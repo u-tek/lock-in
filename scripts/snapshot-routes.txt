@@ -1,0 +1,9 @@
+# Routes exported by scripts/export-snapshots.sh, one per line (see SnapshotGallery in the app).
+# lab.* routes are design-lab pages (iPhone 16 Pro only, into design/lab).
+# store.* routes are App Store screenshots (iPhone 16 Pro Max only, into design/appstore). M6:
+# the scripts already handle them; none exist yet.
+home
+developer
+spike
+lab.tokens
+lab.liveactivity

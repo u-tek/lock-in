@@ -1,0 +1,32 @@
+name: Set up Xcode and tools
+description: Selects the newest stable Xcode, installs XcodeGen and xcbeautify, and restores the Swift package cache.
+runs:
+  using: composite
+  steps:
+    - name: Select the newest stable Xcode
+      shell: bash
+      run: |
+        xcode=$(printf '%s\n' /Applications/Xcode_*.app | python3 -c '
+        import re, sys
+        apps = [line.strip() for line in sys.stdin if not re.search(r"beta|_rc|release.candidate", line, re.I)]
+        key = lambda path: [int(part) for part in re.findall(r"\d+", path.rsplit("/", 1)[-1])]
+        print(max(apps, key=key))
+        ')
+        echo "Using $xcode"
+        sudo xcode-select -s "$xcode/Contents/Developer"
+        xcodebuild -version
+
+    # No ldid: Lockin goes to phones through TestFlight (pushes need the paid account), never as
+    # a sideloaded IPA.
+    - name: Install tools
+      shell: bash
+      run: |
+        brew install xcodegen
+        command -v xcbeautify || brew install xcbeautify
+
+    - name: Cache Swift packages
+      uses: actions/cache@v5
+      with:
+        path: .spm
+        key: spm-${{ runner.os }}-${{ hashFiles('Packages/LKKit/Package.swift') }}
+        restore-keys: spm-${{ runner.os }}-

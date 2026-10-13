@@ -1,0 +1,36 @@
+name = "lockin-api"
+main = "src/index.ts"
+# Never a future date: Cloudflare refuses those, and `npm run dev`'s local runtime only knows dates
+# up to its own release. Move it forward deliberately, with the tests and a deploy to check.
+compatibility_date = "2026-10-01"
+
+# Secrets: set each with `npx wrangler secret put <NAME>` (README.md). Never commit them.
+#   APNS_TEAM_ID       your Apple Developer team ID, e.g. ABCDE12345
+#   APNS_KEY_ID        the APNs key's 10-character ID
+#   APNS_PRIVATE_KEY   the contents of AuthKey_XXXXXXXXXX.p8
+#   ADMIN_TOKEN        32+ random characters; turns on POST /admin/push-test outside production
+# For `npm run dev`, put the same names in server/.dev.vars (gitignored) instead.
+
+[vars]
+# The app's bundle ID (LK_BUNDLE_ID), not the widget extension's: APNs pushes Live Activity
+# updates to the topic "<this>.push-type.liveactivity".
+APNS_BUNDLE_ID = "com.example.lockin"
+# "production" turns off the /admin routes.
+ENVIRONMENT = "development"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "lockin"
+# Paste the database_id that `npx wrangler d1 create lockin` prints.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+# One Room per live squad session (M3).
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+# Durable Object class migrations (not D1's): SQLite-backed, which the Workers Free plan includes.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]

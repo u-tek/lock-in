@@ -1,0 +1,184 @@
+# Sends one test Live Activity update to an iPhone through the deployed Worker's
+# POST /admin/push-test: the M0 APNs-from-Worker spike (docs/spikes/apns-worker.md).
+#
+# Made to be run from the GitHub mobile app, so no computer is needed:
+#   1. In the Lockin TestFlight build, open the Developer menu > APNs spike, start the Live
+#      Activity and tap Copy. That copies {"token":"…","env":"…","me":"…","sid":"…"}.
+#   2. In the GitHub app: this repository > Actions > Push test > Run workflow. Paste the blob
+#      into "device", pick a scenario and run it.
+#   3. Lock the phone and watch the Lock Screen or the Dynamic Island. The run's summary shows
+#      what APNs answered.
+#
+# Needs two repository secrets: LOCKIN_API_URL (https://<worker host>) and LOCKIN_ADMIN_TOKEN (the
+# same value as the Worker's ADMIN_TOKEN secret). The Worker answers 404 when it's deployed with
+# ENVIRONMENT "production", without ADMIN_TOKEN, or when the two tokens differ.
+name: Push test
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: 'Paste what the APNs spike screen copies: {"token":"…","env":"…","me":"…","sid":"…"}'
+        type: string
+        required: true
+      scenario:
+        description: "squad (you and three friends focusing), join (a friend has just joined), cheer (a cheer arrives) or end (everyone done; ends the activity)"
+        type: choice
+        options: [squad, join, cheer, end]
+        default: squad
+      priority:
+        description: APNs priority. "default" lets the Worker choose as SPEC.md §4.4 does (5 for a cheer, 10 otherwise); 10 counts against the hourly budget.
+        type: choice
+        options: [default, "5", "10"]
+        default: default
+
+# Talks only to the Worker: no repository access needed.
+permissions: {}
+
+jobs:
+  push:
+    name: Send a test push
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the secrets
+        env:
+          LOCKIN_API_URL: ${{ secrets.LOCKIN_API_URL }}
+          LOCKIN_ADMIN_TOKEN: ${{ secrets.LOCKIN_ADMIN_TOKEN }}
+        run: |
+          missing=()
+          [[ -n "${LOCKIN_API_URL//[[:space:]]/}" ]] || missing+=(LOCKIN_API_URL)
+          [[ -n "${LOCKIN_ADMIN_TOKEN//[[:space:]]/}" ]] || missing+=(LOCKIN_ADMIN_TOKEN)
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error title=Push test secrets missing::Add these repository secrets (Settings > Secrets and variables > Actions): ${missing[*]}. LOCKIN_API_URL is https://<worker host>; LOCKIN_ADMIN_TOKEN equals the Worker's ADMIN_TOKEN secret."
+            exit 1
+          fi
+          if [[ "${LOCKIN_API_URL//[[:space:]]/}" != https://* ]]; then
+            echo "::error title=LOCKIN_API_URL looks wrong::It should start with https://, e.g. https://lockin-api.yourname.workers.dev"
+            exit 1
+          fi
+
+      # The inputs are read from the event file, never through ${{ inputs.device }}: an expression
+      # is printed in the step's log as part of the script, before the token could be masked.
+      # (A Live Activity push token is useless without the team's APNs key, but it stays out of
+      # the log all the same.)
+      - name: Read the device
+        run: |
+          device=$(jq -r '.inputs.device // ""' "$GITHUB_EVENT_PATH")
+          scenario=$(jq -r '.inputs.scenario // "squad"' "$GITHUB_EVENT_PATH")
+          priority=$(jq -r '.inputs.priority // "default"' "$GITHUB_EVENT_PATH")
+          # A phone keyboard can turn straight quotes into curly ones; JSON needs straight.
+          # One expression per quote, so it works byte by byte whatever the runner's locale.
+          device=$(printf '%s' "$device" | sed -e 's/“/"/g' -e 's/”/"/g')
+
+          wanted='Paste exactly what the APNs spike screen copies: {"token":"…","env":"sandbox" or "production","me":"…","sid":"…"}'
+          if ! jq -e 'type == "object"' > /dev/null 2>&1 <<< "$device"; then
+            echo "::error title=device isn't a JSON object::$wanted"
+            exit 1
+          fi
+          token=$(jq -r '.token | strings' <<< "$device")
+          if [[ -n "$token" ]]; then echo "::add-mask::$token"; fi
+          if [[ ! "$token" =~ ^([0-9a-fA-F]{2})+$ ]]; then
+            echo "::error title=device has no usable token::\"token\" should be the Live Activity push token in hex. $wanted"
+            exit 1
+          fi
+          env=$(jq -r '.env | strings' <<< "$device")
+          if [[ "$env" != sandbox && "$env" != production ]]; then
+            echo "::error title=device has no usable env::\"env\" should be \"sandbox\" (Xcode builds) or \"production\" (TestFlight). $wanted"
+            exit 1
+          fi
+          case "$scenario" in squad|join|cheer|end) ;; *) echo "::error::Unknown scenario $scenario"; exit 1 ;; esac
+          case "$priority" in default|5|10) ;; *) echo "::error::Unknown priority $priority"; exit 1 ;; esac
+
+          # Only the keys the endpoint takes; me and sid only when the app sent them.
+          jq -c --arg scenario "$scenario" --arg priority "$priority" '
+            {token, env}
+            + (if (.me | type) == "string" and .me != "" then {me} else {} end)
+            + (if (.sid | type) == "string" and .sid != "" then {sid} else {} end)
+            + {scenario: $scenario}
+            + (if $priority == "default" then {} else {priority: ($priority | tonumber)} end)
+          ' <<< "$device" > "$RUNNER_TEMP/body.json"
+          {
+            echo "SCENARIO=$scenario"
+            echo "PRIORITY=$priority"
+            echo "APNS_ENV=$env"
+          } >> "$GITHUB_ENV"
+          echo "Sending scenario $scenario at priority $priority to a $env token (${#token} hex characters)"
+
+      - name: Send
+        env:
+          LOCKIN_API_URL: ${{ secrets.LOCKIN_API_URL }}
+          LOCKIN_ADMIN_TOKEN: ${{ secrets.LOCKIN_ADMIN_TOKEN }}
+        run: |
+          url="${LOCKIN_API_URL//[[:space:]]/}"
+          url="${url%/}/admin/push-test"
+          response="$RUNNER_TEMP/response.json"
+          http=$(curl --silent --show-error --fail-with-body --max-time 30 \
+            --request POST \
+            --header "Authorization: Bearer ${LOCKIN_ADMIN_TOKEN//[[:space:]]/}" \
+            --header "Content-Type: application/json" \
+            --data-binary "@$RUNNER_TEMP/body.json" \
+            --output "$response" --write-out '%{http_code}' \
+            "$url") || true
+          touch "$response"
+
+          if jq -e 'type == "object" and has("status")' "$response" > /dev/null 2>&1; then
+            jq '{status, apnsId, reason, environment, bytes, event} | with_entries(select(.value != null))' "$response"
+            echo "::group::Full response (with the content-state sent)"
+            jq . "$response"
+            echo "::endgroup::"
+          else
+            echo "The Worker answered HTTP ${http:-000}:"
+            cat "$response"
+            echo
+          fi
+
+          # The run's summary page: what the phone should now show, and what APNs said.
+          field() {
+            local value
+            value=$(jq -r --arg key "$1" '.[$key] // empty | tostring' "$response" 2> /dev/null || true)
+            echo "${value:-–}"
+          }
+          {
+            echo "### Push test: $SCENARIO"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Worker HTTP status | ${http:-000} |"
+            echo "| APNs status | $(field status) |"
+            echo "| apns-id | $(field apnsId) |"
+            echo "| Reason | $(field reason) |"
+            echo "| APNs environment | $(field environment) (device said $APNS_ENV) |"
+            echo "| Event | $(field event) |"
+            echo "| Payload bytes | $(field bytes) |"
+            echo "| Priority asked for | $PRIORITY |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # A body with a status is APNs's answer (the Worker sends a refusal as HTTP 502); without
+          # one, the Worker itself stopped, and its error says why.
+          status=$(field status)
+          if [[ "$status" == – ]]; then
+            case "${http:-000}" in
+              000)
+                echo "::error title=Couldn't reach the Worker::No answer from LOCKIN_API_URL. Is the Worker deployed (npm run deploy in server/)?" ;;
+              404)
+                echo "::error title=No push-test endpoint::The Worker answers 404 when its ENVIRONMENT is \"production\", when ADMIN_TOKEN is unset or under 32 characters, or when LOCKIN_ADMIN_TOKEN doesn't match it. Or LOCKIN_API_URL names the wrong host." ;;
+              *)
+                echo "::error title=The Worker answered HTTP $http::$(field error)" ;;
+            esac
+            exit 1
+          fi
+          if [[ "$status" != 200 ]]; then
+            reason=$(field reason)
+            hint=""
+            case "$reason" in
+              BadDeviceToken) hint=" The token doesn't belong to this APNs environment: TestFlight builds are production, Xcode builds sandbox." ;;
+              DeviceTokenNotForTopic|TopicDisallowed|BadTopic) hint=" Check the Worker's APNS_BUNDLE_ID var: it must be the app's bundle ID." ;;
+              InvalidProviderToken|MissingProviderToken|ExpiredProviderToken) hint=" Check the Worker's APNS_TEAM_ID, APNS_KEY_ID and APNS_PRIVATE_KEY secrets." ;;
+              ExpiredToken|Unregistered) hint=" The Live Activity has ended: start a new one in the app and copy again." ;;
+              TooManyRequests) hint=" The phone's push budget is spent: wait, or use priority 5." ;;
+            esac
+            echo "::error title=APNs answered $status::$reason.$hint"
+            exit 1
+          fi
+          echo "APNs accepted the push. Look at the phone."

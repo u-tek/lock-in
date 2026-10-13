@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Export options for scripts/testflight.sh: an App Store Connect build, signed automatically and
+  uploaded straight to App Store Connect. teamID is a placeholder; the script fills in the real
+  team (from Config/Local.xcconfig) in a temporary copy, so it never lives in the repo.
+  manageAppVersionAndBuildNumber is off because the build number comes from the CI run number.
+-->
+<plist version="1.0">
+<dict>
+	<key>destination</key>
+	<string>upload</string>
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<key>teamID</key>
+	<string>LK_TEAM_ID</string>
+	<key>uploadSymbols</key>
+	<true/>
+</dict>
+</plist>

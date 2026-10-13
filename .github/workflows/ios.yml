@@ -1,0 +1,403 @@
+name: iOS
+
+on:
+  push:
+    branches: ["**"]
+    paths-ignore:
+      - "**/*.md"
+      - "design/**"
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      snapshots:
+        description: Export design snapshots and commit them to the branch
+        type: boolean
+        default: false
+      screens:
+        description: "Only these screens, comma-separated (e.g. home,spike): a quick check on the iPhone 16 Pro. Naming any turns on snapshots. Empty for all."
+        type: string
+        default: ""
+      testflight:
+        description: Archive a Release build and upload it to TestFlight
+        type: boolean
+        default: false
+
+# macOS minutes are expensive: a newer push cancels the run it supersedes, TestFlight upload
+# included (the next [testflight] push uploads again, with a higher build number).
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only unless a job says otherwise: only the snapshots job pushes.
+permissions:
+  contents: read
+
+env:
+  SPM_DIR: ${{ github.workspace }}/.spm
+
+# Server and app run side by side on every push. Snapshots and TestFlight are opt-in and wait
+# only on the small plan job, never on the build.
+jobs:
+  # The API Worker in /server. Cheap, so it runs on Linux.
+  server:
+    name: API server
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: server
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Type-check
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      # A dry run bundles the Worker exactly as a deploy would, without Cloudflare credentials.
+      - name: Bundle
+        run: npm run build
+
+  build-and-test:
+    name: Build and test
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+
+      - name: Pick a simulator
+        run: |
+          destination=$(scripts/sim-destination.sh)
+          echo "Using $destination"
+          echo "DESTINATION=$destination" >> "$GITHUB_ENV"
+
+      - name: Module tests
+        working-directory: Packages/LKKit
+        run: |
+          set -o pipefail
+          xcodebuild test -scheme LKKit-Package -destination "$DESTINATION" \
+            -clonedSourcePackagesDirPath "$SPM_DIR" \
+            -skipMacroValidation -skipPackagePluginValidation \
+            -resultBundlePath "$GITHUB_WORKSPACE/build/ModuleTests.xcresult" \
+            | xcbeautify --renderer github-actions
+
+      - name: Generate the Xcode project
+        run: xcodegen generate
+
+      - name: Build the app and its UI tests
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing -project Lockin.xcodeproj -scheme Lockin \
+            -destination "$DESTINATION" -derivedDataPath build/DerivedData \
+            -clonedSourcePackagesDirPath "$SPM_DIR" \
+            -skipMacroValidation -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      # Drag the unzipped .app onto a booted simulator to run it (`xcrun simctl install booted Lockin.app`).
+      # Live Activity pushes need a real phone: that's the TestFlight job.
+      - name: Zip the simulator app
+        if: github.event_name != 'pull_request'
+        run: |
+          cd build/DerivedData/Build/Products/Debug-iphonesimulator
+          ditto -c -k --keepParent Lockin.app "$GITHUB_WORKSPACE/build/Lockin-simulator.zip"
+
+      - uses: actions/upload-artifact@v5
+        if: github.event_name != 'pull_request'
+        with:
+          name: Lockin-simulator
+          path: build/Lockin-simulator.zip
+          retention-days: 14
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: test-results
+          path: build/*.xcresult
+          if-no-files-found: ignore
+
+  # Reads the opt-ins: a manual run's inputs, or the subject line of the pushed commit, so a commit
+  # body can mention [snapshots] or [testflight] without starting either. It only starts when the
+  # message mentions one of them somewhere; skipping it skips both opt-in jobs.
+  #   [snapshots]          every screen, iPhone 16 Pro and iPhone SE
+  #   [snapshots: a,b]     only those routes, iPhone 16 Pro only
+  #   [light]              light mode as well as dark (with either of the above)
+  #   [testflight]         archive, sign and upload to TestFlight
+  plan:
+    name: Opt-ins
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+        (contains(github.event.head_commit.message, '[snapshots') ||
+         contains(github.event.head_commit.message, '[testflight]')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      snapshots: ${{ steps.read.outputs.snapshots }}
+      routes: ${{ steps.read.outputs.routes }}
+      appearances: ${{ steps.read.outputs.appearances }}
+      testflight: ${{ steps.read.outputs.testflight }}
+    steps:
+      - name: Read the opt-ins
+        id: read
+        env:
+          EVENT: ${{ github.event_name }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          SNAPSHOTS_INPUT: ${{ inputs.snapshots }}
+          SCREENS_INPUT: ${{ inputs.screens }}
+          TESTFLIGHT_INPUT: ${{ inputs.testflight }}
+        run: |
+          # Matches contains() in the job's condition, which ignores case.
+          shopt -s nocasematch
+          subject="${COMMIT_MESSAGE%%$'\n'*}"
+          snapshots=false testflight=false routes="" appearances=""
+          if [[ "$EVENT" == workflow_dispatch ]]; then
+            routes="${SCREENS_INPUT// /}"
+            if [[ "$SNAPSHOTS_INPUT" == true || -n "$routes" ]]; then snapshots=true; fi
+            if [[ "$TESTFLIGHT_INPUT" == true ]]; then testflight=true; fi
+          else
+            pattern='\[snapshots(:[[:space:]]*([^]]*))?\]'
+            if [[ "$subject" =~ $pattern ]]; then
+              snapshots=true
+              routes="${BASH_REMATCH[2]// /}"
+            fi
+            if [[ "$subject" == *"[light]"* ]]; then appearances="light,dark"; fi
+            if [[ "$subject" == *"[testflight]"* ]]; then testflight=true; fi
+          fi
+          {
+            echo "snapshots=$snapshots"
+            echo "routes=$routes"
+            echo "appearances=$appearances"
+            echo "testflight=$testflight"
+          } >> "$GITHUB_OUTPUT"
+          echo "Snapshots: $snapshots${routes:+ (only $routes)}${appearances:+ ($appearances)}"
+          echo "TestFlight: $testflight"
+
+  # One app launch per phone covers every screen (UITests/SnapshotExportTests.swift).
+  snapshots:
+    name: Design snapshots
+    needs: plan
+    if: needs.plan.outputs.snapshots == 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      LK_ONLY_ROUTES: ${{ needs.plan.outputs.routes }}
+      LK_APPEARANCES: ${{ needs.plan.outputs.appearances }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+
+      # A new simulator's first boot spends minutes setting itself up. Keep a booted-once copy of
+      # the iPhone 16 Pro between runs (one per runner image, Xcode and iOS version), and start
+      # it booting while the app builds.
+      - name: Simulator cache key
+        run: echo "SIM_CACHE_KEY=$(scripts/snapshot-simulator.sh key 'iPhone 16 Pro')" >> "$GITHUB_ENV"
+      - name: Restore the simulator
+        id: simcache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/lk-simulator
+          key: ${{ env.SIM_CACHE_KEY }}
+      - name: Start the simulator
+        run: scripts/snapshot-simulator.sh start "iPhone 16 Pro"
+
+      - name: Build the app and its UI tests
+        run: |
+          set -o pipefail
+          xcodegen generate
+          xcodebuild build-for-testing -project Lockin.xcodeproj -scheme Lockin \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build/DerivedData \
+            -clonedSourcePackagesDirPath "$SPM_DIR" \
+            -skipMacroValidation -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      # Each phone runs even if another failed or got stuck, so one bad screen never hides the rest.
+      - name: iPhone 16 Pro
+        id: pro
+        continue-on-error: true
+        timeout-minutes: 15
+        run: scripts/export-snapshots.sh "iPhone 16 Pro"
+      # A narrowed run ([snapshots: a,b]) is a quick check: the iPhone 16 Pro only.
+      - name: iPhone SE
+        id: se
+        if: env.LK_ONLY_ROUTES == ''
+        continue-on-error: true
+        timeout-minutes: 15
+        run: scripts/export-snapshots.sh "iPhone SE (3rd generation)"
+      # M6: App Store screenshots, only for [snapshots: store]. There are no store.* routes yet,
+      # so this finds nothing to render and stops before booting the phone.
+      - name: iPhone 16 Pro Max (App Store)
+        id: store
+        if: contains(env.LK_ONLY_ROUTES, 'store')
+        continue-on-error: true
+        timeout-minutes: 20
+        run: scripts/export-snapshots.sh "iPhone 16 Pro Max"
+
+      - name: Collect the renders
+        if: always()
+        run: scripts/collect-snapshots.sh
+
+      # Kept even if the push below fails.
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: design-snapshots
+          path: build/design-out/design
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Commit design snapshots
+        if: always()
+        run: |
+          [[ -d build/design-out/design ]] || { echo "Nothing exported"; exit 0; }
+          cp -R build/design-out/design .
+          # GitHub refuses files over 100 MB; never let one block the renders.
+          find design -type f -size +95M -print -delete
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add design/lab design/screens design/appstore 2>/dev/null || git add design
+          if git diff --cached --quiet; then
+            echo "Snapshots unchanged"
+            exit 0
+          fi
+          git commit -m "Update design snapshots [skip ci]"
+          # The runner's network occasionally drops for a moment; don't lose the renders to it.
+          for wait in 5 15 30 60 0; do
+            if git pull --rebase origin "$GITHUB_REF_NAME" && git push origin HEAD:"$GITHUB_REF_NAME"; then
+              exit 0
+            fi
+            [[ $wait -gt 0 ]] && sleep "$wait"
+          done
+          exit 1
+
+      # After the commit, so saving the simulator never delays the screenshots.
+      - name: Simulator timings
+        if: always()
+        run: cat build/simulator.log 2>/dev/null || true
+      - name: Keep the simulator for next time
+        id: keepsim
+        if: always() && steps.simcache.outputs.cache-hit != 'true' && steps.pro.outcome == 'success'
+        run: scripts/snapshot-simulator.sh save "iPhone 16 Pro"
+      - uses: actions/cache/save@v5
+        if: always() && steps.keepsim.outcome == 'success'
+        with:
+          path: ~/lk-simulator
+          key: ${{ env.SIM_CACHE_KEY }}
+
+      - name: Fail if a screen didn't render
+        if: always() && (steps.pro.outcome == 'failure' || steps.se.outcome == 'failure' || steps.store.outcome == 'failure')
+        run: exit 1
+
+  # Archives a Release build, signs it with the App Store Connect API key and uploads it; it then
+  # shows up in the TestFlight app on the phone. The only way onto a real iPhone: pushes need the
+  # paid account, so there's no sideloaded build. Never on pull requests (they can't read the
+  # secrets, and plan doesn't run for them). The one-time Apple setup is in docs/apple-setup.md.
+  testflight:
+    name: TestFlight
+    needs: plan
+    if: needs.plan.outputs.testflight == 'true'
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      # Before anything slow, so a missing secret costs seconds, not a build.
+      - name: Check the secrets
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          LK_BUNDLE_ID: ${{ secrets.LK_BUNDLE_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          missing=()
+          for name in APPLE_TEAM_ID LK_BUNDLE_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
+            value="${!name}"
+            if [[ -z "${value//[[:space:]]/}" ]]; then missing+=("$name"); fi
+          done
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error title=TestFlight secrets missing::Add these repository secrets (Settings > Secrets and variables > Actions): ${missing[*]}. docs/apple-setup.md says where each one comes from."
+            exit 1
+          fi
+          team="${APPLE_TEAM_ID//[[:space:]]/}"
+          if [[ ! "$team" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "::error title=APPLE_TEAM_ID looks wrong::It should be the 10-character Team ID from developer.apple.com > Account > Membership details."
+            exit 1
+          fi
+          if [[ "$ASC_KEY_P8" != *"BEGIN PRIVATE KEY"* ]]; then
+            echo "::error title=ASC_KEY_P8 looks wrong::Paste the whole contents of the AuthKey_<id>.p8 file, BEGIN and END lines included."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+
+      # The secrets reach the build through two files outside git: Local.xcconfig is gitignored,
+      # and the key sits in the runner's temp folder. Whitespace is trimmed because a pasted
+      # secret often ends in a newline, and Windows line endings are dropped from the key.
+      - name: Write Config/Local.xcconfig and the API key
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          LK_BUNDLE_ID: ${{ secrets.LK_BUNDLE_ID }}
+          LK_API_HOST: ${{ secrets.LK_API_HOST || vars.LK_API_HOST }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          host="${LK_API_HOST//[[:space:]]/}"
+          # Host only: "//" starts a comment in an xcconfig file.
+          host="${host#https://}"
+          host="${host#http://}"
+          host="${host%%/*}"
+          {
+            echo "// Written by CI from repository secrets for a TestFlight build."
+            echo "LK_TEAM_ID = ${APPLE_TEAM_ID//[[:space:]]/}"
+            echo "LK_BUNDLE_ID = ${LK_BUNDLE_ID//[[:space:]]/}"
+            if [[ -n "$host" ]]; then echo "LK_API_HOST = $host"; fi
+          } > Config/Local.xcconfig
+          key_id="${ASC_KEY_ID//[[:space:]]/}"
+          key="$RUNNER_TEMP/AuthKey_$key_id.p8"
+          cr=$'\r'
+          (umask 077 && printf '%s\n' "${ASC_KEY_P8//$cr/}" > "$key")
+          {
+            echo "ASC_KEY_ID=$key_id"
+            echo "ASC_ISSUER_ID=${ASC_ISSUER_ID//[[:space:]]/}"
+            echo "ASC_KEY_PATH=$key"
+          } >> "$GITHUB_ENV"
+          if [[ -z "$host" ]]; then
+            echo "::notice::No LK_API_HOST secret: this build runs without a backend (the APNs spike doesn't need one)."
+          fi
+
+      - name: Generate the Xcode project
+        run: xcodegen generate
+
+      - name: Archive and upload
+        run: |
+          # A re-run keeps its run number, and App Store Connect never takes a build number twice.
+          build="$GITHUB_RUN_NUMBER"
+          if [[ "$GITHUB_RUN_ATTEMPT" -gt 1 ]]; then build="$build.$GITHUB_RUN_ATTEMPT"; fi
+          scripts/testflight.sh "$build"
+
+      - name: Upload the logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: testflight-logs
+          path: build/logs
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # The runner is thrown away after the job anyway; this just keeps the key's life short.
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/AuthKey_*.p8 Config/Local.xcconfig
