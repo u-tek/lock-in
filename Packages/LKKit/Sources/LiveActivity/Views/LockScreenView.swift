@@ -140,7 +140,11 @@ private struct SquadLayout: View {
 
 // MARK: - Solo
 
-/// About 90 points tall: 12 + badge 52 + 12 + bar 4 + 12. StandBy swaps in the hero timer.
+/// About 90 points tall: 12 + badge 52 + 12 + bar 4 + 12.
+///
+/// StandBy swaps in the hero timer, which leaves no room for words beside it ("Locked in" was
+/// squeezed to "Lo…"), so the headline moves under it, beside the bar: about 144 points, 12 +
+/// timer 86 + 12 + headline 22 + 12. The status line is left out there; the headline carries it.
 private struct SoloLayout: View {
     let presentation: LiveActivityPresentation
     let isStandBy: Bool
@@ -151,18 +155,20 @@ private struct SoloLayout: View {
                 if let me = presentation.primary {
                     MemberBadge(me, size: isStandBy ? ActivityMetrics.soloStandByBadge : ActivityMetrics.soloBadge)
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(presentation.headline)
-                        .font(ActivityFont.soloHeadline)
-                        .foregroundStyle(LKColor.textPrimary)
-                        .lineLimit(1)
-                    Text(presentation.statusLine)
-                        .font(ActivityFont.caption)
-                        .foregroundStyle(LKColor.textSecondary)
-                        .lineLimit(1)
+                if !isStandBy {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(presentation.headline)
+                            .font(ActivityFont.soloHeadline)
+                            .foregroundStyle(LKColor.textPrimary)
+                            .lineLimit(1)
+                        Text(presentation.statusLine)
+                            .font(ActivityFont.caption)
+                            .foregroundStyle(LKColor.textSecondary)
+                            .lineLimit(1)
+                    }
+                    .layoutPriority(1)
+                    .accessibilityElement(children: .combine)
                 }
-                .layoutPriority(1)
-                .accessibilityElement(children: .combine)
                 Spacer(minLength: LKSpacing.s)
                 if let me = presentation.primary {
                     CountdownText(countdown: me.countdown, tone: me.tone, style: timerStyle(for: me.countdown))
@@ -170,10 +176,26 @@ private struct SoloLayout: View {
                         .accessibilityCountdownValue(me.countdown)
                 }
             }
-            SessionProgressBar(progress: presentation.sessionProgress, tint: presentation.primary?.tone.color ?? LKColor.accent)
+            if isStandBy {
+                HStack(spacing: LKSpacing.m) {
+                    Text(presentation.headline)
+                        .font(ActivityFont.soloHeadline)
+                        .foregroundStyle(LKColor.textPrimary)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .accessibilityLabel(Text(verbatim: "\(presentation.headline), \(presentation.statusLine)"))
+                    progressBar
+                }
+            } else {
+                progressBar
+            }
         }
         .padding(.horizontal, LKSpacing.l)
         .padding(.vertical, LKSpacing.m)
+    }
+
+    private var progressBar: some View {
+        SessionProgressBar(progress: presentation.sessionProgress, tint: presentation.primary?.tone.color ?? LKColor.accent)
     }
 
     /// The hero size in StandBy, unless the timer needs its hours digit: "1:29:59" at 72 points

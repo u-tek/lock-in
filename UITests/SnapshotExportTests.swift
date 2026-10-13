@@ -4,8 +4,11 @@ import XCTest
 ///
 /// One launch covers every screen: the app shows the first shot, and after each capture the test
 /// posts a Darwin notification and the app steps to the next one in place (`SnapshotMode` in the
-/// app). If a screen crashes the app, it's noted and the app is relaunched with the shots that
-/// are left.
+/// app). Before each capture the test waits for the app's marker for that shot
+/// (`lk.snapshot.<index>`), so a slow screen is never photographed as the one before it; a shot
+/// whose marker never appears counts as not rendered. If a screen crashes the app, it's noted and
+/// the app is relaunched with the shots that are left. How long each shot took to appear goes to
+/// `timings.txt` beside the renders.
 ///
 /// Environment (pass from xcodebuild with a `TEST_RUNNER_` prefix, as
 /// `scripts/export-snapshots.sh` does):
@@ -29,23 +32,26 @@ final class SnapshotExportTests: XCTestCase {
         // Every light screen, then every dark one: the appearance switches once, not every shot.
         let shots = appearances.flatMap { appearance in routes.map { "\($0)@\(appearance)" } }
         var failures: [String] = []
+        var timings: [String] = []
         var remaining = shots[...]
         let app = XCUIApplication()
 
         while !remaining.isEmpty {
             app.launchArguments = ["-LKSnapshots", remaining.joined(separator: ",")]
             app.launch()
-            // The first frame of the first screen.
-            Thread.sleep(forTimeInterval: 2.5)
 
             var crashed = false
             var previous: String?
             for (offset, shot) in remaining.enumerated() {
-                if let previous {
+                if previous != nil {
                     postNext()
-                    // A change of appearance takes longer to settle than a change of screen.
-                    Thread.sleep(forTimeInterval: appearance(of: shot) == appearance(of: previous) ? 1.8 : 2.5)
                 }
+                // The app numbers shots from 0 in each launch, as this loop does.
+                let asked = Date()
+                let shown = app.descendants(matching: .any)["lk.snapshot.\(offset)"].waitForExistence(timeout: 30)
+                timings.append(String(format: "%@ %@ after %.1f s", shot, shown ? "shown" : "NOT shown", Date().timeIntervalSince(asked)))
+                // Then let it settle: the first screen and a change of appearance take longest.
+                let settle = previous == nil ? 1.5 : (appearance(of: shot) == appearance(of: previous!) ? 1.0 : 2.0)
                 previous = shot
                 guard app.state == .runningForeground else {
                     // This screen crashed the app: note it and carry on from the next one.
@@ -54,6 +60,12 @@ final class SnapshotExportTests: XCTestCase {
                     crashed = true
                     break
                 }
+                guard shown else {
+                    // Still showing an earlier screen: capturing now would file it under this name.
+                    failures.append(shot)
+                    continue
+                }
+                Thread.sleep(forTimeInterval: settle)
                 let name = shot.replacingOccurrences(of: "@", with: "-")
                 clearSystemBanners()
                 let screenshot = XCUIScreen.main.screenshot()
@@ -73,6 +85,9 @@ final class SnapshotExportTests: XCTestCase {
             app.terminate()
         }
 
+        if let outputDirectory {
+            try timings.joined(separator: "\n").write(to: outputDirectory.appendingPathComponent("timings.txt"), atomically: true, encoding: .utf8)
+        }
         if let outputDirectory, !failures.isEmpty {
             try failures.joined(separator: "\n").write(to: outputDirectory.appendingPathComponent("failures.txt"), atomically: true, encoding: .utf8)
         }

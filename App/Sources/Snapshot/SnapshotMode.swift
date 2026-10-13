@@ -129,6 +129,15 @@ struct SnapshotHost: View {
         }
         // A fresh screen for every shot: no state carries over from the last one.
         .id(stepper.index)
+        // The exporter waits for this marker before it captures, so it never photographs the
+        // last screen while this one is still on its way (CI once caught nine stale shots in a
+        // row). Invisible, and only ever in snapshot mode.
+        .overlay(alignment: .topLeading) {
+            Text(verbatim: String(stepper.index))
+                .font(.system(size: 1))
+                .foregroundStyle(.clear)
+                .accessibilityIdentifier("lk.snapshot.\(stepper.index)")
+        }
         .preferredColorScheme(shot.appearance.colorScheme)
         .onAppear {
             // Screens settle at once, so a capture never catches one mid-transition.

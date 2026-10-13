@@ -88,6 +88,14 @@ TEST_RUNNER_LK_SNAPSHOT_ROUTES="$routes" TEST_RUNNER_LK_SNAPSHOT_DIR="$raw" \
     -only-testing:LockinUITests/SnapshotExportTests \
     | xcbeautify || status=$?
 
+# How long each shot took to appear: a slow screen shows up here before it shows up as a
+# missing render.
+if [[ -f "$raw/timings.txt" ]]; then
+  echo "Time for each shot to appear on $device:"
+  sed 's/^/  /' "$raw/timings.txt"
+  echo
+fi
+
 if [[ -f "$raw/failures.txt" ]]; then
   echo "::error::Screens that didn't render on $device: $(paste -sd, "$raw/failures.txt")"
 fi
