@@ -14,10 +14,14 @@
 #   ASC_ISSUER_ID   the issuer ID shown above the list of keys
 #   ASC_KEY_PATH    the key's .p8 file (CI writes it to $RUNNER_TEMP, never into the repo)
 #
-# Signing is automatic, with no certificates on the machine: given the key and
-# -allowProvisioningUpdates, xcodebuild creates the profiles it needs, and the export signs with a
-# cloud-managed distribution certificate. That's why the key needs the Admin role. Raw logs go to
-# build/logs/ for when xcbeautify's summary isn't enough.
+# Signing is automatic: given the key and -allowProvisioningUpdates, xcodebuild creates the
+# profiles it needs, and the export signs with a cloud-managed distribution certificate. That's why
+# the key needs the Admin role. The archive first signs for development. With no Apple Development
+# certificate on the machine, xcodebuild makes one whose private key stays on that runner, and a
+# later run can fail for want of it. When the LK_DEV_CERT_P12 and LK_DEV_CERT_PASSWORD secrets are
+# set, CI installs a long-lived one before this runs instead
+# (docs/decisions/0003-ci-development-certificate.md). Raw logs go to build/logs/ for when
+# xcbeautify's summary isn't enough.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -46,6 +50,10 @@ steps in docs/apple-setup.md:
     that team with Push Notifications and the App Group group.<bundle id>;
   - at least one iPhone is registered under Devices: automatic signing makes a development
     profile while archiving, and Apple won't make one for a team with no devices;
+  - "already has an Apple Development signing certificate for this machine, but its private key
+    is not installed": an earlier runner made that certificate. Give CI one of its own with the
+    LK_DEV_CERT_P12 and LK_DEV_CERT_PASSWORD secrets
+    (docs/decisions/0003-ci-development-certificate.md);
   - for the upload: an app with this bundle ID exists in App Store Connect, and this build number
     is higher than the last one uploaded for this version.
 Error lines from $log:

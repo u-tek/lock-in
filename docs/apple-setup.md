@@ -288,6 +288,18 @@ On github.com, in a browser: the repository → **Settings** → **Secrets and v
 The **APNs** `.p8` (step 8) belongs to the Worker only. The **API key's** `.p8` (step 10) belongs to
 GitHub only. You don't need `Config/Local.xcconfig`: CI writes it from these secrets.
 
+**Optional: a stored development certificate.** Skip this unless a later TestFlight run fails with
+the development certificate error in step 13. Then two more secrets give CI one long-lived Apple
+Development certificate; `docs/decisions/0003-ci-development-certificate.md` shows how to make the
+`.p12` on Windows.
+
+| Secret | Value | Used by |
+|---|---|---|
+| `LK_DEV_CERT_P12` | The base64 of `dev.p12`, on one line (`base64 -w0 dev.p12`) | TestFlight |
+| `LK_DEV_CERT_PASSWORD` | The password you gave the `.p12` | TestFlight |
+
+Set both or neither: with only one, the TestFlight job stops at its secrets check.
+
 ## 13. First TestFlight build
 
 GitHub → **Actions** → **iOS** → **Run workflow**. Tick *Archive a Release build and upload it to
@@ -302,7 +314,10 @@ minutes, and it appears in the TestFlight app.
   artifact from the run page.
 - If a **later** run fails with *"Your account already has an Apple Development signing
   certificate for this machine, but its private key is not installed in your keychain"*, that's the
-  risk in `docs/decisions/0003-ci-development-certificate.md`. Tell Claude.
+  risk in `docs/decisions/0003-ci-development-certificate.md`. Add the two optional secrets from
+  step 12, revoke the Apple Development certificates earlier runs left on the
+  [Certificates](https://developer.apple.com/account/resources/certificates/list) page (not the one
+  in `dev.p12`), and run it again.
 
 Then run the spike: `docs/spikes/apns-worker.md`.
 

@@ -48,7 +48,8 @@ public struct LiveActivityPresentation: Hashable, Sendable {
     public let compactTrailingAccessibilityLabel: String
     /// `primary`'s session as a bar, for the solo layouts.
     public let sessionProgress: SessionProgress
-    /// The squad pet. Nil when solo, and for a squad whose egg hasn't hatched.
+    /// The squad pet, when the content-state carries one. It doesn't for a solo session, or for a
+    /// squad whose egg hasn't hatched.
     public let pet: Pet?
 
     public init(attributes: LockinAttributes, state: LockinAttributes.ContentState) {

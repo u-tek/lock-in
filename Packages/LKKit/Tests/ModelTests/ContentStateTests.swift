@@ -110,6 +110,16 @@ private func member(_ id: String, _ state: MemberState, end: Double, pausedAt: D
         #expect(state.staleDate(now: now) == Date(timeIntervalSince1970: 1_791_902_700 + 300))
     }
 
+    @Test func squadStaleDatesMatchTheServer() throws {
+        // The same squad-6 moments the server's `staleDateFor` is tested at, in whole seconds
+        // because the server rounds APNs dates up. Both sides must give these numbers.
+        let state = try Fixture.contentState("squad-6")
+        // At the cheer: Noor's break (…2700) ends last; Jules slipped, so …3060 doesn't count.
+        #expect(state.staleDate(now: Date(timeIntervalSince1970: 1_791_900_650)) == Date(timeIntervalSince1970: 1_791_903_000))
+        // Later: Kai's 780 paused seconds, counted from now, end last.
+        #expect(state.staleDate(now: Date(timeIntervalSince1970: 1_791_903_000)) == Date(timeIntervalSince1970: 1_791_904_080))
+    }
+
     @Test func aPausedMemberCountsAsResumingNow() {
         let state = State(v: 1, m: [
             member("ava", .focusing, end: now.timeIntervalSince1970 + 600),

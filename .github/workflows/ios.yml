@@ -14,7 +14,7 @@ on:
         type: boolean
         default: false
       screens:
-        description: "Only these screens, comma-separated (e.g. home,spike): a quick check on the iPhone 16 Pro. Naming any turns on snapshots. Empty for all."
+        description: "Only these routes, comma-separated (e.g. home,lab.liveactivity.island): a quick check on the iPhone 16 Pro. A name covers the routes under it too (lab.liveactivity: the page and each part). Naming any turns on snapshots. Empty for all."
         type: string
         default: ""
       testflight:
@@ -129,7 +129,8 @@ jobs:
   # body can mention [snapshots] or [testflight] without starting either. It only starts when the
   # message mentions one of them somewhere; skipping it skips both opt-in jobs.
   #   [snapshots]          every screen, iPhone 16 Pro and iPhone SE
-  #   [snapshots: a,b]     only those routes, iPhone 16 Pro only
+  #   [snapshots: a,b]     only those routes and the ones under them (lab.liveactivity covers
+  #                        lab.liveactivity.<part>), iPhone 16 Pro only; an unknown name fails
   #   [light]              light mode as well as dark (with either of the above)
   #   [testflight]         archive, sign and upload to TestFlight
   plan:
@@ -237,7 +238,7 @@ jobs:
         timeout-minutes: 15
         run: scripts/export-snapshots.sh "iPhone SE (3rd generation)"
       # M6: App Store screenshots, only for [snapshots: store]. There are no store.* routes yet,
-      # so this finds nothing to render and stops before booting the phone.
+      # so this stops before booting the phone, and fails because "store" matches no route.
       - name: iPhone 16 Pro Max (App Store)
         id: store
         if: contains(env.LK_ONLY_ROUTES, 'store')
@@ -319,6 +320,8 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          LK_DEV_CERT_P12: ${{ secrets.LK_DEV_CERT_P12 }}
+          LK_DEV_CERT_PASSWORD: ${{ secrets.LK_DEV_CERT_PASSWORD }}
         run: |
           missing=()
           for name in APPLE_TEAM_ID LK_BUNDLE_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
@@ -336,6 +339,12 @@ jobs:
           fi
           if [[ "$ASC_KEY_P8" != *"BEGIN PRIVATE KEY"* ]]; then
             echo "::error title=ASC_KEY_P8 looks wrong::Paste the whole contents of the AuthKey_<id>.p8 file, BEGIN and END lines included."
+            exit 1
+          fi
+          # Optional, but only as a pair (see "Install the development certificate" below).
+          p12="${LK_DEV_CERT_P12//[[:space:]]/}"
+          if [[ -n "$p12" && -z "$LK_DEV_CERT_PASSWORD" ]] || [[ -z "$p12" && -n "$LK_DEV_CERT_PASSWORD" ]]; then
+            echo "::error title=Development certificate half set up::LK_DEV_CERT_P12 (the base64 of the .p12) and LK_DEV_CERT_PASSWORD (its password) go together: add the missing one, or delete both to let automatic signing make its own certificate. docs/decisions/0003-ci-development-certificate.md has the steps."
             exit 1
           fi
 
@@ -381,6 +390,57 @@ jobs:
       - name: Generate the Xcode project
         run: xcodegen generate
 
+      # Optional: a long-lived Apple Development certificate for the archive's development signing,
+      # so automatic signing doesn't make a new one on every runner
+      # (docs/decisions/0003-ci-development-certificate.md). Without the two secrets, nothing
+      # changes. It goes into a keychain of its own, which only lives for this job.
+      - name: Install the development certificate
+        env:
+          LK_DEV_CERT_P12: ${{ secrets.LK_DEV_CERT_P12 }}
+          LK_DEV_CERT_PASSWORD: ${{ secrets.LK_DEV_CERT_PASSWORD }}
+        run: |
+          # Pasted base64 often carries line breaks; a pasted password may end in one.
+          p12="${LK_DEV_CERT_P12//[[:space:]]/}"
+          if [[ -z "$p12" ]]; then
+            echo "No LK_DEV_CERT_P12 secret: automatic signing makes its own development certificate."
+            exit 0
+          fi
+          cert_password="${LK_DEV_CERT_PASSWORD%%[$'\r\n']*}"
+          keychain="$RUNNER_TEMP/lk-signing.keychain-db"
+          file="$RUNNER_TEMP/lk-development.p12"
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          if ! (umask 077 && printf '%s' "$p12" | base64 --decode > "$file"); then
+            echo "::error title=LK_DEV_CERT_P12 looks wrong::It should be the base64 of the .p12 file (in Git Bash: base64 -w0 dev.p12)."
+            exit 1
+          fi
+          security create-keychain -p "$password" "$keychain"
+          # Locks after 6 hours instead of the default 5 minutes, so it stays open for the whole job.
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          if ! security import "$file" -k "$keychain" -P "$cert_password" -T /usr/bin/codesign -T /usr/bin/security; then
+            rm -f "$file"
+            echo "::error title=Couldn't import the development certificate::Check LK_DEV_CERT_PASSWORD, and that the .p12 was made with 'openssl pkcs12 -export -legacy' (the keychain can't read OpenSSL 3's default)."
+            exit 1
+          fi
+          rm -f "$file"
+          # Lets codesign use the private key without a dialog that nobody is there to click.
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
+          # In front of the keychains already searched (the login keychain among them), not instead.
+          keychains=("$keychain")
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line#\"}"
+            line="${line%\"}"
+            if [[ -n "$line" && "$line" != "$keychain" ]]; then keychains+=("$line"); fi
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "${keychains[@]}"
+          if ! security find-identity -p codesigning "$keychain" | grep -qE '[0-9]+\) [0-9A-F]{40} '; then
+            echo "::error title=No signing identity in LK_DEV_CERT_P12::The .p12 needs the certificate and its private key together (openssl pkcs12 -export -legacy -inkey dev.key -in dev.pem)."
+            exit 1
+          fi
+          security find-identity -p codesigning "$keychain"
+
       - name: Archive and upload
         run: |
           # A re-run keeps its run number, and App Store Connect never takes a build number twice.
@@ -401,3 +461,11 @@ jobs:
       - name: Remove the key
         if: always()
         run: rm -f "$RUNNER_TEMP"/AuthKey_*.p8 Config/Local.xcconfig
+      - name: Remove the development certificate
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/lk-development.p12"
+          # Also takes it off the keychain search list.
+          if [[ -f "$RUNNER_TEMP/lk-signing.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/lk-signing.keychain-db"
+          fi

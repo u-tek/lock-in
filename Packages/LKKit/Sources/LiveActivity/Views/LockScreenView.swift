@@ -14,8 +14,8 @@ import WidgetKit
 ///
 /// Squad: the squad name and how many are locked in, a row of up to six members with their own
 /// countdowns, and the pet. Solo: your badge, what you're doing, your countdown and a bar that
-/// fills as the session runs. Both stay under 160 points tall, where the system starts cutting
-/// content off (SPEC.md §3).
+/// fills as the session runs. Both stay under 160 points tall, StandBy included, where the system
+/// starts cutting content off (SPEC.md §3; LockScreenHeightTests checks every sample).
 public struct LockScreenView: View {
     /// Which layout to draw.
     public enum Layout: Hashable, Sendable {
@@ -75,8 +75,12 @@ public struct LockScreenView: View {
 
 // MARK: - Squad
 
-/// About 147 points tall with a pet: 12 + header 18 + 10 + row 71 + 10 + pet 14 + 12. StandBy adds
-/// your countdown to the header, about 30 points more; the system scales it up from there.
+/// About 145 points tall with a pet: 12 + header 18 + 10 + row 70 + 10 + pet 13 + 12.
+///
+/// StandBy puts your countdown in the header, about 48 points tall at `.timerLarge`, and moves
+/// the pet up beside it, under the squad name and status (18 + 2 + 13 + 2 + 13). That keeps it
+/// about 152 points: 12 + header 48 + 10 + row 70 + 12. The system scales it up from there, but
+/// truncates past 160 points just as on the Lock Screen (LockScreenHeightTests measures both).
 private struct SquadLayout: View {
     let presentation: LiveActivityPresentation
     let isStandBy: Bool
@@ -90,7 +94,7 @@ private struct SquadLayout: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            if let pet = presentation.pet {
+            if !isStandBy, let pet = presentation.pet {
                 PetRow(pet: pet)
             }
         }
@@ -101,21 +105,33 @@ private struct SquadLayout: View {
     private var header: some View {
         HStack(alignment: .center, spacing: LKSpacing.s) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(presentation.headline)
-                    .font(ActivityFont.headline)
-                    .foregroundStyle(LKColor.textPrimary)
-                    .lineLimit(1)
-                if isStandBy {
-                    SquadStatus(text: presentation.statusLine)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(presentation.headline)
+                        .font(ActivityFont.headline)
+                        .foregroundStyle(LKColor.textPrimary)
+                        .lineLimit(1)
+                    if isStandBy {
+                        SquadStatus(text: presentation.statusLine)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                if isStandBy, let pet = presentation.pet {
+                    PetRow(pet: pet)
                 }
             }
-            .accessibilityElement(children: .combine)
+            // In StandBy the width the countdown leaves goes to this column, not the spacer, so
+            // the pet's bar and a long squad name aren't squeezed.
+            .layoutPriority(isStandBy ? 1 : 0)
             Spacer(minLength: LKSpacing.s)
             if isStandBy, let me = presentation.primary {
                 CountdownText(countdown: me.countdown, tone: me.tone, style: .timerLarge)
+                    // Its full width first: the pet's bar beside it would take any it gave up,
+                    // and a word ("Done") has no reserved frame to hold it.
+                    .fixedSize(horizontal: true, vertical: false)
                     .accessibilityLabel(me.accessibilityLabel)
                     .accessibilityCountdownValue(me.countdown)
-            } else {
+            } else if !isStandBy {
+                // StandBy already shows it under the squad name.
                 SquadStatus(text: presentation.statusLine)
             }
         }

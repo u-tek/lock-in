@@ -5,7 +5,7 @@
 #   1. In the Lockin TestFlight build, open the Developer menu > APNs spike, start the Live
 #      Activity and tap Copy. That copies {"token":"…","env":"…","me":"…","sid":"…"}.
 #   2. In the GitHub app: this repository > Actions > Push test > Run workflow. Paste the blob
-#      into "device", pick a scenario and run it.
+#      into the first box ("Paste what the APNs spike screen copies…"), pick a scenario and run it.
 #   3. Lock the phone and watch the Lock Screen or the Dynamic Island. The run's summary shows
 #      what APNs answered.
 #
@@ -176,7 +176,9 @@ jobs:
               DeviceTokenNotForTopic|TopicDisallowed|BadTopic) hint=" Check the Worker's APNS_BUNDLE_ID var: it must be the app's bundle ID." ;;
               InvalidProviderToken|MissingProviderToken|ExpiredProviderToken) hint=" Check the Worker's APNS_TEAM_ID, APNS_KEY_ID and APNS_PRIVATE_KEY secrets." ;;
               ExpiredToken|Unregistered) hint=" The Live Activity has ended: start a new one in the app and copy again." ;;
-              TooManyRequests) hint=" The phone's push budget is spent: wait, or use priority 5." ;;
+              TooManyRequests) hint=" Too many pushes to this token in a row: wait a minute." ;;
+              BadEnvironmentKeyIdInToken) hint=" The APNs key only works in Sandbox, and TestFlight builds are production: make a Team Scoped Production key and update APNS_KEY_ID and APNS_PRIVATE_KEY (docs/decisions/0002-apns-key-environment.md)." ;;
+              TooManyProviderTokenUpdates) hint=" Transport works: the Worker reached APNs over HTTP/2. Isolates sent different provider tokens on one connection; record it (docs/decisions/0004-shared-apns-provider-token.md)." ;;
             esac
             echo "::error title=APNs answered $status::$reason.$hint"
             exit 1

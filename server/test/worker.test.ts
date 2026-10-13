@@ -15,8 +15,11 @@ test("the entry module exports only handlers and classes", () => {
 });
 
 test("src/ uses Web APIs only", () => {
-  // The Worker doesn't enable nodejs_compat. Node's types are in the shared tsconfig for the
-  // tests, so tsc wouldn't notice a Node API creeping into the Worker.
+  // The tests run the Worker's code in plain Node (vitest.config.ts), so src/ sticks to Web APIs
+  // that behave the same there and in workerd, and never imports `cloudflare:` modules.
+  // (nodejs_compat is on by default at this compatibility_date, so a Node API wouldn't fail at
+  // deploy; this test is what keeps it out.) Node's types are in the shared tsconfig for the tests,
+  // so tsc wouldn't notice.
   const directory = new URL("../src/", import.meta.url);
   for (const file of readdirSync(directory).filter((name) => name.endsWith(".ts"))) {
     const code = readFileSync(new URL(file, directory), "utf8")

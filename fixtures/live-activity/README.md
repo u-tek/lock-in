@@ -13,7 +13,7 @@ drift apart:
 |---|---|
 | `squad-6.*` | Six members, one in every state (focusing, break, paused, done, left, slipped), a pet and a cheer |
 | `solo.*` | A solo session: no squad name, pet or cheer (optional keys absent, never `null`) |
-| `largest.*` | The worst case the server allows: every optional key, the longest strings in 4-byte characters, long fractional times. Must stay under 3.5 KB of compact UTF-8 JSON (attributes + content-state) |
+| `largest.*` | The longest strings the validators allow: six paused members, every optional key, every name and the squad name at their limits in 4-byte characters, the longest avatar and pet codes. Its numbers stay realistic: the Live Activity Lab's `largest` sample mirrors this file and moves its times with `now`, so don't maximise them. The numeric worst case (`v` at `Number.MAX_SAFE_INTEGER`, 18-character fractional times) is built in `server/test/liveActivity.test.ts`. Both must stay within 3,584 bytes of compact UTF-8 JSON (attributes + content-state): about 1.2 KB here, 1.3 KB for the numeric worst case |
 
 Rules (CLAUDE.md, "Live Activity rules"):
 

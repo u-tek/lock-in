@@ -39,6 +39,8 @@ export function demoScenario(scenario: DemoScenario, options: DemoOptions): Demo
   const now = Math.floor(options.now);
   const me = options.me ?? DEMO_ME;
   const you: Person = { i: me, n: "You", a: "b3.c7.e2.h4" };
+  // Must match APNsSpikeModel.squadName in App/Sources/Developer/APNsSpikeScreen.swift: the phone
+  // shows the squad name from its own attributes, never from a push.
   const attributes: Attributes = { sid: options.sid ?? DEMO_SID, me, sq: "Spike Squad" };
 
   const focusing = (person: Person, startedMinutesAgo: number, minutes: number): Member => {

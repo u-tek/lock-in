@@ -2,8 +2,21 @@
 # lab.* routes are design-lab pages (iPhone 16 Pro only, into design/lab).
 # store.* routes are App Store screenshots (iPhone 16 Pro Max only, into design/appstore). M6:
 # the scripts already handle them; none exist yet.
+# A lab page is taller than one screenshot, so each part is a route of its own too
+# (DesignTokensScreen.Panel, LiveActivityLabScreen.Panel); the page's own route shows its top.
 home
 developer
 spike
 lab.tokens
+lab.tokens.colours
+lab.tokens.type
+lab.tokens.metrics
+lab.tokens.components
 lab.liveactivity
+lab.liveactivity.states
+lab.liveactivity.lockscreen
+lab.liveactivity.island
+lab.liveactivity.standby
+lab.liveactivity.alwayson
+lab.liveactivity.watch
+lab.liveactivity.largest

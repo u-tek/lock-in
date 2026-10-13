@@ -1,3 +1,4 @@
+import ActivityKit
 import Core
 import Foundation
 import LiveActivity
@@ -20,12 +21,24 @@ enum AppServices {
         orphanIDs = Set(liveActivities.activities.map(\.id))
     }
 
-    /// Ends every Live Activity left running from an earlier launch. M0 keeps no session between
-    /// launches, so every one still running is an orphan: left by a crash or a killed app, it
-    /// would otherwise sit in the island until the system's 8-hour cap (CLAUDE.md, "Live Activity
-    /// rules"). M1 keeps the activity of a session that's still going.
+    /// Ends the Live Activities noted by `noteOrphanedActivities()`: those left running from an
+    /// earlier launch. M0 keeps no session between launches, so every one of them is an orphan:
+    /// left by a crash or a killed app, it would otherwise sit in the island until the system's
+    /// 8-hour cap (CLAUDE.md, "Live Activity rules"). M1 keeps the activity of a session that's
+    /// still going.
+    ///
+    /// Only the noted ids, never everything running: the root view's task runs again when the
+    /// system reconnects the scene within the same launch, and an activity started since (on the
+    /// APNs spike screen, say) must survive that. Ended activities drop out of `activities`, so a
+    /// second run ends nothing.
     static func endOrphanedActivities() async {
-        await liveActivities.endOrphans(keeping: nil)
+        let orphans = liveActivities.activities.filter { orphanIDs.contains($0.id) }
+        for activity in orphans {
+            await liveActivities.end(activity, state: nil, dismissal: .immediate)
+        }
+        if !orphans.isEmpty {
+            Log.liveActivity.info("Ended \(orphans.count, privacy: .public) orphaned activities")
+        }
     }
 }
 

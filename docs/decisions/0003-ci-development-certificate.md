@@ -1,7 +1,7 @@
 # 0003: CI signing may need a stored development certificate
 
-Status: **proposed**, awaiting the owner. Act on it only if the second TestFlight run fails as
-described below.
+Status: **adopted**. CI supports an optional stored development certificate (option 2 below). Add
+the two secrets only if the second TestFlight run fails as described below.
 
 Affects: M0 (the TestFlight lane).
 
@@ -65,12 +65,16 @@ try it without the Apple account.
    base64 -w0 dev.p12   # the value for the first secret below
    ```
 
-   Two new repository secrets (proposed names): `APPLE_DEV_CERT_P12` (the base64 of `dev.p12`) and
-   `APPLE_DEV_CERT_PASSWORD`. The TestFlight job gets one new step before *Archive and upload*. That
-   step creates and unlocks a temporary keychain, runs `security import` on the `.p12`, runs
-   `security set-key-partition-list` so `codesign` can use it without a prompt, and deletes the
-   keychain at the end. Revoke the stray certificates that earlier runs left behind. This doesn't
-   affect builds already in TestFlight, which are distribution-signed.
+   Add two repository secrets (`docs/apple-setup.md` step 12): `LK_DEV_CERT_P12` (the base64 of
+   `dev.p12`) and `LK_DEV_CERT_PASSWORD` (the password `openssl pkcs12` asked for). They work only
+   as a pair: with only one set, the TestFlight job's *Check the secrets* step fails within
+   seconds; with neither, nothing changes. When both are set, the job's *Install the development
+   certificate* step, before *Archive and upload*, creates and unlocks a temporary keychain, runs
+   `security import` on the `.p12`, runs `security set-key-partition-list` so `codesign` can use it
+   without a prompt, and puts the keychain in front of the search list. *Remove the development
+   certificate* deletes the keychain at the end. Then revoke the stray certificates that earlier
+   runs left behind. This doesn't affect builds already in TestFlight, which are
+   distribution-signed.
 
    `-legacy` matters: OpenSSL 3's default `.p12` encryption isn't readable by the macOS keychain.
 
@@ -79,5 +83,4 @@ try it without the Apple account.
    altogether, but there are more secrets to renew every year, and every new extension (M8) needs its
    own profile. Prefer option 2.
 
-Whoever applies option 2 should also update the comment at the top of `scripts/testflight.sh` and
-the M0 risk note.
+The comment at the top of `scripts/testflight.sh` describes the same opt-in.

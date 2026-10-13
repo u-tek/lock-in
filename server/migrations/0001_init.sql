@@ -147,6 +147,9 @@ CREATE TABLE participants (
   ended_at    REAL,
   focused_sec INTEGER NOT NULL DEFAULT 0 CHECK (focused_sec >= 0),
   -- The activity's push token (hex). Arrives after joining and can change, so it's nullable.
+  -- M3: no APNs environment for it yet. CLAUDE.md wants one per token, but SPEC.md §4.6/§4.7 have
+  -- none, and a user can have several devices, so it can't come from `devices`. Proposal:
+  -- docs/decisions/0005-live-activity-token-environment.md.
   la_token    TEXT,
   slips       INTEGER NOT NULL DEFAULT 0 CHECK (slips >= 0),
   PRIMARY KEY (session_id, user_id),

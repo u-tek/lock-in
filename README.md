@@ -71,25 +71,28 @@ commit can mention one without starting it. Case doesn't matter.
 | Tag | Does |
 |---|---|
 | `[snapshots]` | Every route, on iPhone 16 Pro and iPhone SE (3rd generation), dark mode |
-| `[snapshots: home,spike]` | Only those routes, iPhone 16 Pro only: a quick check |
+| `[snapshots: home,spike]` | Only those routes and the ones under them (`lab.liveactivity` is the page and each of its parts), iPhone 16 Pro only: a quick check. A name that matches no route fails the run |
 | `[light]` | Light mode as well as dark, together with one of the above |
 | `[testflight]` | Archive, sign and upload to TestFlight |
 
 A commit that changes only Markdown files doesn't run CI at all, so a tag in it does nothing. Use a
-manual run instead: **Actions → iOS → Run workflow**. The GitHub app can do this too. Tick
-*snapshots* or *testflight*, or type routes into *screens*; naming any route turns snapshots on.
-Manual snapshot runs render dark mode only.
+manual run instead: **Actions → iOS → Run workflow**. The GitHub app can do this too. The form
+labels each option with its description: tick *Export design snapshots and commit them to the
+branch* or *Archive a Release build and upload it to TestFlight*, or type routes into the box under
+*Only these routes, comma-separated…*; naming any route turns snapshots on. Manual snapshot runs
+render dark mode only.
 
 **Snapshots.** Routes are listed in `scripts/snapshot-routes.txt`: `home`, `developer`, `spike`,
-`lab.tokens` and `lab.liveactivity`. `lab.*` routes render on the iPhone 16 Pro only. CI commits
-the renders back to the branch as `github-actions[bot]` with `[skip ci]`, so pull before your next
-push:
+`lab.tokens` and `lab.liveactivity`. A lab page is taller than one screenshot, so each of its parts
+is a route too, such as `lab.liveactivity.island`. `lab.*` routes render on the iPhone 16 Pro only.
+CI commits the renders back to the branch as `github-actions[bot]` with `[skip ci]`, so pull before
+your next push:
 
 | Path | What's there |
 |---|---|
 | `design/screens/iphone-16-pro/<route>-<appearance>.png` | App screens on the iPhone 16 Pro |
 | `design/screens/iphone-se-3rd-generation/<route>-<appearance>.png` | App screens on the iPhone SE |
-| `design/lab/<name>-<appearance>.png` | Design lab pages: the design tokens and the Live Activity Lab |
+| `design/lab/<name>-<appearance>.png` | Design lab pages and their parts: the design tokens and the Live Activity Lab |
 
 The same files are also kept for 7 days as the run's `design-snapshots` artifact. CI creates both
 simulators itself and caches a booted-once iPhone 16 Pro between runs, so a narrowed run is quicker.
@@ -99,7 +102,9 @@ re-run. The build shows up in the TestFlight app once Apple has processed it, us
 minutes of the upload. The job checks the secrets first and fails within seconds, naming any that
 are missing. If signing or the upload fails, it prints a checklist and keeps the raw logs as the
 `testflight-logs` artifact. A newer push to the same branch cancels a TestFlight job that's still
-running, so wait for it to finish or push to another branch.
+running, so wait for it to finish or push to another branch. Two optional secrets,
+`LK_DEV_CERT_P12` and `LK_DEV_CERT_PASSWORD`, give the job a stored development certificate: add
+them only if a later run fails as `docs/decisions/0003-ci-development-certificate.md` describes.
 
 **Simulator build.** Every push (not pull requests) uploads the app as the `Lockin-simulator`
 artifact, kept for 14 days: open the run in **Actions**, then go to **Artifacts**. It only runs in

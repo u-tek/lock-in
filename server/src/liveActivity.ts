@@ -6,6 +6,8 @@
 // loudly, the update is silently dropped on the phone. Both sides test against the same files in
 // fixtures/live-activity/. Change a key there, in Model, and here in the same commit.
 
+import { APNS_BODY_LIMIT_BYTES } from "./apns.ts";
+
 /** Member states, as the Int the Swift side decodes. Each has its own creature pose. */
 export const MemberState = {
   focusing: 0,
@@ -319,16 +321,25 @@ export function assertPayloadBudget(attributes: Attributes, state: ContentState)
 }
 
 /**
- * When the activity should look stale if no update has arrived: the latest member end plus five
- * minutes. A paused member's end keeps moving, so it counts as `now` plus the time they have left.
+ * When the activity should look stale if no update has arrived: five minutes after the last running
+ * timer should end. Same rule as Swift's `ContentState.staleDate(now:)` (Model), so the app and the
+ * server never disagree:
+ * - only running members count (focusing, on a break, paused); done, left and slipped members don't
+ *   hold the activity open, unless nobody is running, when everyone's end counts;
+ * - a paused member's end keeps moving, so it counts as `now` plus the time they have left.
  * Whole seconds, rounded up, because APNs dates are integers.
  */
 export function staleDateFor(state: ContentState, now: number): number {
+  const running = state.m.filter(
+    (member) => member.s === MemberState.focusing || member.s === MemberState.break || member.s === MemberState.paused,
+  );
+  const considered = running.length > 0 ? running : state.m;
   let latestEnd = -Infinity;
-  for (const member of state.m) {
+  for (const member of considered) {
     const end = member.s === MemberState.paused && member.q !== undefined ? now + (member.e - member.q) : member.e;
     latestEnd = Math.max(latestEnd, end);
   }
+  if (latestEnd === -Infinity) latestEnd = now;
   return Math.ceil(latestEnd + STALE_AFTER_END_SECONDS);
 }
 
@@ -355,7 +366,11 @@ export interface LiveActivityPayloadOptions {
   attributesType?: string;
   /** `start` only, and required there. */
   attributes?: Attributes;
-  /** `start` only: asks iOS 18 to hand the new activity's update token to the app. */
+  /**
+   * `start` only. Defaults to true: every supported iOS (18.0+) needs `input-push-token: 1` to hand
+   * the new activity's update token to the app (CLAUDE.md). Pass false only when starting with
+   * `input-push-channel` instead.
+   */
   inputPushToken?: boolean;
 }
 
@@ -392,6 +407,8 @@ function parseAlert(value: unknown): LiveActivityAlert {
  *
  * Push-to-start (`start`) follows Apple's rules (SPEC.md §3, §4.5): it must carry an alert, the
  * attributes type and the attributes, and the attributes count against the payload budget.
+ *
+ * The whole body, alert and all, must also fit APNs' `APNS_BODY_LIMIT_BYTES`.
  */
 export function buildLiveActivityPayload(options: LiveActivityPayloadOptions): LiveActivityPayload {
   const { event } = options;
@@ -421,7 +438,7 @@ export function buildLiveActivityPayload(options: LiveActivityPayloadOptions): L
     aps["attributes-type"] = options.attributesType ?? ATTRIBUTES_TYPE;
     if (aps["attributes-type"].length === 0) fail("attributesType", "must not be empty");
     aps.attributes = parseAttributes(options.attributes);
-    if (options.inputPushToken === true) aps["input-push-token"] = 1;
+    if (options.inputPushToken !== false) aps["input-push-token"] = 1;
     assertPayloadBudget(aps.attributes, state);
   } else {
     if (options.alert !== undefined) aps.alert = parseAlert(options.alert);
@@ -429,5 +446,11 @@ export function buildLiveActivityPayload(options: LiveActivityPayloadOptions): L
       fail(event, "pushes can't carry attributesType, attributes or inputPushToken: those are for start");
     }
   }
-  return { aps };
+
+  const payload = { aps };
+  const bytes = utf8.encode(JSON.stringify(payload)).length;
+  if (bytes > APNS_BODY_LIMIT_BYTES) {
+    throw new LiveActivityError(`The APNs body is ${bytes} bytes; APNs takes at most ${APNS_BODY_LIMIT_BYTES}`);
+  }
+  return payload;
 }

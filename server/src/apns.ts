@@ -20,11 +20,20 @@ export const APNS_HOSTS: Readonly<Record<ApnsEnvironment, string>> = {
 };
 
 /**
- * How old the cached provider token gets before it's signed again. Apple rejects a token older
- * than an hour (ExpiredProviderToken) and one refreshed more than every 20 minutes
- * (TooManyProviderTokenUpdates), so 40 minutes sits safely between the two.
+ * How old the cached provider token gets before it's signed again. Apple asks for a new token no
+ * more than every 20 minutes and no less than every 60, and a token whose `iat` is over an hour old
+ * gets 403 ExpiredProviderToken. APNs enforces the 20-minute floor per connection: a connection that
+ * sees a new token more than once in 20 minutes gets 429 TooManyProviderTokenUpdates. 40 minutes
+ * sits between the two bounds, but only for this isolate's own tokens: Cloudflare may carry several
+ * isolates' different tokens on one connection to APNs (docs/decisions/0004).
  */
 export const PROVIDER_TOKEN_REFRESH_SECONDS = 40 * 60;
+
+/**
+ * The largest request body APNs takes: the whole `{"aps": …}` JSON, alert included, in UTF-8 bytes.
+ * Anything bigger gets 413 PayloadTooLarge, so it's refused here before it's sent.
+ */
+export const APNS_BODY_LIMIT_BYTES = 4096;
 
 export interface ApnsCredentials {
   /** The Apple Developer team ID. */
@@ -106,8 +115,8 @@ export class ApnsClient {
   async providerToken(): Promise<string> {
     const cached = this.cached;
     if (cached !== undefined && this.now() - cached.issuedAt < PROVIDER_TOKEN_REFRESH_SECONDS) return cached.token;
-    // Requests that arrive together share one signature: every new token counts towards Apple's
-    // once-per-20-minutes limit.
+    // Requests that arrive together share one signature: a connection that sees a new token more
+    // than once in 20 minutes gets 429 TooManyProviderTokenUpdates.
     this.signing ??= this.signProviderToken().finally(() => {
       this.signing = undefined;
     });
@@ -129,8 +138,9 @@ export class ApnsClient {
   }
 
   /**
-   * Sends one Live Activity push. Resolves with APNs' answer, refusals included; rejects only when
-   * the key is unusable (`ApnsConfigError`) or APNs can't be reached at all.
+   * Sends one Live Activity push. Resolves with APNs' answer, refusals included; rejects when the
+   * push itself is malformed (`TypeError`, or `RangeError` for a body over `APNS_BODY_LIMIT_BYTES`),
+   * when the key is unusable (`ApnsConfigError`) or when APNs can't be reached at all.
    */
   async sendLiveActivity(push: LiveActivityPush): Promise<ApnsResult> {
     if (!isDeviceToken(push.deviceToken)) throw new TypeError("deviceToken must be the push token as hex");
@@ -139,8 +149,12 @@ export class ApnsClient {
 
     const url = `${APNS_HOSTS[push.environment]}/3/device/${push.deviceToken.toLowerCase()}`;
     const body = JSON.stringify(push.payload);
+    const bytes = new TextEncoder().encode(body).length;
+    if (bytes > APNS_BODY_LIMIT_BYTES) throw new RangeError(`The payload is ${bytes} bytes; APNs takes at most ${APNS_BODY_LIMIT_BYTES}`);
     const token = await this.providerToken();
     const result = await this.post(url, token, push, body);
+    // Only an expired token is worth signing again. A 429 TooManyProviderTokenUpdates means a
+    // connection saw new tokens too often: another one would make it worse, so it's returned as is.
     if (result.status !== 403 || result.reason !== "ExpiredProviderToken") return result;
 
     // Our clock and Apple's disagree about the token's age. Sign a new one (unless a concurrent

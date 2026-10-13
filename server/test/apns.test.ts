@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ApnsClient, ApnsConfigError, PROVIDER_TOKEN_REFRESH_SECONDS, isDeviceToken } from "../src/apns.ts";
+import { APNS_BODY_LIMIT_BYTES, ApnsClient, ApnsConfigError, PROVIDER_TOKEN_REFRESH_SECONDS, isDeviceToken } from "../src/apns.ts";
 import { DEVICE_TOKEN, decodeJWT, fakeAPNs, makeKey, verifyES256 } from "./helpers.ts";
 
 const T0 = 1_791_900_000;
@@ -95,6 +95,19 @@ describe("ApnsClient", () => {
     expect(fake.requests).toHaveLength(2);
   });
 
+  test("never signs a new token on TooManyProviderTokenUpdates", async () => {
+    // Only 403 ExpiredProviderToken does. This 429 means a connection saw new tokens too often.
+    const fake = fakeAPNs({ status: 429, body: { reason: "TooManyProviderTokenUpdates" } }, { status: 200 });
+    const { apns } = await client(fake);
+    const send = () => apns.sendLiveActivity({ deviceToken: DEVICE_TOKEN, environment: "production", priority: 10, payload });
+
+    expect(await send()).toMatchObject({ ok: false, status: 429, reason: "TooManyProviderTokenUpdates" });
+    expect(fake.requests).toHaveLength(1);
+    expect(await send()).toMatchObject({ ok: true, status: 200 });
+    expect(fake.requests[1]?.headers.authorization).toBe(fake.requests[0]?.headers.authorization);
+    expect(`bearer ${await apns.providerToken()}`).toBe(fake.requests[0]?.headers.authorization);
+  });
+
   test("surfaces APNs' reason and doesn't retry other refusals", async () => {
     const badToken = fakeAPNs({ status: 400, body: { reason: "BadDeviceToken" }, apnsId: "a1" });
     const result = await (await client(badToken)).apns.sendLiveActivity({ deviceToken: DEVICE_TOKEN, environment: "sandbox", priority: 10, payload });
@@ -126,6 +139,22 @@ describe("ApnsClient", () => {
     expect(fake.requests).toHaveLength(0);
     expect(isDeviceToken(DEVICE_TOKEN)).toBe(true);
     expect(isDeviceToken(DEVICE_TOKEN.toUpperCase())).toBe(true);
+  });
+
+  test("refuses a body over 4096 bytes of UTF-8 before calling APNs", async () => {
+    const fake = fakeAPNs({ status: 200 });
+    const { apns } = await client(fake);
+    const send = (alert: string) =>
+      apns.sendLiveActivity({ deviceToken: DEVICE_TOKEN, environment: "sandbox", priority: 10, payload: { aps: { alert } } });
+    // `{"aps":{"alert":""}}` is 20 bytes; "é" is 2 bytes in UTF-8 but 1 in String.length.
+    const exact = "é".repeat((APNS_BODY_LIMIT_BYTES - 20) / 2);
+
+    await expect(send(`${exact}é`)).rejects.toThrow(RangeError);
+    await expect(send(`${exact}é`)).rejects.toThrow(`The payload is ${APNS_BODY_LIMIT_BYTES + 2} bytes; APNs takes at most 4096`);
+    expect(fake.requests).toHaveLength(0);
+
+    expect(await send(exact)).toMatchObject({ ok: true });
+    expect(new TextEncoder().encode(fake.requests[0]?.body).length).toBe(APNS_BODY_LIMIT_BYTES);
   });
 
   test("an unusable key is a set-up error", async () => {

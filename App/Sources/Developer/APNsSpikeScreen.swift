@@ -6,8 +6,8 @@ import Model
 import SwiftUI
 import UIKit
 
-/// The M0 spike's phone end (docs/spikes/apns-worker.md): starts a solo Live Activity that takes
-/// push updates, and copies what the Push test workflow needs to reach it.
+/// The M0 spike's phone end (docs/spikes/apns-worker.md): starts a squad Live Activity named
+/// "Spike Squad" that takes push updates, and copies what the Push test workflow needs to reach it.
 struct APNsSpikeScreen: View {
     @StateObject private var model: APNsSpikeModel
     @Environment(\.scenePhase) private var scenePhase
@@ -63,6 +63,10 @@ struct APNsSpikeScreen: View {
         // A new activity starts a new token stream; the old one ends with its task.
         .task(id: model.session) {
             await model.observeTokens()
+        }
+        // An end that arrives while the screen is open, not only on a return to the foreground.
+        .task(id: model.session) {
+            await model.observeState()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
@@ -171,8 +175,8 @@ struct APNsSpikeScreen: View {
     private var instructions: some View {
         VStack(alignment: .leading, spacing: LKSpacing.m) {
             LKSectionHeader("How to run it")
-            Step(number: 1, text: "Tap Start and wait for the push token, then tap Copy. It copies {\"env\", \"me\", \"sid\", \"token\"} as one line of JSON.")
-            Step(number: 2, text: "In the GitHub app, open this repository › Actions › Push test › Run workflow. Paste into \"device\", pick a scenario and run it.")
+            Step(number: 1, text: "Tap Start: it starts the squad \"\(APNsSpikeModel.squadName)\", with just you in it. Wait for the push token, then tap Copy. It copies {\"env\", \"me\", \"sid\", \"token\"} as one line of JSON.")
+            Step(number: 2, text: "In the GitHub app, open this repository › Actions › Push test › Run workflow. Paste into the first box (\"Paste what the APNs spike screen copies…\"), pick a scenario and run it.")
             Step(number: 3, text: "Lock the phone and watch the Lock Screen, or stay in the GitHub app and watch the Dynamic Island.")
             Text("TestFlight builds must say production. If iOS closes Lockin in the background, opening it again ends the old activity: start a new one and copy again. After the end scenario, start a new one too.")
                 .font(LKFont.caption)
@@ -267,6 +271,14 @@ final class APNsSpikeModel: ObservableObject {
 
     let environment: APNsEnvironment.Resolution
 
+    /// The spike activity's squad name. Must match `sq` in server/src/demo.ts: the attributes the
+    /// Worker counts payload bytes against. Pushes carry no attributes, so this is what the Lock
+    /// Screen shows.
+    static let squadName = "Spike Squad"
+
+    /// What the screen says when the activity ends without its End button.
+    private static let endedProblem = "The activity has ended, by an end push or by the system. Start a new one and copy again."
+
     /// Nil for a snapshot: then nothing here touches ActivityKit.
     private let controller: LiveActivityController?
     private var activity: LockinActivity?
@@ -303,14 +315,16 @@ final class APNsSpikeModel: ObservableObject {
 
     // MARK: - Actions
 
-    /// Starts a solo 25-minute activity that takes push updates: a session id made here, this
-    /// install's member id, and one member, "You".
+    /// Starts a 25-minute squad activity named `squadName` that takes push updates: a session id
+    /// made here, this install's member id, and one member, "You". Squad attributes, so the Worker's
+    /// made-up squad gets the squad layout on the Lock Screen and "+3" in the compact island;
+    /// attributes can't change after the start.
     func start() {
         guard let controller, activity == nil, !isBusy else { return }
         problem = nil
         let me = LocalMember.id()
         let now = Date()
-        let attributes = LockinAttributes.solo(me: me)
+        let attributes = LockinAttributes(sid: ShortID.make(), me: me, sq: Self.squadName)
         let member = LockinAttributes.ContentState.Member(
             id: me,
             name: "You",
@@ -320,7 +334,9 @@ final class APNsSpikeModel: ObservableObject {
             end: now.addingTimeInterval(SessionPreset.twentyFive.duration)
         )
         do {
-            let started = try controller.start(attributes: attributes, state: .solo(member: member), now: now)
+            // Version 1: the Worker's pushes carry v = Unix seconds, so each one is newer.
+            let state = LockinAttributes.ContentState(v: 1, m: [member], p: nil, c: nil)
+            let started = try controller.start(attributes: attributes, state: state, now: now)
             adopt(started)
         } catch {
             let reason = LiveActivityError(error)
@@ -368,16 +384,23 @@ final class APNsSpikeModel: ObservableObject {
         }
     }
 
+    /// The activity's state: the current one, then each change. Notices an end (an `end` push, a
+    /// swipe-away, the system) while the screen is open. Runs until the activity ends, the screen
+    /// goes away or the activity changes.
+    func observeState() async {
+        guard controller != nil, let activity else { return }
+        if noteState(activity.activityState, of: activity) { return }
+        for await state in activity.activityStateUpdates {
+            if noteState(state, of: activity) { return }
+        }
+    }
+
     /// Back in the foreground: Settings may have changed, and a push may have ended the activity.
     func refresh() {
         guard let controller else { return }
         activitiesEnabled = controller.areActivitiesEnabled
         if let activity {
-            let state = activity.activityState
-            if state == .ended || state == .dismissed {
-                forget()
-                problem = "The activity has ended, by an end push or by the system. Start a new one and copy again."
-            }
+            _ = noteState(activity.activityState, of: activity)
         } else {
             adoptRunningActivity()
         }
@@ -400,6 +423,18 @@ final class APNsSpikeModel: ObservableObject {
         session = Session(sid: activity.attributes.sid, me: activity.attributes.me)
         token = activity.pushToken.map(PushToken.hex)
         copiedBlob = nil
+    }
+
+    /// Forgets `activity` once `state` says it has ended, and says so. Returns true when there's
+    /// nothing more to follow: it ended, or the screen has moved on to another activity.
+    private func noteState(_ state: ActivityState, of activity: LockinActivity) -> Bool {
+        guard self.activity?.id == activity.id else { return true }
+        guard state == .ended || state == .dismissed else { return false }
+        // Our own End button: end() is already forgetting it, and it isn't a problem.
+        if isBusy { return true }
+        forget()
+        problem = Self.endedProblem
+        return true
     }
 
     private func forget() {

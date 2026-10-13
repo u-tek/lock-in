@@ -71,8 +71,8 @@ The scenarios (times are relative to the moment of sending, so the countdowns on
 | `cheer` | `update` | 5 | The squad, plus a cheer from Noor to you |
 | `end` | `end` | 10 | Everyone done. The activity ends, leaves the Dynamic Island and stays on the Lock Screen for up to 30 minutes |
 
-The squad name comes from the phone's own attributes, set when the spike screen started the
-activity, not from the push.
+The squad name, "Spike Squad", comes from the phone's own attributes, set when the spike screen
+started the activity, not from the push.
 
 ## Procedure
 
@@ -96,7 +96,8 @@ The expected answer is a refusal, which the Worker sends as HTTP 502, so `Invoke
 reports an error. Windows PowerShell shows the response body in the error message. On
 PowerShell 7, add `-SkipHttpErrorCheck` to see it as a normal result.
 
-Or use the GitHub app: **Actions** → **Push test** → **Run workflow**, with *device* set to
+Or use the GitHub app: **Actions** → **Push test** → **Run workflow**, with the field labelled
+*Paste what the APNs spike screen copies…* set to
 `{"token":"0000000000000000000000000000000000000000000000000000000000000000","env":"production"}`.
 The run goes red because APNs refused the token. Its summary page shows APNs's answer.
 
@@ -111,25 +112,29 @@ Do this once or twice, not in a loop: APNs drops connections that keep producing
 
 ### 2. Get a TestFlight build onto the phone
 
-GitHub → **Actions** → **iOS** → **Run workflow**, tick *testflight*. Or push a commit with
-`[testflight]` in its first line that changes more than Markdown. Wait for the upload, then up to
-about 15 minutes of processing, and install the build from the TestFlight app.
+GitHub → **Actions** → **iOS** → **Run workflow**, tick *Archive a Release build and upload it to
+TestFlight*. Or push a commit with `[testflight]` in its first line that changes more than
+Markdown. Wait for the upload, then up to about 15 minutes of processing, and install the build
+from the TestFlight app.
 
 ### 3. Start the Live Activity
 
-On the iPhone, open Lockin → **Developer** → **APNs spike** → **Start**. Wait until the push token
-appears. **env** must say `production`, since TestFlight builds get production tokens. Tap **Copy**.
-That copies `{"token":"…","env":"production","me":"…","sid":"…"}`, a complete request body.
+On the iPhone, open Lockin → **Developer** → **APNs spike** → **Start a 25-minute activity**. Wait
+until the push token appears. **APNs environment** must start with `production`, since TestFlight
+builds get production tokens. Tap **Copy for the Push test**. That copies
+`{"env":"production","me":"…","sid":"…","token":"…"}`, a complete request body. **Share** sends the
+same text to your PC instead (by email to yourself, for example).
 
 Make sure Live Activities are allowed: Settings → Lockin → Live Activities.
 
 ### 4. Send `squad`
 
-In the GitHub app: **Actions** → **Push test** → **Run workflow**.
+In the GitHub app: **Actions** → **Push test** → **Run workflow**, then fill in the three fields:
 
-- *device*: paste what the app copied. Curly quotes from the keyboard are fixed for you.
-- *scenario*: `squad`
-- *priority*: `default`
+- *Paste what the APNs spike screen copies…*: paste what the app copied. Curly quotes from the
+  keyboard are fixed for you.
+- *squad (you and three friends focusing), join …*: `squad`
+- *APNs priority. …*: `default`
 
 Run it, and keep the run open. Lockin is in the background now, so the Live Activity sits in the
 Dynamic Island above the GitHub app: you can watch the **Send** step finish and the island change at
@@ -138,7 +143,8 @@ Worker's status, APNs's status, the `apns-id`, the reason (if any), the environm
 size.
 
 Prefer the PC? The PowerShell command in step 1 does the same, and leaves the phone free to watch.
-Use the copied blob as `$body`. It sends `squad`; for the others, add a key such as
+Send the blob to the PC with **Share** on the spike screen, then set `$body = '<blob>'` (single
+quotes, since the blob contains double quotes). It sends `squad`; for the others, add a key such as
 `"scenario":"join"` inside the braces.
 
 ### 5. Then `join`, `cheer` and `end`
@@ -153,8 +159,11 @@ Repeat step 4 with each scenario, in that order, and fill in a row of the table 
 ### 6. Optional: an hour later
 
 Send `squad` once more after at least an hour (start and copy a new activity first if the old one
-has gone). The Worker re-signs its provider token after 40 minutes, so this checks the refresh on
-the real thing.
+has gone). This checks that a push still goes through long after the first one. It can't show the
+Worker's 40-minute re-sign of its provider token: a Worker isolate that sat idle for an hour has
+usually been replaced, so this push most likely signs a fresh token, as the first one did. The
+answer doesn't say which token was used either, and the one retry on `ExpiredProviderToken` would
+hide a stale one. `server/test/apns.test.ts` covers the re-sign.
 
 ## Reading the answer
 

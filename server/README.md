@@ -15,8 +15,8 @@ Everything else answers `404`. Most of the code is groundwork for later mileston
 |---|---|
 | `src/index.ts` | The Worker's entry point and router (`handle`, which the tests call with a fake `fetch` and clock) |
 | `src/admin.ts` | `POST /admin/push-test` |
-| `src/liveActivity.ts` | The Live Activity wire format (SPEC.md §4.3): strict parsing, canonical encoding, the 3.5 KB budget, `stale-date`, APNs payloads for `update`, `end` and push-to-start |
-| `src/apns.ts` | The APNs sender: token auth with a cached ES256 JWT, one retry on `ExpiredProviderToken` |
+| `src/liveActivity.ts` | The Live Activity wire format (SPEC.md §4.3): strict parsing, canonical encoding, the 3.5 KB budget, `stale-date`, APNs payloads for `update`, `end` and push-to-start, within APNs' 4 KB body limit |
+| `src/apns.ts` | The APNs sender: token auth with a cached ES256 JWT, one retry on `ExpiredProviderToken` (never on a 429), bodies over 4 KB refused before sending |
 | `src/jwt.ts` | ES256 signing with Web Crypto, from the `.p8` file |
 | `src/demo.ts` | The spike's scenarios: `squad`, `join`, `cheer`, `end` |
 | `src/room.ts` | The `Room` Durable Object, a stub until M3 |
@@ -46,7 +46,8 @@ Objects) and, from the Apple developer portal:
   service (APNs). Download `AuthKey_XXXXXXXXXX.p8` once (Apple won't let you download it again)
   and note the Key ID;
 - your **Team ID** (Membership details);
-- the app's **bundle ID**, the same as `LK_BUNDLE_ID` in `Config/Local.xcconfig`.
+- the app's **bundle ID**, the same value as the `LK_BUNDLE_ID` repository secret
+  (docs/apple-setup.md).
 
 1. Install and sign in:
 
@@ -97,11 +98,11 @@ Objects) and, from the Apple developer portal:
    ```
 
 6. Wire up the rest:
-   - `Config/Local.xcconfig`: `LK_API_HOST = lockin-api.yourname.workers.dev` (host only, no
-     `https://`, because `//` starts a comment in xcconfig files).
    - GitHub → Settings → Secrets and variables → Actions: `LOCKIN_API_URL` =
      `https://lockin-api.yourname.workers.dev` and `LOCKIN_ADMIN_TOKEN` = the admin token, for the
-     push-test workflow; `LK_API_HOST` = the host, for TestFlight builds.
+     push-test workflow; `LK_API_HOST` = `lockin-api.yourname.workers.dev` (host only, no
+     `https://`), for TestFlight builds. CI writes it into `Config/Local.xcconfig`, so there's
+     nothing to edit locally.
 
 To watch requests as they happen: `npx wrangler tail`. The Worker logs the APNs status and the
 payload size, never a token or the key.
@@ -165,7 +166,9 @@ body) or couldn't be reached (`{"error": "Couldn't reach APNs: …"}`), so `curl
 | `InvalidProviderToken` | `APNS_TEAM_ID` or `APNS_KEY_ID` doesn't belong to the `.p8` key |
 | `ExpiredToken`, `Unregistered` (410) | The activity has ended: start a new one and copy again |
 | `TooManyRequests` (429) | Too many pushes to this token in a row: wait a minute |
-| `Couldn't reach APNs` | The Worker couldn't talk HTTP/2 to APNs: the spike's failure case. Write it up; the fallback is a small Node relay using `node:http2` behind the same `sendLiveActivity` interface (SPEC.md §4.2) |
+| `BadEnvironmentKeyIdInToken` (403) | The APNs key only works in Sandbox, and TestFlight builds are production: make a Team Scoped key for Production (docs/decisions/0002-apns-key-environment.md) |
+| `TooManyProviderTokenUpdates` (429) | Transport works: the Worker reached APNs. Two isolates sent different provider tokens on one connection; record it (docs/decisions/0004-shared-apns-provider-token.md) |
+| `Couldn't reach APNs` | From `npm run dev`: expected, the local runtime has no HTTP/2 (see Local development). From the deployed Worker: it couldn't talk HTTP/2 to APNs. Try a few times over an hour; if it keeps failing, that's the spike's failure case: write it up in docs/spikes/apns-worker.md. The fallback is a small Node relay using `node:http2` behind the same `sendLiveActivity` interface (SPEC.md §4.2) |
 | `200` but nothing changes on the phone | Live Activities are off in Settings; iOS is throttling priority-10 pushes for this activity (its hourly budget, SPEC.md §3), so try `"priority": 5`; or the phone couldn't decode the content-state, which it drops silently: check the Swift `LockinAttributes` against `fixtures/live-activity/` |
 
 ## Local development
@@ -180,6 +183,10 @@ APNS_TEAM_ID=ABCDE12345
 APNS_KEY_ID=XYZ9876543
 APNS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----"
 ```
+
+`npm run dev` can't reach APNs: its local runtime (`workerd`) has no HTTP/2
+([cloudflare/workerd#4841](https://github.com/cloudflare/workerd/issues/4841)), so
+`/admin/push-test` only works against the deployed Worker.
 
 ## Turning the admin route off
 

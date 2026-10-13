@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { APNS_BODY_LIMIT_BYTES } from "../src/apns.ts";
 import {
   type Attributes,
   type ContentState,
@@ -23,6 +24,28 @@ import { fixtureNames, readFixture } from "./helpers.ts";
 const compact = (text: string) => JSON.stringify(JSON.parse(text));
 const squad6 = () => readFixture("squad-6", "content-state").value as ContentState;
 const solo = () => readFixture("solo", "content-state").value as ContentState;
+const bodyBytes = (payload: unknown) => new TextEncoder().encode(JSON.stringify(payload)).length;
+
+/** The worst case the validators allow: every string at its limit in 4-byte characters, every optional key, the longest numbers. */
+function worstCase(): { state: ContentState; attributes: Attributes; time: number } {
+  const time = 4_102_444_799.999_999_5; // 18 characters as JSON
+  const id = (n: number) => `zZ9yY8xX7${n}`;
+  const state: ContentState = {
+    v: Number.MAX_SAFE_INTEGER,
+    m: Array.from({ length: MAX_MEMBERS }, (_, n): Member => ({
+      i: id(n),
+      n: "🦊".repeat(12),
+      a: "b99.c99.e99.h99",
+      s: MemberState.paused,
+      b: time - 2,
+      e: time,
+      q: time - 1,
+    })),
+    p: { k: "dragonling.99", md: 3, x: 1.234_567_890_123_456_7e-7 },
+    c: { f: id(1), t: id(0), k: 99, at: time },
+  };
+  return { state, attributes: { sid: id(9), me: id(0), sq: "🔒".repeat(20) }, time };
+}
 
 describe("the shared fixtures", () => {
   test("are all here", () => {
@@ -67,24 +90,7 @@ describe("the payload budget", () => {
   });
 
   test("the worst case the validators allow fits too", () => {
-    // Every string at its limit in 4-byte characters, every optional key, the longest numbers.
-    const time = 4_102_444_799.999_999_5; // 18 characters as JSON
-    const id = (n: number) => `zZ9yY8xX7${n}`;
-    const worst: ContentState = {
-      v: Number.MAX_SAFE_INTEGER,
-      m: Array.from({ length: MAX_MEMBERS }, (_, n): Member => ({
-        i: id(n),
-        n: "🦊".repeat(12),
-        a: "b99.c99.e99.h99",
-        s: MemberState.paused,
-        b: time - 2,
-        e: time,
-        q: time - 1,
-      })),
-      p: { k: "dragonling.99", md: 3, x: 1.234_567_890_123_456_7e-7 },
-      c: { f: id(1), t: id(0), k: 99, at: time },
-    };
-    const attributes: Attributes = { sid: id(9), me: id(0), sq: "🔒".repeat(20) };
+    const { state: worst, attributes } = worstCase();
     expect(parseContentState(worst)).toEqual(worst);
     expect(parseAttributes(attributes)).toEqual(attributes);
     expect(payloadByteCount(attributes, worst)).toBeLessThan(PAYLOAD_BUDGET_BYTES);
@@ -197,15 +203,30 @@ describe("strict parsing", () => {
 });
 
 describe("staleDateFor", () => {
-  test("is the latest end plus five minutes", () => {
-    // Jules (slipped) ends last at 1791903060.
-    expect(staleDateFor(squad6(), 1_791_900_650)).toBe(1_791_903_060 + 300);
+  // The same moments as ModelTests' squadStaleDatesMatchTheServer: both sides must agree.
+  test("is the latest end of the running members plus five minutes", () => {
+    // Noor (on a break) ends last among running members at 1791902700. Jules (slipped, 1791903060)
+    // and the others who are done or left don't hold the activity open.
+    expect(staleDateFor(squad6(), 1_791_900_650)).toBe(1_791_903_000);
+  });
+
+  test("uses everyone's end when nobody is running", () => {
+    const base = solo().m[0]!;
+    const state = {
+      v: 1,
+      m: [
+        { ...base, s: MemberState.done, b: 1000, e: 1000 },
+        { ...base, i: "Nr2Kx7pQ1m", s: MemberState.left, b: 1000, e: 3000 },
+        { ...base, i: "Jl3Bt8Gc2f", s: MemberState.slipped, b: 1000, e: 2000 },
+      ],
+    };
+    expect(staleDateFor(state, 1_791_900_000)).toBe(3300);
   });
 
   test("counts a paused member as now plus the time they have left", () => {
     // Kai paused with 780 s left; at this point that outlasts everyone else.
     const now = 1_791_903_000;
-    expect(staleDateFor(squad6(), now)).toBe(now + 780 + 300);
+    expect(staleDateFor(squad6(), now)).toBe(1_791_904_080);
   });
 
   test("rounds up to whole seconds", () => {
@@ -224,7 +245,7 @@ describe("buildLiveActivityPayload", () => {
     });
     expect(Object.keys(payload.aps)).toEqual(["timestamp", "event", "content-state", "stale-date", "relevance-score"]);
     expect(payload.aps.timestamp).toBe(1_791_900_650);
-    expect(payload.aps["stale-date"]).toBe(1_791_903_360);
+    expect(payload.aps["stale-date"]).toBe(1_791_903_000);
     expect(JSON.stringify(payload.aps["content-state"])).toBe(compact(readFixture("squad-6", "content-state").text));
   });
 
@@ -238,7 +259,7 @@ describe("buildLiveActivityPayload", () => {
   test("start: push-to-start needs an alert and the attributes", () => {
     const attributes = readFixture("squad-6", "attributes").value as Attributes;
     const alert = { title: "Ava is locking in 🔒", body: "Joined for 25 minutes" };
-    const payload = buildLiveActivityPayload({ event: "start", state: squad6(), timestamp: 1_791_900_000, alert, attributes, inputPushToken: true });
+    const payload = buildLiveActivityPayload({ event: "start", state: squad6(), timestamp: 1_791_900_000, alert, attributes });
     expect(payload.aps).toMatchObject({
       event: "start",
       alert,
@@ -246,12 +267,51 @@ describe("buildLiveActivityPayload", () => {
       attributes,
       "input-push-token": 1,
     });
+    // On by default (every supported iOS needs it for the update token); off only when asked.
+    const explicit = buildLiveActivityPayload({ event: "start", state: squad6(), timestamp: 1_791_900_000, alert, attributes, inputPushToken: true });
+    expect(explicit).toEqual(payload);
+    const withoutToken = buildLiveActivityPayload({ event: "start", state: squad6(), timestamp: 1_791_900_000, alert, attributes, inputPushToken: false });
+    expect(withoutToken.aps).not.toHaveProperty("input-push-token");
 
     expect(() => buildLiveActivityPayload({ event: "start", state: squad6(), timestamp: 1_791_900_000, attributes })).toThrow(/alert is required/);
     expect(() => buildLiveActivityPayload({ event: "start", state: squad6(), timestamp: 1_791_900_000, alert })).toThrow(/attributes are required/);
     expect(() =>
       buildLiveActivityPayload({ event: "start", state: squad6(), timestamp: 1_791_900_000, alert, attributes: { ...attributes, sid: "bad" } }),
     ).toThrow(/attributes\.sid/);
+  });
+
+  test("the largest start the validators allow fits APNs' 4096-byte body", () => {
+    const { state, attributes, time } = worstCase();
+    // A generous alert, in 4-byte characters: 40 for the title, 120 for the body.
+    const alert = { title: "🔒".repeat(40), body: "🦊".repeat(120), sound: "default" };
+    const payload = buildLiveActivityPayload({
+      event: "start",
+      state,
+      timestamp: time,
+      staleDate: time,
+      relevanceScore: 1.234_567_890_123_456_7e-7,
+      alert,
+      attributes,
+    });
+    expect(payload.aps).toHaveProperty("input-push-token", 1);
+    expect(bodyBytes(payload)).toBeLessThanOrEqual(APNS_BODY_LIMIT_BYTES);
+  });
+
+  test("anything whose whole body is over 4096 bytes throws, alert included", () => {
+    const attributes = readFixture("squad-6", "attributes").value as Attributes;
+    const start = (body: string) =>
+      buildLiveActivityPayload({ event: "start", state: squad6(), timestamp: 1_791_900_000, alert: { title: "Ava", body }, attributes });
+    // Fill the alert to exactly the limit with 2-byte characters: bytes count, not string length.
+    const room = APNS_BODY_LIMIT_BYTES - bodyBytes(start("x"));
+    const exact = `x${"é".repeat(Math.floor(room / 2))}${"x".repeat(room % 2)}`;
+    expect(bodyBytes(start(exact))).toBe(APNS_BODY_LIMIT_BYTES);
+    expect(() => start(`${exact}x`)).toThrow(LiveActivityError);
+    expect(() => start(`${exact}x`)).toThrow(`The APNs body is ${APNS_BODY_LIMIT_BYTES + 1} bytes; APNs takes at most 4096`);
+    // Well under the 3584-byte attributes + content-state budget, but the alert takes it over.
+    expect(payloadByteCount(attributes, squad6())).toBeLessThan(PAYLOAD_BUDGET_BYTES);
+
+    const update = { event: "update", state: squad6(), timestamp: 1_791_900_000 } as const;
+    expect(() => buildLiveActivityPayload({ ...update, alert: { title: "Ava", body: "x".repeat(APNS_BODY_LIMIT_BYTES) } })).toThrow(/APNs body/);
   });
 
   test("keeps start-only and end-only fields where they belong", () => {

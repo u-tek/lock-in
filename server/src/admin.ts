@@ -163,9 +163,11 @@ function apnsCredentials(env: Env): ApnsCredentials {
   return credentials;
 }
 
-// One client per isolate, so the provider token is reused across requests (Apple refuses tokens
-// refreshed more than once every 20 minutes). Tests inject `fetch` and get a fresh one each time.
-// M3: if many isolates trip TooManyProviderTokenUpdates, share one token through a Durable Object.
+// One client per isolate, so the provider token is reused across requests. APNs answers 429
+// TooManyProviderTokenUpdates when one connection sees a new token more than once in 20 minutes, and
+// Cloudflare may share connections between isolates that each sign their own token. Tests inject
+// `fetch` and get a fresh client each time. M3, or sooner if the spike sees that 429: give every
+// isolate the same token (docs/decisions/0004).
 let sharedClient: { credentials: string; client: ApnsClient } | undefined;
 
 function apnsClient(credentials: ApnsCredentials, deps: ApnsDependencies): ApnsClient {
