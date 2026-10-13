@@ -1,0 +1,5 @@
+#include "Shared.xcconfig"
+
+// Builds run from Xcode get sandbox APNs tokens. The app also checks its provisioning profile
+// at runtime (see Core's APNsEnvironment), which wins over this when present.
+LK_APNS_ENV = sandbox

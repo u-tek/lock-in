@@ -1,0 +1,19 @@
+// Identity and service settings shared by every target.
+//
+// These defaults build and run in the simulator. For a device or TestFlight build, copy
+// Config/Local.xcconfig.example to Config/Local.xcconfig (gitignored) and fill in the real
+// values there. CI writes Local.xcconfig from repository secrets for TestFlight uploads.
+
+LK_TEAM_ID =
+LK_BUNDLE_ID = com.example.lockin
+LK_APP_GROUP = group.$(LK_BUNDLE_ID)
+
+// Host of the API Worker deployed from /server, e.g. lockin-api.yourname.workers.dev.
+// Host only: "//" starts a comment here. Empty: the app runs without a backend (solo only).
+LK_API_HOST =
+
+// YES until launch: shows the Developer menu (APNs spike, Live Activity Lab) in TestFlight
+// builds, which the owner can't run from Xcode. Set NO for the App Store (M9 checklist).
+LK_DEVELOPER_TOOLS = YES
+
+#include? "Local.xcconfig"

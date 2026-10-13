@@ -1,0 +1,4 @@
+#include "Shared.xcconfig"
+
+// TestFlight and App Store builds get production APNs tokens.
+LK_APNS_ENV = production

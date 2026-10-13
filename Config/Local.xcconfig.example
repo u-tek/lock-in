@@ -1,0 +1,12 @@
+// Copy to Config/Local.xcconfig (gitignored) and fill in. CI writes this file from repository
+// secrets for TestFlight builds (see .github/workflows/ios.yml), so the owner never needs it
+// locally unless building on a Mac.
+
+LK_TEAM_ID = ABCDE12345
+LK_BUNDLE_ID = com.yourcompany.lockin
+
+// LK_APP_GROUP derives from LK_BUNDLE_ID (group.<bundle id>). Override it only if the group
+// registered in the developer portal differs.
+
+// The API Worker's host, no scheme: "//" starts a comment in xcconfig files.
+LK_API_HOST = lockin-api.yourname.workers.dev
