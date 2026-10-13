@@ -13,84 +13,51 @@ import UIKit
         #expect(LKMemberTone(rawValue: 6) == nil)
     }
 
-    @Test func paletteListsTheStatesInWireOrder() {
+    @Test func catalogueListsTheStatesInWireOrder() {
         let tokens = LKMemberTone.allCases.map { $0.token }
-        #expect(tokens == LKPalette.memberStates)
+        #expect(tokens == LKColorCatalogue.memberStates)
     }
 
-    @Test func statesAreDistinguishableForEveryone() {
-        // OKLab distance: about 0.02 is just noticeable side by side. Typical vision gets six
-        // times that. The deficiencies flatten a whole colour axis, so for them the bar is three
-        // and a half times, carried mostly by lightness steps between the states.
-        for scheme in appearances {
-            for vision in LKColorVision.allCases {
-                let minimum = vision == .typical ? 0.12 : 0.07
-                for (a, b) in pairs(LKMemberTone.allCases) {
-                    let d = perceivedDistance(a.token.value(in: scheme), b.token.value(in: scheme), for: vision)
-                    #expect(d >= minimum, "\(a) and \(b), \(scheme), \(vision.rawValue): \(d)")
-                }
-            }
-        }
-    }
-
-    @Test func statesReadOnTheLockScreenAndInTheIsland() {
-        // The activity renders with lkNightAppearance(), so only the dark values ever reach it.
+    @Test func statesWearTheSystemColoursInTheSystemDoc() {
+        // design/SYSTEM.md's member-state table.
         for tone in LKMemberTone.allCases {
-            for background in [LKPalette.liveActivityBackground, LKPalette.islandBackground] {
-                let ratio = tone.token.contrastRatio(on: background, in: .dark)
-                #expect(ratio >= 4.5, "\(tone) on \(background.name): \(ratio)")
+            let (name, system) = expectedColour(tone)
+            #expect(tone.token.uiKitName == name, "\(tone)")
+            for scheme in appearances {
+                let drawn = tone.token.resolved(in: scheme)
+                #expect(distance(drawn, resolve(system, in: scheme)) < 0.001, "\(tone), \(scheme)")
             }
         }
     }
 
-    @Test func statesReadInTheApp() {
+    @Test func focusingWearsTheTint() {
+        for scheme in appearances {
+            #expect(LKMemberTone.focusing.token.hexString(in: scheme) == LKColorCatalogue.tint.hexString(in: scheme))
+        }
+    }
+
+    @Test func sixStatesSixColoursInEitherAppearance() {
+        // Pairwise, in light and again in dark: no two states may resolve to the same colour, or
+        // to near neighbours. 0.15 is a comfortable margin under the closest system pair here
+        // (about 0.4); a state that drifted onto another's colour would land near 0.
+        for scheme in appearances {
+            for (a, b) in pairs(LKMemberTone.allCases) {
+                let d = distance(a.token.resolved(in: scheme), b.token.resolved(in: scheme))
+                #expect(d > 0.15, "\(a) and \(b), \(scheme): \(d)")
+            }
+        }
+    }
+
+    @Test func leftIsTheOnlyGreyState() {
+        // Grey means "not here any more", so nothing else may be grey.
         for scheme in appearances {
             for tone in LKMemberTone.allCases {
-                for background in [LKPalette.background, LKPalette.surface] {
-                    let ratio = tone.token.contrastRatio(on: background, in: scheme)
-                    #expect(ratio >= 4.5, "\(tone) on \(background.name), \(scheme): \(ratio)")
-                }
-            }
-        }
-    }
-
-    @Test func statesSurviveAlwaysOn() {
-        // Always-On dims the whole panel. WCAG's 0.05 flare term is what makes dim colours sink
-        // into black, so scaling luminance to 40 % is a rough stand-in for the dimmed Lock
-        // Screen. Shapes and large text need 3:1.
-        let dimming = 0.4
-        let black = LKPalette.islandBackground.dark.relativeLuminance * dimming
-        for tone in LKMemberTone.allCases {
-            let dimmed = tone.token.dark.relativeLuminance * dimming
-            let ratio = (dimmed + 0.05) / (black + 0.05)
-            #expect(ratio >= 3, "\(tone): \(ratio)")
-        }
-    }
-
-    @Test func leftIsTheOnlyGreyedState() {
-        for scheme in appearances {
-            for tone in LKMemberTone.allCases {
-                let chroma = OKLab(tone.token.value(in: scheme)).chroma
+                let c = components(tone.token.resolved(in: scheme))
+                let spread = max(c.red, c.green, c.blue) - min(c.red, c.green, c.blue)
                 if tone == .left {
-                    #expect(chroma < 0.03, "left, \(scheme): \(chroma)")
+                    #expect(spread < 0.05, "left, \(scheme): \(spread)")
                 } else {
-                    #expect(chroma > 0.06, "\(tone), \(scheme): \(chroma)")
-                }
-            }
-        }
-    }
-
-    @Test func pillsKeepTheirTextReadable() {
-        for scheme in appearances {
-            let ink = LKPalette.textPrimary.value(in: scheme)
-            for tone in LKMemberTone.allCases {
-                let tint = tone.token.value(in: scheme)
-                for background in [LKPalette.background, LKPalette.surface] {
-                    let fill = tint.composited(over: background.value(in: scheme), opacity: LKColor.tintedFillOpacity)
-                    let text = ink.contrastRatio(with: fill)
-                    let symbol = tint.contrastRatio(with: fill)
-                    #expect(text >= 4.5, "\(tone) pill text on \(background.name), \(scheme): \(text)")
-                    #expect(symbol >= 3, "\(tone) pill symbol on \(background.name), \(scheme): \(symbol)")
+                    #expect(spread > 0.2, "\(tone), \(scheme): \(spread)")
                 }
             }
         }
@@ -103,9 +70,25 @@ import UIKit
         #expect(Set(titles).count == titles.count)
     }
 
+    @Test func symbolsFollowTheSystemDoc() {
+        let symbols = LKMemberTone.allCases.map { $0.symbolName }
+        #expect(symbols == ["lock.fill", "cup.and.saucer.fill", "pause.fill", "checkmark", "hand.wave.fill", "drop.fill"])
+    }
+
     @Test @MainActor func symbolsExist() {
         for tone in LKMemberTone.allCases {
             #expect(UIImage(systemName: tone.symbolName) != nil, "\(tone.symbolName)")
+        }
+    }
+
+    private func expectedColour(_ tone: LKMemberTone) -> (String, UIColor) {
+        switch tone {
+        case .focusing: ("systemIndigo", .systemIndigo)
+        case .onBreak: ("systemTeal", .systemTeal)
+        case .paused: ("systemOrange", .systemOrange)
+        case .done: ("systemGreen", .systemGreen)
+        case .left: ("systemGray", .systemGray)
+        case .slipped: ("systemPink", .systemPink)
         }
     }
 }

@@ -5,6 +5,9 @@ import SwiftUI
 /// Tools for building and checking the app on a real phone: the owner tests TestFlight builds and
 /// has no Xcode to read logs from, so what a build knows about itself is shown here. Reached from
 /// Home while `LK_DEVELOPER_TOOLS` is YES (off for the App Store: M9).
+///
+/// Laid out like a page of Settings: rows with coloured icon tiles that push the tools, then the
+/// build's facts as label and value.
 struct DeveloperMenu: View {
     private let build = BuildInfo.current
 
@@ -12,32 +15,37 @@ struct DeveloperMenu: View {
         List {
             Section {
                 NavigationLink(value: AppRoute.apnsSpike) {
-                    MenuRow(title: "APNs spike", detail: "Start a Live Activity and copy its push token", systemImage: "antenna.radiowaves.left.and.right")
+                    MenuRow(title: "APNs spike", systemImage: "antenna.radiowaves.left.and.right", color: .green)
                 }
                 NavigationLink(value: AppRoute.liveActivityLab) {
-                    MenuRow(title: "Live Activity Lab", detail: "Every presentation with made-up squads", systemImage: "rectangle.on.rectangle")
+                    MenuRow(title: "Live Activity Lab", systemImage: "testtube.2", color: .purple)
                 }
                 NavigationLink(value: AppRoute.designTokens) {
-                    MenuRow(title: "Design tokens", detail: "Colours, type, spacing and components", systemImage: "paintpalette")
+                    MenuRow(title: "Design tokens", systemImage: "paintpalette.fill", color: .pink)
                 }
+            } footer: {
+                Text("The spike starts a Live Activity and copies its push token. The Lab shows every presentation with made-up squads; the tokens page shows the colours, type and components.")
             }
-            .listRowBackground(LKColor.surface)
 
             Section {
-                InfoRow(label: "Version", value: build.version)
-                InfoRow(label: "Build", value: build.build)
-                InfoRow(label: "APNs environment", value: build.apnsEnvironment)
-                InfoRow(label: "API host", value: build.apiHost)
-                InfoRow(label: "App Group", value: build.appGroup)
+                LabeledContent("Version", value: build.version)
+                LabeledContent("Build", value: build.build)
+                LabeledContent {
+                    Text(build.apnsEnvironment)
+                } label: {
+                    // A second Text in the label is the row's subtitle.
+                    Text("APNs environment")
+                    Text(build.apnsSource)
+                }
+                LabeledContent("API host", value: build.apiHost ?? BuildInfo.notSet)
+                LabeledContent("App Group", value: build.appGroup ?? BuildInfo.notSet)
             } header: {
-                Text("This build")
+                Text("Build")
             } footer: {
                 Text("TestFlight builds use production APNs, builds run from Xcode use sandbox. With no API host the app runs without a backend, which the APNs spike doesn't need.")
             }
-            .listRowBackground(LKColor.surface)
         }
-        .scrollContentBackground(.hidden)
-        .lkScreenBackground()
+        .listStyle(.insetGrouped)
         .navigationTitle("Developer")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -47,76 +55,52 @@ struct DeveloperMenu: View {
 struct BuildInfo: Equatable {
     var version: String
     var build: String
+    /// "production" or "sandbox".
     var apnsEnvironment: String
-    var apiHost: String
-    var appGroup: String
+    /// Where the APNs environment came from: "From the provisioning profile".
+    var apnsSource: String
+    /// Nil when the build has none.
+    var apiHost: String?
+    var appGroup: String?
+
+    /// What a row says for a setting the build doesn't have.
+    static let notSet = "Not set"
 
     static var current: BuildInfo {
         let info = Bundle.main.infoDictionary ?? [:]
         let configuration = AppConfiguration.main
+        let resolution = APNsEnvironment.currentResolution
         return BuildInfo(
-            version: info["CFBundleShortVersionString"] as? String ?? "unknown",
-            build: info["CFBundleVersion"] as? String ?? "unknown",
-            apnsEnvironment: describe(APNsEnvironment.currentResolution),
-            apiHost: configuration.apiHost ?? "not set",
-            appGroup: configuration.appGroupIdentifier ?? "not set"
+            version: info["CFBundleShortVersionString"] as? String ?? "Unknown",
+            build: info["CFBundleVersion"] as? String ?? "Unknown",
+            apnsEnvironment: resolution.environment.rawValue,
+            apnsSource: source(of: resolution),
+            apiHost: configuration.apiHost,
+            appGroup: configuration.appGroupIdentifier
         )
     }
 
-    /// "production, from the provisioning profile".
-    static func describe(_ resolution: APNsEnvironment.Resolution) -> String {
-        let source: String
+    /// "From the provisioning profile": why the build uses the environment it does.
+    static func source(of resolution: APNsEnvironment.Resolution) -> String {
         switch resolution.source {
-        case .provisioningProfile: source = "from the provisioning profile"
-        case .configuration: source = "from LK_APNS_ENV"
-        case .fallback: source = "by default"
+        case .provisioningProfile: "From the provisioning profile"
+        case .configuration: "From LK_APNS_ENV"
+        case .fallback: "By default"
         }
-        return "\(resolution.environment.rawValue), \(source)"
     }
 }
 
+/// A Settings row: an icon tile and a title. The NavigationLink around it adds the chevron.
 private struct MenuRow: View {
     let title: String
-    let detail: String
     let systemImage: String
+    let color: Color
 
     var body: some View {
-        HStack(spacing: LKSpacing.m) {
-            Image(systemName: systemImage)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(LKColor.accentText)
-                .frame(width: 28)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(LKFont.headline)
-                    .foregroundStyle(LKColor.textPrimary)
-                Text(detail)
-                    .font(LKFont.caption)
-                    .foregroundStyle(LKColor.textSecondary)
-            }
+        Label {
+            Text(title)
+        } icon: {
+            LKIconTile(systemName: systemImage, color: color)
         }
-        .padding(.vertical, LKSpacing.xxs)
-    }
-}
-
-/// A label and a value that can be selected and copied (a host name, say).
-private struct InfoRow: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: LKSpacing.m) {
-            Text(label)
-                .font(LKFont.subheadline)
-                .foregroundStyle(LKColor.textSecondary)
-            Spacer(minLength: LKSpacing.s)
-            Text(value)
-                .font(LKFont.subheadline.monospaced())
-                .foregroundStyle(LKColor.textPrimary)
-                .multilineTextAlignment(.trailing)
-                .textSelection(.enabled)
-        }
-        .accessibilityElement(children: .combine)
     }
 }

@@ -8,7 +8,12 @@ import SwiftUI
 /// extension draws (docs/decisions/0001-live-activity-views-in-package.md).
 ///
 /// M0 shows the squad and solo samples in each presentation; M1 extends it to every presentation
-/// × state. The island and the Lock Screen around the views are mock-ups (`ActivityFrames.swift`).
+/// × state. The island, the Lock Screen's wallpaper and StandBy's black around the views are
+/// stand-ins (`ActivityFrames.swift`).
+///
+/// An inset-grouped list, one section per presentation. Each sample is two rows: its name and
+/// payload size as label and value, then a stage row with the presentation on what the system
+/// would draw behind it.
 struct LiveActivityLabScreen: View {
     /// The page's parts, in order. Each is also a snapshot route, `lab.liveactivity.<part>`, for
     /// when the whole page is taller than one screenshot.
@@ -22,6 +27,30 @@ struct LiveActivityLabScreen: View {
         case largest
 
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .states: "Member states"
+            case .lockScreen: "Lock Screen"
+            case .island: "Dynamic Island"
+            case .standBy: "StandBy"
+            case .alwaysOn: "Always-On"
+            case .watch: "Apple Watch Smart Stack"
+            case .largest: "Largest payload"
+            }
+        }
+
+        var detail: String {
+            switch self {
+            case .states: "Each state's colour and symbol, on the Lock Screen's card and in the island's black."
+            case .lockScreen: "On the system's default background over a stand-in wallpaper. Also the banner on iPhones without the Dynamic Island."
+            case .island: "Compact, minimal and expanded. The island is always dark, so it's drawn in the dark appearance here too."
+            case .standBy: "Shown at 1×; the system scales it up to fill the screen, always on black."
+            case .alwaysOn: "Reduced luminance: outlines, nothing glows. The dimming is a stand-in for the system's."
+            case .watch: "The small activity family, on the watch face's black."
+            case .largest: "Every limit at its maximum, against the 3,584-byte budget."
+            }
+        }
     }
 
     private let panels: [Panel]
@@ -35,17 +64,18 @@ struct LiveActivityLabScreen: View {
 
     var body: some View {
         let samples = LabSamples(now: now)
-        ScrollView {
-            VStack(alignment: .leading, spacing: LKSpacing.xxl) {
-                ForEach(panels) { panel in
-                    PanelView(panel: panel, samples: samples)
+        List {
+            ForEach(panels) { panel in
+                Section {
+                    PanelRows(panel: panel, samples: samples)
+                } header: {
+                    Text(panel.title)
+                } footer: {
+                    Text(panel.detail)
                 }
             }
-            .padding(.horizontal, LKSpacing.gutter)
-            .padding(.top, LKSpacing.l)
-            .padding(.bottom, LKSpacing.xxxl)
         }
-        .lkScreenBackground()
+        .listStyle(.insetGrouped)
         .navigationTitle("Live Activity Lab")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -79,95 +109,92 @@ private struct LabSamples {
     }
 }
 
-private struct PanelView: View {
+/// One panel's rows. A list flattens them, so each `LabItem` here becomes two rows.
+private struct PanelRows: View {
     let panel: LiveActivityLabScreen.Panel
     let samples: LabSamples
 
     var body: some View {
         switch panel {
         case .states:
-            LabPanel("Member states", detail: "Badges at 34 and 22 pt") {
-                StateBadges(members: samples.states)
-            }
+            LabeledContent("Lock Screen", value: "34 pt")
+            StateBadges(members: samples.states, size: 34)
+                .padding(.vertical, LKSpacing.m)
+                .background(
+                    .regularMaterial,
+                    in: RoundedRectangle(cornerRadius: ActivityFrameMetrics.lockScreenCornerRadius, style: .continuous)
+                )
+                .activityStageRow(.wallpaper)
+            LabeledContent("Dynamic Island", value: "22 pt")
+            StateBadges(members: samples.states, size: 22)
+                .environment(\.colorScheme, .dark)
+                .activityStageRow(.black)
         case .lockScreen:
-            LabPanel("Lock Screen", detail: "Also the banner without an island") {
-                ForEach([samples.squad, samples.squadOfFour, samples.solo]) { sample in
-                    LabItem(sample) {
-                        LockScreenPreview(sample)
-                    }
+            ForEach([samples.squad, samples.squadOfFour, samples.solo]) { sample in
+                LabItem(sample, on: .wallpaper) {
+                    LockScreenPreview(sample)
                 }
             }
         case .island:
-            LabPanel("Dynamic Island", detail: "Compact, minimal, expanded") {
-                ForEach([samples.squad, samples.squadOfFour, samples.solo]) { sample in
-                    LabItem(sample) {
-                        HStack(spacing: LKSpacing.m) {
-                            CompactIslandPreview(sample)
-                            MinimalIslandPreview(sample)
-                        }
+            ForEach([samples.squad, samples.squadOfFour, samples.solo]) { sample in
+                LabItem(sample, note: "Compact and minimal", on: .wallpaper) {
+                    HStack(spacing: LKSpacing.m) {
+                        CompactIslandPreview(sample)
+                        MinimalIslandPreview(sample)
                     }
                 }
-                ForEach([samples.squad, samples.solo]) { sample in
-                    LabItem(sample, note: "expanded") {
-                        ExpandedIslandPreview(sample)
-                    }
+            }
+            ForEach([samples.squad, samples.solo]) { sample in
+                LabItem(sample, note: "Expanded", on: .wallpaper) {
+                    ExpandedIslandPreview(sample)
                 }
             }
         case .standBy:
-            LabPanel("StandBy", detail: "Shown here at 1×; the system scales it up") {
-                ForEach([samples.squad, samples.solo]) { sample in
-                    LabItem(sample) {
-                        LockScreenPreview(sample, layout: .standBy)
-                    }
+            ForEach([samples.squad, samples.solo]) { sample in
+                LabItem(sample, on: .black) {
+                    LockScreenPreview(sample, layout: .standBy)
                 }
             }
         case .alwaysOn:
-            LabPanel("Always-On", detail: "Reduced luminance: outlines, nothing glows") {
-                ForEach([samples.squad, samples.solo]) { sample in
-                    LabItem(sample) {
-                        LockScreenPreview(sample, isLuminanceReduced: true)
-                    }
+            ForEach([samples.squad, samples.solo]) { sample in
+                LabItem(sample, on: .dimmedWallpaper) {
+                    LockScreenPreview(sample, isLuminanceReduced: true)
                 }
             }
         case .watch:
-            LabPanel("Apple Watch Smart Stack", detail: "The small activity family") {
-                HStack(alignment: .top, spacing: LKSpacing.m) {
-                    ForEach([samples.squad, samples.solo]) { sample in
-                        LockScreenPreview(sample, layout: .smartStack)
-                    }
+            ForEach([samples.squad, samples.solo]) { sample in
+                LabItem(sample, on: .black) {
+                    LockScreenPreview(sample, layout: .smartStack)
                 }
             }
         case .largest:
-            LabPanel("Largest payload", detail: "Every limit at its maximum") {
-                LabItem(samples.largest) {
-                    LockScreenPreview(samples.largest)
-                }
-                LabItem(samples.largest, note: "island") {
-                    VStack(alignment: .leading, spacing: LKSpacing.m) {
-                        HStack(spacing: LKSpacing.m) {
-                            CompactIslandPreview(samples.largest)
-                            MinimalIslandPreview(samples.largest)
-                        }
-                        ExpandedIslandPreview(samples.largest)
+            LabItem(samples.largest, note: "Lock Screen", on: .wallpaper) {
+                LockScreenPreview(samples.largest)
+            }
+            LabItem(samples.largest, note: "Dynamic Island", on: .wallpaper) {
+                VStack(spacing: LKSpacing.m) {
+                    HStack(spacing: LKSpacing.m) {
+                        CompactIslandPreview(samples.largest)
+                        MinimalIslandPreview(samples.largest)
                     }
+                    ExpandedIslandPreview(samples.largest)
                 }
             }
         }
     }
 }
 
-/// One badge per member state, at the Lock Screen row's size and the island's, on the activity's
-/// background.
+/// One badge per member state at one size, with the state's name under it.
 private struct StateBadges: View {
     let members: [LiveActivityPresentation.Member]
+    let size: CGFloat
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             // By state: every one of these is you, so they share a member id.
             ForEach(members, id: \.state) { member in
                 VStack(spacing: LKSpacing.s) {
-                    MemberBadge(member, size: 34)
-                    MemberBadge(member, size: 22)
+                    MemberBadge(member, size: size)
                     Text(member.tone.title)
                         .font(LKFont.caption)
                         .foregroundStyle(LKColor.textSecondary)
@@ -177,74 +204,43 @@ private struct StateBadges: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .padding(.vertical, LKSpacing.l)
-        .padding(.horizontal, LKSpacing.s)
-        .frame(maxWidth: ActivityFrameMetrics.lockScreenWidth)
-        .background(
-            LKColor.liveActivityBackground,
-            in: RoundedRectangle(cornerRadius: ActivityFrameMetrics.lockScreenCornerRadius, style: .continuous)
-        )
-        .lkNightAppearance()
+        .padding(.horizontal, LKSpacing.xs)
     }
 }
 
-/// A titled part of the page.
-private struct LabPanel<Content: View>: View {
-    let title: String
-    let detail: String
-    let content: Content
-
-    init(_ title: String, detail: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.detail = detail
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: LKSpacing.m) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(LKFont.title)
-                    .foregroundStyle(LKColor.textPrimary)
-                    .accessibilityAddTraits(.isHeader)
-                Text(detail)
-                    .font(LKFont.caption)
-                    .foregroundStyle(LKColor.textSecondary)
-            }
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// One sample in one presentation, captioned with the sample and its payload size.
+/// One sample in one presentation: a row naming it with its payload size, then a stage row with
+/// the presentation on `backdrop`.
 private struct LabItem<Content: View>: View {
     let sample: LiveActivitySample
     let note: String?
+    let backdrop: ActivityBackdrop
     let content: Content
 
-    init(_ sample: LiveActivitySample, note: String? = nil, @ViewBuilder content: () -> Content) {
+    init(_ sample: LiveActivitySample, note: String? = nil, on backdrop: ActivityBackdrop, @ViewBuilder content: () -> Content) {
         self.sample = sample
         self.note = note
+        self.backdrop = backdrop
         self.content = content()
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: LKSpacing.xs) {
-            Text(caption)
-                .font(LKFont.caption)
-                .foregroundStyle(LKColor.textSecondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            content
+        LabeledContent {
+            Text(size)
+                .monospacedDigit()
+        } label: {
+            Text(sample.title)
+            // A second Text in the label is the row's subtitle.
+            if let note {
+                Text(note)
+            }
         }
+        content
+            .activityStageRow(backdrop)
     }
 
-    /// "Squad of 6, one in every state · 1,024 bytes". Attributes and content-state as compact
-    /// JSON, against the 3,584-byte budget.
-    private var caption: String {
+    /// "804 bytes": attributes and content-state as compact JSON, against the 3,584-byte budget.
+    private var size: String {
         let bytes = sample.attributes.payloadByteCount(for: sample.state)
-        let size = bytes == Int.max ? "won't encode" : "\(bytes.formatted()) bytes"
-        return [sample.title, note, size].compactMap { $0 }.joined(separator: " · ")
+        return bytes == Int.max ? "Won't encode" : "\(bytes.formatted()) bytes"
     }
 }

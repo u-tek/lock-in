@@ -4,6 +4,9 @@ import SwiftUI
 
 /// Home, with the Developer menu and its tools pushed on top. M1 puts onboarding and the session
 /// screen here.
+///
+/// One navigation stack, as in Settings: Home has the large title, and the screens pushed on it
+/// have inline ones.
 struct RootView: View {
     @State private var path: [AppRoute] = []
     private let configuration = AppConfiguration.main

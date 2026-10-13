@@ -2,10 +2,14 @@
 
     python3 design/tools/app_icon.py
 
-A padlock with a face, locked in: the brand's lamp amber on its indigo night, with a soft glow
-behind it like a desk lamp in a dark room. One 1024 x 1024 image for every size (the single-size
-asset format), fully opaque, because App Store Connect rejects icons with an alpha channel. The
-system rounds the corners, so the artwork fills the square. Needs Pillow and NumPy.
+A white padlock with a small face, locked in, on a soft indigo-to-purple gradient: the shape of
+an Apple icon (one simple glyph on a quiet gradient, no text) in the app's tint family
+(design/SYSTEM.md). The face makes the lock a little friendly without becoming a mascot; the
+creatures arrive in M1 with their own original art.
+
+One 1024 x 1024 image for every size (the single-size asset format), fully opaque RGB, because
+App Store Connect rejects icons with an alpha channel. The system rounds the corners, so the
+gradient fills the square. Needs Pillow and NumPy.
 """
 from pathlib import Path
 
@@ -17,20 +21,17 @@ OUT = ROOT / "App/Resources/Assets.xcassets/AppIcon.appiconset"
 SIZE = 1024
 SCALE = 4  # draw large, then downscale: smooth edges without per-shape anti-aliasing
 
-# DesignSystem's tokens (Packages/LKKit/Sources/DesignSystem/Colors.swift).
-NIGHT = 0x0D0B17  # background, dark
-NIGHT_RAISED = 0x2A2356  # a lighter indigo for the top of the sky
-AMBER = 0xFFB23F  # accent, dark
-AMBER_LIGHT = 0xFFCF70
-AMBER_DEEP = 0xF08F22
-INK = 0x1E1405  # onAccent
-SHACKLE = 0xD9D3F5  # textPrimary's lavender, a touch deeper so the shackle reads as metal
-SHACKLE_SHADE = 0xA79FD0
-CHEEK = 0xFF7F5C
+# Near the system's indigo and purple (Apple's colour guidelines, iOS 26 values: indigo
+# #6155F5 / #6D7CFF, purple #CB30E0), softened so the two ends sit close in lightness and the
+# gradient reads as one colour turning, not as two colours meeting.
+TOP = 0x6F73FA  # a light indigo
+BOTTOM = 0x8E44E0  # an indigo-leaning purple
+GLYPH = 0xFFFFFF
+SHADOW = 0x2A1670  # a deep indigo, for the glyph's faint shadow
 
 
 def rgb(value):
-    return np.array([(value >> 16) & 255, (value >> 8) & 255, value & 255], dtype=np.float64) / 255
+    return np.array([(value >> 16) & 255, (value >> 8) & 255, value & 255], dtype=np.float32) / 255
 
 
 def to_image(array):
@@ -38,20 +39,15 @@ def to_image(array):
 
 
 def background(s):
-    """The night: indigo at the top to near-black at the bottom, with the lamp's warm glow."""
-    ys, xs = np.mgrid[0:s, 0:s] / s
-    sky = rgb(NIGHT_RAISED) * (1 - ys[..., None]) + rgb(NIGHT) * ys[..., None]
-    # A soft amber glow centred behind the lock's body.
-    distance = np.hypot(xs - 0.5, (ys - 0.6) * 1.1)
-    glow = np.exp(-(distance / 0.34) ** 2)[..., None] * 0.42
-    return sky * (1 - glow) + rgb(AMBER) * glow
-
-
-def vertical_gradient(s, top, bottom, y0, y1):
-    """A top-to-bottom gradient over rows y0..y1 (fractions of the canvas), as an RGB image."""
-    ys = np.clip((np.arange(s) / s - y0) / (y1 - y0), 0, 1)[:, None, None]
-    column = rgb(top) * (1 - ys) + rgb(bottom) * ys
-    return to_image(np.broadcast_to(column, (s, s, 3)).copy())
+    """Top to bottom, light indigo to purple, with a faint glow from above like Apple's icons."""
+    ys = (np.arange(s, dtype=np.float32) / s)[:, None]
+    xs = (np.arange(s, dtype=np.float32) / s)[None, :]
+    # Ease the blend so the middle isn't a muddy halfway colour for long.
+    t = (ys * ys * (3 - 2 * ys))[..., None]
+    base = rgb(TOP) * (1 - t) + rgb(BOTTOM) * t
+    base = np.broadcast_to(base, (s, s, 3))
+    glow = np.exp(-(((xs - 0.5) / 0.55) ** 2 + ((ys + 0.05) / 0.45) ** 2))[..., None] * 0.14
+    return base * (1 - glow) + 1.0 * glow
 
 
 def mask(s, draw_shape):
@@ -60,66 +56,63 @@ def mask(s, draw_shape):
     return image
 
 
-def render():
-    s = SIZE * SCALE
-    icon = to_image(background(s))
+def glyph_mask(s):
+    """The padlock with its face knocked out, as a mask: white where the glyph is."""
 
     def px(value):
         return value * s
 
-    # The shackle: a thick upside-down U whose legs disappear into the body. Drawn as an outer
-    # arch minus an inner one, so the curve and the legs meet without a seam.
-    centre_x, centre_y, bottom = px(0.5), px(0.345), px(0.5)
+    # The body: a rounded rectangle, a little wider than tall, like SF Symbols' lock. Its
+    # corners end before the shackle's legs begin, so the legs meet a straight edge.
+    body_box = [px(0.275), px(0.455), px(0.725), px(0.79)]
+
+    def body(draw, s):
+        draw.rounded_rectangle(body_box, radius=px(0.08), fill=255)
+
+    # The shackle: an upside-down U whose legs run into the body. An outer arch minus an inner
+    # one, so the curve and the legs meet without a seam.
+    centre_x, centre_y, legs_end = px(0.5), px(0.36), px(0.5)
 
     def arch(radius):
         def shape(draw, s):
             draw.ellipse([centre_x - radius, centre_y - radius, centre_x + radius, centre_y + radius], fill=255)
-            draw.rectangle([centre_x - radius, centre_y, centre_x + radius, bottom], fill=255)
+            draw.rectangle([centre_x - radius, centre_y, centre_x + radius, legs_end], fill=255)
+
         return shape
 
-    shackle = ImageChops.subtract(mask(s, arch(px(0.158))), mask(s, arch(px(0.09))))
-    shackle_shade = vertical_gradient(s, SHACKLE, SHACKLE_SHADE, 0.17, 0.5)
-    icon.paste(shackle_shade, (0, 0), shackle)
+    shackle = ImageChops.subtract(mask(s, arch(px(0.142))), mask(s, arch(px(0.08))))
+    lock = ImageChops.lighter(shackle, mask(s, body))
 
-    # The body: a soft rounded square in lamp amber, lit from above.
-    body_box = [px(0.25), px(0.43), px(0.75), px(0.84)]
+    # The face, cut out of the body so the gradient shows through: two tall eyes and a smile.
+    def face(draw, s):
+        for cx in (0.43, 0.57):
+            draw.ellipse([px(cx - 0.026), px(0.555), px(cx + 0.026), px(0.627)], fill=255)
+        draw.arc([px(0.445), px(0.6), px(0.555), px(0.69)], 25, 155, fill=255, width=int(px(0.022)))
+        # Round the smile's ends, as a pen would. Pillow draws an arc's width inwards from its
+        # box, so the stroke's centre line runs half a width inside it.
+        for angle in (25, 155):
+            theta = np.radians(angle)
+            x = px(0.5) + px(0.055 - 0.011) * np.cos(theta)
+            y = px(0.645) + px(0.045 - 0.011) * np.sin(theta)
+            r = px(0.011)
+            draw.ellipse([x - r, y - r, x + r, y + r], fill=255)
 
-    def body(draw, s):
-        draw.rounded_rectangle(body_box, radius=px(0.13), fill=255)
+    return ImageChops.subtract(lock, mask(s, face))
 
-    # A shadow under the body, so it sits on the glow rather than floating on it.
-    shadow = mask(s, body).filter(ImageFilter.GaussianBlur(px(0.02)))
-    shadow = shadow.transform(shadow.size, Image.AFFINE, (1, 0, 0, 0, 1, -px(0.012)))
-    dark = Image.new("RGB", (s, s), tuple(int(c * 255) for c in rgb(NIGHT)))
-    icon = Image.composite(dark, icon, shadow.point(lambda v: int(v * 0.45)))
-    icon.paste(vertical_gradient(s, AMBER_LIGHT, AMBER_DEEP, 0.43, 0.84), (0, 0), mask(s, body))
 
-    # A highlight along the top edge of the body.
-    def highlight(draw, s):
-        draw.rounded_rectangle([px(0.29), px(0.455), px(0.71), px(0.53)], radius=px(0.04), fill=255)
+def render():
+    s = SIZE * SCALE
+    icon = to_image(background(s))
+    glyph = glyph_mask(s)
 
-    glow = mask(s, highlight).filter(ImageFilter.GaussianBlur(px(0.02)))
-    icon = Image.composite(Image.new("RGB", (s, s), (255, 236, 196)), icon, glow.point(lambda v: int(v * 0.35)))
+    # A faint shadow under the glyph, so it sits on the gradient rather than being printed on it.
+    shadow = glyph.filter(ImageFilter.GaussianBlur(s * 0.018))
+    shadow = shadow.transform(shadow.size, Image.AFFINE, (1, 0, 0, 0, 1, -s * 0.012))
+    shade = Image.new("RGB", (s, s), tuple(int(c * 255) for c in rgb(SHADOW)))
+    icon = Image.composite(shade, icon, shadow.point(lambda v: int(v * 0.28)))
 
-    # Rosy cheeks, soft.
-    def cheeks(draw, s):
-        for cx in (0.355, 0.645):
-            draw.ellipse([px(cx - 0.05), px(0.665), px(cx + 0.05), px(0.725)], fill=255)
-
-    blush = mask(s, cheeks).filter(ImageFilter.GaussianBlur(px(0.012)))
-    cheek_colour = Image.new("RGB", (s, s), tuple(int(c * 255) for c in rgb(CHEEK)))
-    icon = Image.composite(cheek_colour, icon, blush.point(lambda v: int(v * 0.5)))
-    draw = ImageDraw.Draw(icon)
-
-    # Eyes: dark ovals, each with a small catchlight.
-    ink = tuple(int(c * 255) for c in rgb(INK))
-    for cx in (0.415, 0.585):
-        draw.ellipse([px(cx - 0.032), px(0.585), px(cx + 0.032), px(0.668)], fill=ink)
-        draw.ellipse([px(cx - 0.006), px(0.6), px(cx + 0.014), px(0.622)], fill=(255, 248, 232))
-
-    # A small, content smile.
-    smile_box = [px(0.46), px(0.66), px(0.54), px(0.725)]
-    draw.arc(smile_box, 20, 160, fill=ink, width=int(px(0.014)))
+    white = Image.new("RGB", (s, s), tuple(int(c * 255) for c in rgb(GLYPH)))
+    icon = Image.composite(white, icon, glyph)
 
     return icon.resize((SIZE, SIZE), Image.LANCZOS).convert("RGB")
 

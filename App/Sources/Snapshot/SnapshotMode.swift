@@ -1,4 +1,3 @@
-import DesignSystem
 import SwiftUI
 import UIKit
 
@@ -26,7 +25,8 @@ struct SnapshotMode: Sendable {
 
     struct Shot: Sendable {
         let route: String
-        let appearance: Appearance
+        /// Nil follows the simulator's own appearance, as the app does outside snapshot mode.
+        let appearance: Appearance?
     }
 
     /// Posted by the exporter after each capture.
@@ -48,7 +48,7 @@ struct SnapshotMode: Sendable {
         let shots = list.split(separator: ",").compactMap { token -> Shot? in
             let parts = token.split(separator: "@", maxSplits: 1).map(String.init)
             guard let route = parts.first?.trimmingCharacters(in: .whitespaces), !route.isEmpty else { return nil }
-            let appearance = parts.count > 1 ? Appearance(rawValue: parts[1]) ?? .dark : .dark
+            let appearance = parts.count > 1 ? Appearance(rawValue: parts[1]) : nil
             return Shot(route: route, appearance: appearance)
         }
         return shots.isEmpty ? nil : SnapshotMode(shots: shots, referenceDate: Date())
@@ -120,11 +120,11 @@ struct SnapshotHost: View {
             if let view = SnapshotGallery.view(for: shot.route, now: mode.referenceDate) {
                 view
             } else {
-                Text(verbatim: "Unknown snapshot route \(shot.route)")
-                    .font(LKFont.body)
-                    .foregroundStyle(LKColor.textPrimary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .lkScreenBackground()
+                ContentUnavailableView(
+                    "Unknown snapshot route",
+                    systemImage: "questionmark.square.dashed",
+                    description: Text(verbatim: shot.route)
+                )
             }
         }
         // A fresh screen for every shot: no state carries over from the last one.
@@ -138,7 +138,7 @@ struct SnapshotHost: View {
                 .foregroundStyle(.clear)
                 .accessibilityIdentifier("lk.snapshot.\(stepper.index)")
         }
-        .preferredColorScheme(shot.appearance.colorScheme)
+        .preferredColorScheme(shot.appearance?.colorScheme)
         .onAppear {
             // Screens settle at once, so a capture never catches one mid-transition.
             UIView.setAnimationsEnabled(false)

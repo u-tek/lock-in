@@ -1,78 +1,110 @@
 import SwiftUI
 
-/// The type styles. One family, SF Rounded, for a soft and friendly voice.
+/// The type styles: SF Pro, the system font, through Dynamic Type (design/SYSTEM.md).
 ///
-/// Text styles scale with Dynamic Type; their `pointSize` is the size at the default text size.
-/// Timers are fixed sizes, because they live in fixed spaces (the compact island, a Lock Screen
-/// row), and every timer uses monospaced digits so a countdown doesn't shuffle sideways as it
-/// ticks. `Text(timerInterval:countsDown:)` picks up the font like any other `Text`.
+/// Text uses the system's text styles and their own weights, so it scales with the reader's text
+/// size and sits right beside system controls. A view that needs more weight adds
+/// `.fontWeight(_:)` rather than a new style. No SF Rounded: the one exception is a member's
+/// monogram, which follows Contacts and sets its own font.
+///
+/// Every countdown has monospaced digits, so it doesn't shuffle sideways as it ticks.
+/// `Text(timerInterval:countsDown:)` picks the font up like any other `Text`. Timers in the Live
+/// Activity scale from a text style too; only the big ones (in-app and StandBy) are fixed sizes,
+/// because they're already as large as the space allows.
+///
+/// The fonts leave the design unset, so the environment chooses it: nothing above them should set
+/// `.fontDesign(.rounded)`.
 public enum LKTypeStyle: String, CaseIterable, Sendable, Identifiable {
-    /// Screen titles and the first-run pitch.
-    case display
-    /// Section-sized titles: a sheet, a card that leads a screen.
-    case title
-    /// Names, row titles and button labels.
+    // MARK: Text
+
+    /// The first-run pitch. Screen titles come from the navigation bar, not this.
+    case largeTitle
+    /// A sheet's title, or the card that leads a screen.
+    case title2
+    /// Names and row titles.
     case headline
     /// Reading text.
     case body
     /// Supporting lines under a title.
     case subheadline
-    /// Small print: timestamps, counts, pills.
+    /// Small print: explanations under a control, notes at the bottom of a section.
+    case footnote
+    /// Timestamps and counts.
     case caption
-    /// Section headers, in spaced capitals.
-    case label
-    /// The countdown on the in-app session screen.
-    case timerHero
-    /// Your own countdown on the Lock Screen and in StandBy.
-    case timerLarge
-    /// Squadmates' countdowns in the expanded island and on the Lock Screen row.
-    case timer
-    /// The countdown in the compact island, next to the camera.
-    case timerCompact
+
+    // MARK: Timers
+
+    /// The countdown on the in-app session screen, light and large like Clock's timer.
+    case timerApp
+    /// Your own countdown on the Lock Screen and in the Apple Watch Smart Stack.
+    case timerLockScreen
+    /// Your countdown in the Dynamic Island, compact and expanded.
+    case timerIsland
+    /// Squadmates' countdowns under their monograms: the Lock Screen row, the island's chips.
+    case timerSquadmate
+    /// The hero in StandBy, solo and under an hour.
+    case timerStandBy
+    /// StandBy when the hero won't fit: beside the squad's name, or with an hours digit.
+    case timerStandBySmall
 
     public var id: String { rawValue }
 
-    /// The name shown in the design lab.
-    public var name: String { rawValue }
-
-    /// The size in points (at the default text size for styles that scale).
-    public var pointSize: CGFloat {
+    /// The name shown on the tokens page.
+    public var name: String {
         switch self {
-        case .display: 34
-        case .title: 22
-        case .headline: 17
-        case .body: 17
-        case .subheadline: 15
-        case .caption: 12
-        case .label: 13
-        case .timerHero: 72
-        case .timerLarge: 40
-        case .timer: 20
-        case .timerCompact: 15
-        }
-    }
-
-    public var weight: Font.Weight {
-        switch self {
-        case .display, .title: .bold
-        case .headline, .label: .semibold
-        case .body, .subheadline: .regular
-        case .caption: .medium
-        case .timerHero, .timerLarge, .timer, .timerCompact: .semibold
+        case .largeTitle: "Large Title"
+        case .title2: "Title 2"
+        case .headline: "Headline"
+        case .body: "Body"
+        case .subheadline: "Subheadline"
+        case .footnote: "Footnote"
+        case .caption: "Caption"
+        case .timerApp: "Timer, in the app"
+        case .timerLockScreen: "Timer, Lock Screen"
+        case .timerIsland: "Timer, Dynamic Island"
+        case .timerSquadmate: "Timer, squadmate"
+        case .timerStandBy: "Timer, StandBy"
+        case .timerStandBySmall: "Timer, StandBy small"
         }
     }
 
     /// The Dynamic Type style it scales with, or nil for a fixed size.
     public var textStyle: Font.TextStyle? {
         switch self {
-        case .display: return .largeTitle
-        case .title: return .title2
-        case .headline: return .headline
-        case .body: return .body
-        case .subheadline: return .subheadline
-        case .caption: return .caption
-        case .label: return .footnote
-        case .timerHero, .timerLarge, .timer, .timerCompact: return nil
+        case .largeTitle: .largeTitle
+        case .title2, .timerLockScreen: .title2
+        case .headline: .headline
+        case .body, .timerIsland: .body
+        case .subheadline, .timerSquadmate: .subheadline
+        case .footnote: .footnote
+        case .caption: .caption
+        case .timerApp, .timerStandBy, .timerStandBySmall: nil
+        }
+    }
+
+    /// The size in points: at the default text size (Large) for styles that scale. The Live
+    /// Activity reserves countdown widths from it (`Countdown.reservedWidth(fontSize:)`).
+    public var pointSize: CGFloat {
+        switch self {
+        case .largeTitle: 34
+        case .title2, .timerLockScreen: 22
+        case .headline, .body, .timerIsland: 17
+        case .subheadline, .timerSquadmate: 15
+        case .footnote: 13
+        case .caption: 12
+        case .timerApp: 76
+        case .timerStandBy: 72
+        case .timerStandBySmall: 40
+        }
+    }
+
+    /// A weight on top of the style's own, or nil to keep it (Headline is already semibold).
+    /// Only timers add one.
+    public var weight: Font.Weight? {
+        switch self {
+        case .timerApp: .light
+        case .timerLockScreen, .timerIsland, .timerSquadmate, .timerStandBy, .timerStandBySmall: .semibold
+        default: nil
         }
     }
 
@@ -80,53 +112,60 @@ public enum LKTypeStyle: String, CaseIterable, Sendable, Identifiable {
 
     public var isTimer: Bool {
         switch self {
-        case .timerHero, .timerLarge, .timer, .timerCompact: true
+        case .timerApp, .timerLockScreen, .timerIsland, .timerSquadmate, .timerStandBy, .timerStandBySmall: true
         default: false
         }
     }
 
-    /// Every digit the same width. Timers need it; so would any column of numbers.
+    /// Every digit the same width. Timers need it; so would any column of numbers, which can add
+    /// `.monospacedDigit()` to any style.
     public var hasMonospacedDigits: Bool { isTimer }
 
-    /// Letter spacing in points: loosened for the capitals, tightened a touch for the big title.
-    public var tracking: CGFloat {
-        switch self {
-        case .label: 0.8
-        case .display: -0.4
-        default: 0
+    public var font: Font {
+        let base: Font
+        if let textStyle {
+            // A nil weight keeps the style's own.
+            base = .system(textStyle, weight: weight)
+        } else {
+            let fixedWeight: Font.Weight = weight ?? .regular
+            base = .system(size: pointSize, weight: fixedWeight)
         }
+        return hasMonospacedDigits ? base.monospacedDigit() : base
     }
 
-    public var isUppercase: Bool { self == .label }
-
-    /// Where it's used, shown in the design lab.
+    /// Where it's used, shown on the tokens page.
     public var usage: String {
         switch self {
-        case .display: "Screen titles and the first-run pitch."
-        case .title: "Sheet titles and the card that leads a screen."
-        case .headline: "Names, row titles, button labels."
+        case .largeTitle: "The first-run pitch. Screen titles come from the navigation bar."
+        case .title2: "Sheet titles and the card that leads a screen."
+        case .headline: "Names and row titles."
         case .body: "Reading text."
         case .subheadline: "Supporting lines under a title."
-        case .caption: "Timestamps, counts, pills."
-        case .label: "Section headers, in spaced capitals (use lkType(.label))."
-        case .timerHero: "The countdown on the in-app session screen."
-        case .timerLarge: "Your own countdown on the Lock Screen and in StandBy."
-        case .timerCompact: "The countdown in the compact island."
-        case .timer: "Squadmates' countdowns in the expanded island and Lock Screen rows."
+        case .footnote: "Notes under a control or at the foot of a section."
+        case .caption: "Timestamps and counts."
+        case .timerApp: "The countdown on the in-app session screen."
+        case .timerLockScreen: "Your countdown on the Lock Screen and the Watch's Smart Stack."
+        case .timerIsland: "Your countdown in the Dynamic Island."
+        case .timerSquadmate: "Squadmates' countdowns under their monograms."
+        case .timerStandBy: "The StandBy hero, solo and under an hour."
+        case .timerStandBySmall: "StandBy beside the squad's name, or with an hours digit."
         }
     }
 
-    /// Something to set in the style in the design lab.
+    /// Something to set in the style on the tokens page.
     public var sample: String {
         isTimer ? "1:24:59" : "Lock in with your friends"
     }
 
-    /// "34 pt bold, scales from Large Title" or "15 pt semibold, fixed, monospaced digits".
+    /// "Large Title, 34 pt by default", "Title 2 semibold, 22 pt by default, monospaced digits"
+    /// or "72 pt semibold, fixed, monospaced digits".
     public var summary: String {
-        var parts = ["\(Int(pointSize)) pt \(weightName)"]
+        var parts: [String] = []
         if let textStyle {
-            parts.append("scales from \(Self.name(of: textStyle))")
+            parts.append([Self.styleName(textStyle), weight.map(Self.weightName)].compactMap { $0 }.joined(separator: " "))
+            parts.append("\(Int(pointSize)) pt by default")
         } else {
+            parts.append("\(Int(pointSize)) pt \(Self.weightName(weight ?? .regular))")
             parts.append("fixed")
         }
         if hasMonospacedDigits {
@@ -135,61 +174,53 @@ public enum LKTypeStyle: String, CaseIterable, Sendable, Identifiable {
         return parts.joined(separator: ", ")
     }
 
-    private var weightName: String {
-        if weight == .bold { return "bold" }
-        if weight == .semibold { return "semibold" }
-        if weight == .medium { return "medium" }
-        return "regular"
+    private static func weightName(_ weight: Font.Weight) -> String {
+        switch weight {
+        case .ultraLight: "ultralight"
+        case .thin: "thin"
+        case .light: "light"
+        case .medium: "medium"
+        case .semibold: "semibold"
+        case .bold: "bold"
+        case .heavy: "heavy"
+        case .black: "black"
+        default: "regular"
+        }
     }
 
-    private static func name(of textStyle: Font.TextStyle) -> String {
+    private static func styleName(_ textStyle: Font.TextStyle) -> String {
         switch textStyle {
-        case .largeTitle: return "Large Title"
-        case .title: return "Title"
-        case .title2: return "Title 2"
-        case .title3: return "Title 3"
-        case .headline: return "Headline"
-        case .subheadline: return "Subheadline"
-        case .body: return "Body"
-        case .callout: return "Callout"
-        case .footnote: return "Footnote"
-        case .caption: return "Caption"
-        case .caption2: return "Caption 2"
-        default: return "a text style"
+        case .largeTitle: "Large Title"
+        case .title: "Title"
+        case .title2: "Title 2"
+        case .title3: "Title 3"
+        case .headline: "Headline"
+        case .subheadline: "Subheadline"
+        case .body: "Body"
+        case .callout: "Callout"
+        case .footnote: "Footnote"
+        case .caption: "Caption"
+        case .caption2: "Caption 2"
+        default: "a text style"
         }
-    }
-
-    public var font: Font {
-        let base: Font
-        if let textStyle {
-            base = .system(textStyle, design: .rounded, weight: weight)
-        } else {
-            base = .system(size: pointSize, weight: weight, design: .rounded)
-        }
-        return hasMonospacedDigits ? base.monospacedDigit() : base
     }
 }
 
-/// The type styles as fonts. For the label style's tracking and caps, use `lkType(.label)`.
+/// The type styles as fonts: `.font(LKFont.headline)`. The text ones are the system's own text
+/// styles under Lockin's names, so `.font(.headline)` is the same thing.
 public enum LKFont {
-    public static let display = LKTypeStyle.display.font
-    public static let title = LKTypeStyle.title.font
+    public static let largeTitle = LKTypeStyle.largeTitle.font
+    public static let title2 = LKTypeStyle.title2.font
     public static let headline = LKTypeStyle.headline.font
     public static let body = LKTypeStyle.body.font
     public static let subheadline = LKTypeStyle.subheadline.font
+    public static let footnote = LKTypeStyle.footnote.font
     public static let caption = LKTypeStyle.caption.font
-    public static let label = LKTypeStyle.label.font
-    public static let timerHero = LKTypeStyle.timerHero.font
-    public static let timerLarge = LKTypeStyle.timerLarge.font
-    public static let timer = LKTypeStyle.timer.font
-    public static let timerCompact = LKTypeStyle.timerCompact.font
-}
 
-extension View {
-    /// Sets text in one of the type styles, with its tracking and case.
-    public func lkType(_ style: LKTypeStyle) -> some View {
-        font(style.font)
-            .tracking(style.tracking)
-            .textCase(style.isUppercase ? .uppercase : nil)
-    }
+    public static let timerApp = LKTypeStyle.timerApp.font
+    public static let timerLockScreen = LKTypeStyle.timerLockScreen.font
+    public static let timerIsland = LKTypeStyle.timerIsland.font
+    public static let timerSquadmate = LKTypeStyle.timerSquadmate.font
+    public static let timerStandBy = LKTypeStyle.timerStandBy.font
+    public static let timerStandBySmall = LKTypeStyle.timerStandBySmall.font
 }

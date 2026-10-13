@@ -8,6 +8,9 @@ import UIKit
 
 /// The M0 spike's phone end (docs/spikes/apns-worker.md): starts a squad Live Activity named
 /// "Spike Squad" that takes push updates, and copies what the Push test workflow needs to reach it.
+///
+/// A form, like a page of Settings: the status as label and value, the actions as the system's
+/// buttons, and the steps in their own section.
 struct APNsSpikeScreen: View {
     @StateObject private var model: APNsSpikeModel
     @Environment(\.scenePhase) private var scenePhase
@@ -24,37 +27,25 @@ struct APNsSpikeScreen: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: LKSpacing.xl) {
-                Text("Start a Live Activity here, then send it an update from the deployed Worker. If it changes on the Lock Screen, APNs works from Cloudflare.")
-                    .font(LKFont.subheadline)
-                    .foregroundStyle(LKColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                status
-
-                if !model.activitiesEnabled {
-                    turnedOff
-                }
-
-                if let problem = model.problem {
-                    Label(problem, systemImage: "exclamationmark.triangle.fill")
-                        .font(LKFont.subheadline)
-                        .foregroundStyle(LKColor.textPrimary)
-                        .symbolRenderingMode(.multicolor)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .lkCard()
-                }
-
-                actions
-
-                instructions
+        Form {
+            if !model.activitiesEnabled {
+                turnedOff
             }
-            .padding(.horizontal, LKSpacing.gutter)
-            .padding(.top, LKSpacing.l)
-            .padding(.bottom, LKSpacing.xxxl)
+
+            if let problem = model.problem {
+                Section {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill")
+                        .symbolRenderingMode(.multicolor)
+                }
+            }
+
+            status
+
+            actions
+
+            instructions
         }
-        .lkScreenBackground()
+        .formStyle(.grouped)
         .navigationTitle("APNs spike")
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -78,22 +69,33 @@ struct APNsSpikeScreen: View {
     // MARK: - Status
 
     private var status: some View {
-        VStack(alignment: .leading, spacing: LKSpacing.m) {
-            StatusRow(label: "Live Activities", value: model.activitiesEnabled ? "On" : "Off")
-            StatusRow(label: "APNs environment", value: BuildInfo.describe(model.environment))
-            StatusRow(label: "Session", value: model.session?.sid ?? "none yet")
+        Section {
+            LabeledContent("Live Activities", value: model.activitiesEnabled ? "On" : "Off")
+            LabeledContent {
+                Text(model.environment.environment.rawValue)
+            } label: {
+                // A second Text in the label is the row's subtitle.
+                Text("APNs environment")
+                Text(BuildInfo.source(of: model.environment))
+            }
+            LabeledContent("Session", value: model.session?.sid ?? "None yet")
             VStack(alignment: .leading, spacing: LKSpacing.xs) {
                 Text("Push token")
-                    .font(LKFont.subheadline)
-                    .foregroundStyle(LKColor.textSecondary)
+                // Selectable: a long press copies the whole token, even where the lines cut it
+                // short, because selection takes the string rather than what fits on screen.
                 Text(tokenText)
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundStyle(model.token == nil ? LKColor.textTertiary : LKColor.textPrimary)
+                    .font(LKFont.footnote.monospaced())
+                    .foregroundStyle(model.token == nil ? LKColor.textTertiary : LKColor.textSecondary)
+                    .lineLimit(3)
+                    .truncationMode(.middle)
                     .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.vertical, LKSpacing.xxs)
+        } header: {
+            Text("Status")
+        } footer: {
+            Text("Start a Live Activity here, then send it an update from the deployed Worker. If it changes on the Lock Screen, APNs works from Cloudflare.")
         }
-        .lkCard()
     }
 
     private var tokenText: String {
@@ -101,70 +103,84 @@ struct APNsSpikeScreen: View {
         return model.session == nil ? "Start an activity to get one." : "Waiting for the system to issue it…"
     }
 
+    /// The system's prompt, more or less: what's off, why it matters, and the way to Settings.
     private var turnedOff: some View {
-        VStack(alignment: .leading, spacing: LKSpacing.m) {
-            Label("Live Activities are off for Lockin", systemImage: "exclamationmark.circle.fill")
-                .font(LKFont.headline)
-                .foregroundStyle(LKColor.textPrimary)
-            Text("Turn them on in Settings › Lockin › Live Activities, then come back. Nothing can show in the Dynamic Island until then.")
-                .font(LKFont.subheadline)
-                .foregroundStyle(LKColor.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+        Section {
+            Label {
+                VStack(alignment: .leading, spacing: LKSpacing.xxs) {
+                    Text("Live Activities are off for Lockin")
+                        .font(LKFont.headline)
+                    Text("Turn them on in Settings › Lockin › Live Activities, then come back. Nothing can show in the Dynamic Island until then.")
+                        .font(LKFont.subheadline)
+                        .foregroundStyle(LKColor.textSecondary)
+                }
+            } icon: {
+                LKIconTile(systemName: "exclamationmark", color: .orange)
+            }
             Button("Open Settings") {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
                     openURL(url)
                 }
             }
-            .buttonStyle(.lkSecondary)
         }
-        .lkCard()
     }
 
     // MARK: - Actions
 
+    /// The system's buttons, full width on the grouped background rather than inside rows: each
+    /// gets a row of its own, so a tap on one can't reach another, and the row draws nothing.
     @ViewBuilder
     private var actions: some View {
-        if model.session == nil {
-            Button {
-                model.start()
-            } label: {
-                Label("Start a 25-minute activity", systemImage: "play.fill")
-            }
-            .buttonStyle(.lkPrimary)
-            .disabled(!model.activitiesEnabled || model.isBusy)
-        } else {
-            VStack(spacing: LKSpacing.m) {
+        Section {
+            if model.session == nil {
+                Button {
+                    model.start()
+                } label: {
+                    Label("Start a 25-minute activity", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .lkProminentButton()
+                .disabled(!model.activitiesEnabled || model.isBusy)
+                .actionRow()
+            } else {
                 if let blob = model.blob {
                     let copied = model.copiedBlob == blob
                     Button {
                         model.copy(blob)
                     } label: {
                         Label(copied ? Self.copiedTitle : Self.copyTitle, systemImage: copied ? "checkmark" : "doc.on.doc")
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.lkPrimary)
+                    .lkProminentButton()
+                    .actionRow()
                     ShareLink(item: blob) {
                         Label("Share", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.lkSecondary)
+                    .lkSecondaryButton()
+                    .actionRow()
                 } else {
                     HStack(spacing: LKSpacing.s) {
                         ProgressView()
                         Text("Waiting for the push token")
-                            .font(LKFont.subheadline)
                             .foregroundStyle(LKColor.textSecondary)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, LKSpacing.s)
+                    .actionRow()
                 }
-                Button {
+                Button(role: .destructive) {
                     Task { await model.end() }
                 } label: {
                     Label("End the activity", systemImage: "stop.fill")
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.lkSecondary)
+                .lkSecondaryButton()
                 .disabled(model.isBusy)
+                .actionRow()
             }
         }
+        // A screen's main call to action is large; the others match it so they line up.
+        .controlSize(.large)
     }
 
     private static let copyTitle = "Copy for the Push test"
@@ -173,54 +189,44 @@ struct APNsSpikeScreen: View {
     // MARK: - Instructions
 
     private var instructions: some View {
-        VStack(alignment: .leading, spacing: LKSpacing.m) {
-            LKSectionHeader("How to run it")
+        Section {
             Step(number: 1, text: "Tap Start: it starts the squad \"\(APNsSpikeModel.squadName)\", with just you in it. Wait for the push token, then tap Copy. It copies {\"env\", \"me\", \"sid\", \"token\"} as one line of JSON.")
             Step(number: 2, text: "In the GitHub app, open this repository › Actions › Push test › Run workflow. Paste into the first box (\"Paste what the APNs spike screen copies…\"), pick a scenario and run it.")
             Step(number: 3, text: "Lock the phone and watch the Lock Screen, or stay in the GitHub app and watch the Dynamic Island.")
+        } header: {
+            Text("How to run it")
+        } footer: {
             Text("TestFlight builds must say production. If iOS closes Lockin in the background, opening it again ends the old activity: start a new one and copy again. After the end scenario, start a new one too.")
-                .font(LKFont.caption)
-                .foregroundStyle(LKColor.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
 
-private struct StatusRow: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: LKSpacing.m) {
-            Text(label)
-                .font(LKFont.subheadline)
-                .foregroundStyle(LKColor.textSecondary)
-            Spacer(minLength: LKSpacing.s)
-            Text(value)
-                .font(LKFont.subheadline.weight(.semibold))
-                .foregroundStyle(LKColor.textPrimary)
-                .multilineTextAlignment(.trailing)
-        }
-        .accessibilityElement(children: .combine)
-    }
-}
-
+/// One numbered step: the number in a tinted circle, like the steps in Apple's own setup screens.
 private struct Step: View {
     let number: Int
     let text: String
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: LKSpacing.m) {
-            Text(verbatim: "\(number)")
-                .font(LKFont.headline.monospacedDigit())
-                .foregroundStyle(LKColor.accentText)
-                .frame(width: 18, alignment: .leading)
+            Image(systemName: "\(number).circle.fill")
+                .foregroundStyle(.tint)
+                .imageScale(.large)
+                .accessibilityHidden(true)
             Text(text)
-                .font(LKFont.subheadline)
-                .foregroundStyle(LKColor.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(.vertical, LKSpacing.xxs)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("Step \(number). \(text)")
+    }
+}
+
+private extension View {
+    /// A form row that's only a button: no inset, no background, no separator, so the button
+    /// sits on the grouped background like the ones at the foot of Apple's setup screens.
+    func actionRow() -> some View {
+        listRowInsets(EdgeInsets(top: LKSpacing.xs, leading: 0, bottom: LKSpacing.xs, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
     }
 }
 

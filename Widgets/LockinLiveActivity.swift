@@ -13,11 +13,12 @@ struct LockinLiveActivity: Widget {
         ActivityConfiguration(for: LockinAttributes.self) { context in
             // Lock Screen, the banner on iPhones without the island, StandBy, and the Watch's
             // Smart Stack (the view reads the activity family and fullscreen state itself).
+            //
+            // No activityBackgroundTint and no activitySystemActionForegroundColor: the system's
+            // default background and button colours follow the phone's appearance and sit on the
+            // wallpaper like Apple's own activities (design/SYSTEM.md). The view's text uses
+            // hierarchical styles, so it stays vibrant on that background.
             LockScreenView(attributes: context.attributes, state: context.state)
-                .activityBackgroundTint(LKColor.liveActivityBackground)
-                // The system's own buttons on the activity, readable on the night background
-                // whatever the Lock Screen's appearance.
-                .activitySystemActionForegroundColor(Self.ink)
                 .widgetURL(Self.sessionURL(context.attributes.sid))
         } dynamicIsland: { context in
             DynamicIsland {
@@ -40,18 +41,14 @@ struct LockinLiveActivity: Widget {
             } minimal: {
                 MinimalView(attributes: context.attributes, state: context.state)
             }
-            .keylineTint(Self.keyline)
+            // The tint. The island is always dark, and the system colour resolves to its dark
+            // variant there by itself.
+            .keylineTint(LKColor.tint)
             .widgetURL(Self.sessionURL(context.attributes.sid))
         }
         // The Apple Watch Smart Stack: LockScreenView draws its small layout there.
         .supplementalActivityFamilies([.small])
     }
-
-    // The activity is always drawn in the night appearance (`lkNightAppearance()`), so the
-    // system-applied colours use the tokens' dark values rather than following the Lock Screen's
-    // appearance.
-    private static let ink = Color(rgb: LKPalette.textPrimary.dark)
-    private static let keyline = Color(rgb: LKPalette.accent.dark)
 
     /// `lockin://session/<sid>`: opens the app on the session. The app reads it with `DeepLink`
     /// in `App/Sources/AppRoute.swift`; change both together.

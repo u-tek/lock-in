@@ -1,78 +1,33 @@
 import SwiftUI
 
+// Most content belongs in a `List` or `Form`, which draw their own grouped rows. These are for
+// the few things that can't be a list row, such as the Home screen's Live Activity preview.
+// Neither draws a border or a shadow: the system's cards don't (design/SYSTEM.md).
+
 extension View {
-    /// A card: this view, padded, on a surface with a hairline edge, filling the width offered.
-    public func lkCard(padding: CGFloat = LKSpacing.cardPadding, radius: CGFloat = LKRadius.card) -> some View {
-        modifier(LKCardModifier(padding: padding, radius: radius))
+    /// A card on the grouped background: this view, padded, filling the width offered, on
+    /// `secondarySystemGroupedBackground` in a continuous 26-point rectangle. Put the screen on
+    /// `LKColor.groupedBackground` so it reads like a list section beside real ones.
+    public func lkCard(padding: CGFloat = LKSpacing.cardPadding) -> some View {
+        modifier(LKCardModifier(padding: padding, fill: LKColor.secondaryGroupedBackground))
     }
 
-    /// The screen's background, under the safe areas too.
-    public func lkScreenBackground() -> some View {
-        background {
-            LKColor.background.ignoresSafeArea()
-        }
-    }
-
-    /// Glass behind this view, in `shape`: Liquid Glass on iOS 26 and later, a frosted material
-    /// with a hairline edge before that. For floating controls over content (a bar over a
-    /// scrolling list), not for cards, and not in the Live Activity, where the system draws its
-    /// own background.
-    public func lkGlass<S: InsettableShape>(in shape: S, tint: Color? = nil) -> some View {
-        modifier(LKGlassModifier(shape: shape, tint: tint))
-    }
-
-    /// Renders this view in the dark appearance, whatever the system's. The Live Activity (and
-    /// the lab's previews of it) use this: on the Lock Screen and in StandBy it's a little night
-    /// window in both appearances, on `LKColor.liveActivityBackground`, and every token resolves
-    /// to the dark value that DesignSystemTests checks against that background.
-    public func lkNightAppearance() -> some View {
-        environment(\.colorScheme, .dark)
+    /// The same card on `.regularMaterial`, for something floating over other content (a bar over
+    /// a scrolling list, a panel over an image), where the content behind should show through.
+    /// Toolbars and the glass button styles already bring Liquid Glass; don't build it by hand.
+    public func lkMaterialCard(padding: CGFloat = LKSpacing.cardPadding) -> some View {
+        modifier(LKCardModifier(padding: padding, fill: Material.regular))
     }
 }
 
-struct LKCardModifier: ViewModifier {
+struct LKCardModifier<Fill: ShapeStyle>: ViewModifier {
     let padding: CGFloat
-    let radius: CGFloat
+    let fill: Fill
 
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        return content
+        content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(LKColor.surface, in: shape)
-            .overlay {
-                shape.strokeBorder(LKColor.separator, lineWidth: 1)
-            }
-    }
-}
-
-struct LKGlassModifier<S: InsettableShape>: ViewModifier {
-    let shape: S
-    let tint: Color?
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(liquidGlass, in: shape)
-        } else {
-            content
-                .background {
-                    ZStack {
-                        shape.fill(.regularMaterial)
-                        if let tint {
-                            shape.fill(tint.opacity(LKColor.tintedFillOpacity))
-                        }
-                    }
-                }
-                .overlay {
-                    shape.strokeBorder(LKColor.separator, lineWidth: 1)
-                }
-        }
-    }
-
-    @available(iOS 26.0, *)
-    private var liquidGlass: Glass {
-        guard let tint else { return .regular }
-        return .regular.tint(tint)
+            .background(fill, in: RoundedRectangle(cornerRadius: LKRadius.card, style: .continuous))
     }
 }

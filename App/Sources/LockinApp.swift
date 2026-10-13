@@ -23,9 +23,11 @@ struct LockinApp: App {
                         }
                 }
             }
-            // Every screen speaks SF Rounded, system controls included (DesignSystem's type).
-            .fontDesign(.rounded)
-            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            // The one brand colour, set once (design/SYSTEM.md): every control, link and toggle
+            // below picks it up. The asset catalogue's AccentColor matches it for anything the
+            // system draws before SwiftUI does. No font design and no colour scheme here: text is
+            // SF Pro, and every screen follows the phone's light or dark appearance.
+            .tint(LKColor.tint)
         }
     }
 }

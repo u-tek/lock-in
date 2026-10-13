@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// How each member state looks: a colour, a symbol and a word.
+/// How each member state looks: a system colour, a symbol and a word (design/SYSTEM.md).
 ///
 /// Colour is never the only cue. Every state also has its own symbol (and from M1 its own
 /// creature pose), so a squadmate who can't tell two colours apart can still tell the states
-/// apart. The colours themselves are chosen to stay apart under the common colour-vision
-/// deficiencies; DesignSystemTests checks that.
+/// apart. The system colours aren't ours to tune for colour-vision deficiencies, which is one
+/// more reason the symbol has to carry the meaning on its own.
 ///
 /// Raw values are the wire values of `Member.s` (SPEC.md §4.3) and of Model's `MemberState`, so
 /// `LKMemberTone(rawValue: state.rawValue)` maps straight across. DesignSystem doesn't import
@@ -20,17 +20,20 @@ public enum LKMemberTone: Int, CaseIterable, Sendable, Identifiable {
 
     public var id: Int { rawValue }
 
+    /// The catalogue entry behind `color`, for the tokens page and the tests.
     public var token: LKColorToken {
         switch self {
-        case .focusing: LKPalette.focusing
-        case .onBreak: LKPalette.onBreak
-        case .paused: LKPalette.paused
-        case .done: LKPalette.done
-        case .left: LKPalette.left
-        case .slipped: LKPalette.slipped
+        case .focusing: LKColorCatalogue.focusing
+        case .onBreak: LKColorCatalogue.onBreak
+        case .paused: LKColorCatalogue.paused
+        case .done: LKColorCatalogue.done
+        case .left: LKColorCatalogue.left
+        case .slipped: LKColorCatalogue.slipped
         }
     }
 
+    /// Indigo, teal, orange, green, grey or pink. The Dynamic Island is always dark, and these
+    /// resolve to their dark variants there by themselves.
     public var color: Color {
         switch self {
         case .focusing: LKColor.focusing
@@ -54,8 +57,8 @@ public enum LKMemberTone: Int, CaseIterable, Sendable, Identifiable {
         }
     }
 
-    /// The state in a word or two, for pills and VoiceOver. English only until the app has a
-    /// string catalogue.
+    /// The state in a word or two, for status lines and VoiceOver. English only until the app
+    /// has a string catalogue.
     public var title: String {
         switch self {
         case .focusing: "Focusing"

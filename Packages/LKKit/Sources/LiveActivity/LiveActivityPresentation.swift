@@ -113,12 +113,12 @@ public struct LiveActivityPresentation: Hashable, Sendable {
 // MARK: - Member
 
 extension LiveActivityPresentation {
-    /// One squad member as drawn: a badge, a name and a countdown.
+    /// One squad member as drawn: a monogram, a name and a countdown.
     public struct Member: Hashable, Sendable, Identifiable {
         public let id: String
         /// The display name held to the wire limit, or "Someone" when the server sent none.
         public let name: String
-        /// What the badge shows until creatures arrive (M1): the name's first character.
+        /// What the monogram shows until creatures arrive (M1): the name's first character.
         public let initial: String
         /// A state from a newer server reads as `.focusing` (see `Member.state` in Model).
         public let state: MemberState

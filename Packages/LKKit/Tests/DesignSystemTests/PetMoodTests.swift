@@ -1,54 +1,50 @@
 import SwiftUI
 import Testing
+import UIKit
 @testable import DesignSystem
 
 @Suite struct PetMoodTests {
     @Test func moodsAreHeldToTheirRange() {
-        #expect(LKPalette.petMoods.count == 4)
-        #expect(LKPalette.petMood(-1) == LKPalette.petMood0)
-        #expect(LKPalette.petMood(0) == LKPalette.petMood0)
-        #expect(LKPalette.petMood(2) == LKPalette.petMood2)
-        #expect(LKPalette.petMood(3) == LKPalette.petMood3)
-        #expect(LKPalette.petMood(7) == LKPalette.petMood3)
+        #expect(LKColorCatalogue.petMoods.count == 4)
+        #expect(LKColorCatalogue.petMood(-1) == LKColorCatalogue.petMood0)
+        #expect(LKColorCatalogue.petMood(0) == LKColorCatalogue.petMood0)
+        #expect(LKColorCatalogue.petMood(1) == LKColorCatalogue.petMood1)
+        #expect(LKColorCatalogue.petMood(2) == LKColorCatalogue.petMood2)
+        #expect(LKColorCatalogue.petMood(3) == LKColorCatalogue.petMood3)
+        #expect(LKColorCatalogue.petMood(7) == LKColorCatalogue.petMood3)
+        #expect(LKColorCatalogue.petMood(.min) == LKColorCatalogue.petMood0)
+        #expect(LKColorCatalogue.petMood(.max) == LKColorCatalogue.petMood3)
+
+        // The colours views draw clamp the same way. Each is one stored `Color`, so equal here
+        // means the very same one.
+        #expect(LKColor.petMood(-1) == LKColor.petMood0)
+        #expect(LKColor.petMood(1) == LKColor.petMood1)
+        #expect(LKColor.petMood(2) == LKColor.petMood2)
+        #expect(LKColor.petMood(7) == LKColor.petMood3)
     }
 
-    @Test func moodsAreDistinguishable() {
-        // A softer bar than the member states: the pet is one creature at a time, so moods are
-        // rarely seen side by side.
-        for scheme in appearances {
-            for vision in LKColorVision.allCases {
-                let minimum = vision == .typical ? 0.10 : 0.06
-                for (a, b) in pairs(LKPalette.petMoods) {
-                    let d = perceivedDistance(a.value(in: scheme), b.value(in: scheme), for: vision)
-                    #expect(d >= minimum, "\(a.name) and \(b.name), \(scheme), \(vision.rawValue): \(d)")
-                }
+    @Test func moodsWearTheSystemColoursInTheSystemDoc() {
+        // design/SYSTEM.md: grey, orange, mint, green, from lowest to happiest.
+        let expected: [(String, UIColor)] = [
+            ("systemGray", .systemGray), ("systemOrange", .systemOrange),
+            ("systemMint", .systemMint), ("systemGreen", .systemGreen),
+        ]
+        for (mood, (name, system)) in zip(LKColorCatalogue.petMoods, expected) {
+            #expect(mood.uiKitName == name, "\(mood.name)")
+            for scheme in appearances {
+                #expect(distance(mood.resolved(in: scheme), resolve(system, in: scheme)) < 0.001, "\(mood.name), \(scheme)")
             }
         }
     }
 
-    @Test func moodsAreVisible() {
-        // Mood colours draw shapes (the pet, its ring), not text, so 3:1 is the bar.
+    @Test func moodsAreDistinct() {
+        // The pet is one creature at a time, so moods are rarely side by side, but a mood
+        // change still has to show. The closest system pair here is about 0.4 apart.
         for scheme in appearances {
-            for mood in LKPalette.petMoods {
-                for background in [LKPalette.background, LKPalette.surface] {
-                    let ratio = mood.contrastRatio(on: background, in: scheme)
-                    #expect(ratio >= 3, "\(mood.name) on \(background.name), \(scheme): \(ratio)")
-                }
+            for (a, b) in pairs(LKColorCatalogue.petMoods) {
+                let d = distance(a.resolved(in: scheme), b.resolved(in: scheme))
+                #expect(d > 0.15, "\(a.name) and \(b.name), \(scheme): \(d)")
             }
-        }
-        for mood in LKPalette.petMoods {
-            for background in [LKPalette.liveActivityBackground, LKPalette.islandBackground] {
-                let ratio = mood.contrastRatio(on: background, in: .dark)
-                #expect(ratio >= 3, "\(mood.name) on \(background.name): \(ratio)")
-            }
-        }
-    }
-
-    @Test func moodsBrightenAsTheyImprove() {
-        // Lightness alone orders the ramp, so it reads without hue.
-        for scheme in appearances {
-            let lightness = LKPalette.petMoods.map { OKLab($0.value(in: scheme)).l }
-            #expect(lightness == lightness.sorted(), "\(scheme): \(lightness)")
         }
     }
 }
