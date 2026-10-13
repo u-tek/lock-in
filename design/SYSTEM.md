@@ -68,7 +68,15 @@ large `.system(size:weight: .semibold)` hero in StandBy, `.body.weight(.semibold
   `activityBackgroundTint`), so it sits on the wallpaper like Apple's own activities; StandBy
   stays full-bleed black. The Dynamic Island is always dark, and system colours resolve to their
   dark variants there by themselves.
-- Text uses hierarchical styles (`.primary`, `.secondary`) so it stays vibrant on the Lock Screen.
+- Text uses hierarchical styles (`.primary`, `.secondary`) so it stays vibrant on the Lock Screen,
+  at medium weight or heavier (the HIG's rule for Live Activities): the small styles add
+  `.weight(.medium)`.
+- Your own countdown takes your state colour only in the dark appearance (island, StandBy,
+  Always-On, a dark Lock Screen). On a light Lock Screen it's `.primary`; the monogram and the
+  progress bar carry the colour, because tinted text on white is hard to read.
+- Lock Screen side margins are 14 pt, Apple's value: the one exception to the 4 pt grid.
+- Dynamic Type is capped per presentation so nothing passes 160 pt: up to xLarge on the Lock
+  Screen, Large in the island, StandBy and the Smart Stack.
 - Member monograms: a circle filled with the state colour's gradient (`color.gradient`) and a
   white initial, with a small status badge carrying the state symbol, like Contacts and Find My.
 - Keyline tint is the tint colour. No custom animation (the system ignores it); content
