@@ -102,6 +102,20 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | xcbeautify --renderer github-actions
 
+      # Lockin is iPhone only. XcodeGen's iOS preset adds iPad ("1,2") to every target unless the
+      # target overrides it (project.yml), so check what actually got built.
+      - name: Check the build is iPhone only
+        run: |
+          products=build/DerivedData/Build/Products/Debug-iphonesimulator
+          for plist in "$products/Lockin.app/Info.plist" "$products/Lockin.app/PlugIns/LockinWidgets.appex/Info.plist"; do
+            family=$(plutil -extract UIDeviceFamily json -o - "$plist")
+            echo "$(basename "$(dirname "$plist")"): UIDeviceFamily $family"
+            if [[ "$family" != "[1]" ]]; then
+              echo "::error file=project.yml::$(basename "$(dirname "$plist")") is built for UIDeviceFamily $family; expected [1] (iPhone only)"
+              exit 1
+            fi
+          done
+
       # Drag the unzipped .app onto a booted simulator to run it (`xcrun simctl install booted Lockin.app`).
       # Live Activity pushes need a real phone: that's the TestFlight job.
       - name: Zip the simulator app
