@@ -46,8 +46,8 @@ targets:
         LSRequiresIPhoneOS: true
         # ProMotion: without this, iPhone apps are held to 60 frames a second.
         CADisableMinimumFrameDurationOnPhone: true
-        UILaunchScreen:
-          UIColorName: LaunchInk
+        # The system background, white or black with the phone's appearance, like Apple's apps.
+        UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UIApplicationSceneManifest:

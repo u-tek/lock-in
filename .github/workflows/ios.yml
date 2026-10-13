@@ -145,7 +145,7 @@ jobs:
   #   [snapshots]          every screen, iPhone 16 Pro and iPhone SE
   #   [snapshots: a,b]     only those routes and the ones under them (lab.liveactivity covers
   #                        lab.liveactivity.<part>), iPhone 16 Pro only; an unknown name fails
-  #   [light]              light mode as well as dark (with either of the above)
+  #   [light] / [dark]     only that appearance (both render by default)
   #   [testflight]         archive, sign and upload to TestFlight
   plan:
     name: Opt-ins
@@ -185,7 +185,8 @@ jobs:
               snapshots=true
               routes="${BASH_REMATCH[2]// /}"
             fi
-            if [[ "$subject" == *"[light]"* ]]; then appearances="light,dark"; fi
+            if [[ "$subject" == *"[light]"* ]]; then appearances="light"; fi
+            if [[ "$subject" == *"[dark]"* ]]; then appearances="dark"; fi
             if [[ "$subject" == *"[testflight]"* ]]; then testflight=true; fi
           fi
           {

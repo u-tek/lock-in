@@ -70,9 +70,9 @@ commit can mention one without starting it. Case doesn't matter.
 
 | Tag | Does |
 |---|---|
-| `[snapshots]` | Every route, on iPhone 16 Pro and iPhone SE (3rd generation), dark mode |
+| `[snapshots]` | Every route, on iPhone 16 Pro and iPhone SE (3rd generation), light and dark |
 | `[snapshots: home,spike]` | Only those routes and the ones under them (`lab.liveactivity` is the page and each of its parts), iPhone 16 Pro only: a quick check. A name that matches no route fails the run |
-| `[light]` | Light mode as well as dark, together with one of the above |
+| `[light]` or `[dark]` | Only that appearance, together with one of the above: a faster check |
 | `[testflight]` | Archive, sign and upload to TestFlight |
 
 A commit that changes only Markdown files doesn't run CI at all, so a tag in it does nothing. Use a
@@ -80,7 +80,7 @@ manual run instead: **Actions → iOS → Run workflow**. The GitHub app can do 
 labels each option with its description: tick *Export design snapshots and commit them to the
 branch* or *Archive a Release build and upload it to TestFlight*, or type routes into the box under
 *Only these routes, comma-separated…*; naming any route turns snapshots on. Manual snapshot runs
-render dark mode only.
+render light and dark.
 
 **Snapshots.** Routes are listed in `scripts/snapshot-routes.txt`: `home`, `developer`, `spike`,
 `lab.tokens` and `lab.liveactivity`. A lab page is taller than one screenshot, so each of its parts
@@ -125,7 +125,7 @@ use TestFlight.
 | `scripts/` | Simulator, snapshot and TestFlight helpers |
 | `.github/` | The CI workflows and the shared Xcode setup action |
 | `docs/` | `milestones/`, `spikes/`, `decisions/` and `apple-setup.md` |
-| `design/` | Exported screens and lab pages, written by CI (created by the first snapshot run) |
+| `design/` | `SYSTEM.md` (the native design rules) and the screens and lab pages CI exports |
 
 ### Modules
 

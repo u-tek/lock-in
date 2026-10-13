@@ -13,7 +13,8 @@
 #   store.<n>    App Store screenshots (M6): iPhone 16 Pro Max only, light, into
 #                design/appstore/6.9-<n>-light.png, and only when $LK_ONLY_ROUTES names them
 #   anything else  app screens on iPhone 16 Pro and iPhone SE, into design/screens/<device>/
-# $LK_APPEARANCES (comma-separated, light and/or dark) defaults to dark.
+# $LK_APPEARANCES (comma-separated, light and/or dark) defaults to both: the app follows the
+# system appearance, so every screen has to work in both.
 #
 # Renders land in build/snapshots/<phone>/; scripts/collect-snapshots.sh then lays them out under
 # design/. One launch of the app covers every screen (see UITests/SnapshotExportTests.swift).
@@ -54,9 +55,9 @@ else
 fi
 
 case "$slug" in
-  iphone-16-pro) routes=$(echo "$all" | grep -vE '^store\.' || true); appearances="${LK_APPEARANCES:-dark}" ;;
+  iphone-16-pro) routes=$(echo "$all" | grep -vE '^store\.' || true); appearances="${LK_APPEARANCES:-light,dark}" ;;
   iphone-16-pro-max) routes=$(echo "$all" | grep -E '^store\.' || true); appearances="light" ;;
-  *) routes=$(echo "$all" | grep -vE '^(lab|store)\.' || true); appearances="${LK_APPEARANCES:-dark}" ;;
+  *) routes=$(echo "$all" | grep -vE '^(lab|store)\.' || true); appearances="${LK_APPEARANCES:-light,dark}" ;;
 esac
 routes=$(echo "$routes" | paste -sd, -)
 if [[ -z "$routes" ]]; then
