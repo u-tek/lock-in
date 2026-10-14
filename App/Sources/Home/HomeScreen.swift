@@ -16,8 +16,10 @@ struct HomeScreen: View {
         case settings
         case friends
         case customLength
-        /// A squad's page, from a long press on its chip.
+        /// A squad's page, from a long press on its chip or a tap on its pet.
         case squad(String)
+        /// The coin shop, from the coin count (M5).
+        case shop
 
         var id: String {
             switch self {
@@ -26,6 +28,7 @@ struct HomeScreen: View {
             case .friends: "friends"
             case .customLength: "customLength"
             case .squad(let id): "squad.\(id)"
+            case .shop: "shop"
             }
         }
     }
@@ -35,6 +38,8 @@ struct HomeScreen: View {
     @ObservedObject var friends: FriendsStore
     @ObservedObject var account: AccountStore
     @ObservedObject var squads: SquadsStore
+    /// Coins and the shop (M5).
+    @ObservedObject var shop: ShopStore
     let social: SocialModels
     /// Alerts: a tap on "is locking in" picks its squad here (M4).
     @ObservedObject private var alerts: NotificationInbox = AppServices.notificationInbox
@@ -62,6 +67,7 @@ struct HomeScreen: View {
         self.friends = social.friends
         self.account = social.account
         self.squads = social.squads
+        self.shop = social.shop
         self.social = social
         _minutes = State(initialValue: minutes)
         _squadChoice = State(initialValue: squadID)
@@ -86,7 +92,16 @@ struct HomeScreen: View {
                     topBar
                     Spacer(minLength: LKSpacing.s)
                     hero(height: proxy.size.height)
-                    StatChips(stats: engine.stats)
+                    if let squad = chosenSquad {
+                        // A squad picked: its pet and its streak instead of yours (M5).
+                        SquadPetChips(squad: squad) {
+                            sheet = .squad(squad.id)
+                        }
+                        .padding(.top, LKSpacing.l)
+                    } else {
+                        StatChips(stats: engine.stats)
+                            .padding(.top, LKSpacing.l)
+                    }
                         .padding(.top, LKSpacing.l)
                     Spacer(minLength: LKSpacing.l)
                     if !mySquads.isEmpty {
