@@ -246,6 +246,20 @@ const PARTICIPANT_UPSERT = `INSERT INTO participants
     focused_sec = excluded.focused_sec, la_token = excluded.la_token, la_env = excluded.la_env,
     slips = excluded.slips`;
 
+// A credit not yet written: its focus_log row doesn't exist. Binds the session, user and start.
+const UNCREDITED = "NOT EXISTS (SELECT 1 FROM focus_log WHERE session_id = ? AND user_id = ? AND started_at = ?)";
+
+/**
+ * The stage as SQL, from the shared rules: 0 until hatched, then the highest stage whose XP the pet
+ * has, never below 1 (src/pet.ts `petStage`).
+ */
+const STAGE_SQL = `CASE WHEN hatched_at IS NULL THEN 0 ${PET_RULES.stageXp
+  .map((xp, stage) => ({ xp, stage }))
+  .filter(({ stage }) => stage >= 2)
+  .reverse()
+  .map(({ xp, stage }) => `WHEN pet_xp >= ${xp} THEN ${stage}`)
+  .join(" ")} ELSE 1 END`;
+
 // Skipped rather than failing the whole batch when the user has just deleted their account.
 const EVENT_INSERT = `INSERT INTO events (session_id, user_id, type, at, meta_json)
   SELECT ?, ?, ?, ?, ? WHERE ? IS NULL OR EXISTS (SELECT 1 FROM users WHERE id = ?)`;
@@ -604,16 +618,17 @@ export class Database {
   /**
    * Creates a squad with its owner as the first member, unless the owner is already in `maxSquads`
    * squads: false then. Checked and written in one transaction, so two requests can't both slip
-   * under the limit. A taken id throws D1's unique error on `squads.id`.
+   * under the limit. A taken id throws D1's unique error on `squads.id`. M5: the egg's species and
+   * the squad's time zone are set from the start.
    */
-  async insertSquad(squad: { id: string; name: string; ownerId: string; now: number; maxSquads: number }): Promise<boolean> {
+  async insertSquad(squad: { id: string; name: string; ownerId: string; now: number; maxSquads: number; species: string; tz: string }): Promise<boolean> {
     const [inserted] = await this.d1.batch([
       this.d1
         .prepare(
-          `INSERT INTO squads (id, name, owner_id, created_at)
-           SELECT ?, ?, ?, ? WHERE (SELECT count(*) FROM squad_members WHERE user_id = ?) < ?`,
+          `INSERT INTO squads (id, name, owner_id, created_at, pet_species, tz)
+           SELECT ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM squad_members WHERE user_id = ?) < ?`,
         )
-        .bind(squad.id, squad.name, squad.ownerId, squad.now, squad.ownerId, squad.maxSquads),
+        .bind(squad.id, squad.name, squad.ownerId, squad.now, squad.species, squad.tz, squad.ownerId, squad.maxSquads),
       this.d1
         .prepare(
           `INSERT INTO squad_members (squad_id, user_id, joined_at)
@@ -761,8 +776,27 @@ export class Database {
     await this.d1.batch([this.participantUpsert(participant), this.eventInsert(event)]);
   }
 
-  /** The room's state since its last write, in one transaction. Rows of deleted users are skipped. */
-  async syncRoom(sync: { participants: ParticipantWrite[]; ended?: { sessionId: string; endedAt: number }; events: EventWrite[] }): Promise<void> {
+  /**
+   * The room's state since its last write, in one transaction. Rows of deleted users are skipped.
+   *
+   * M5: with it, what stopped timers earned (`credits`), the squad's egg hatching, its stage, and
+   * the streak days the finishes may have made count. Each credit's coins and XP are added only
+   * while its `focus_log` row doesn't exist, and the row is written last, so writing the same
+   * credit again (the room retrying, or a write that succeeded without the room hearing so) adds
+   * nothing. Hatching and streak days are guarded the same way: by `hatched_at` and
+   * `streak_last_day`.
+   */
+  async syncRoom(sync: {
+    participants: ParticipantWrite[];
+    ended?: { sessionId: string; endedAt: number };
+    events: EventWrite[];
+    credits?: CreditWrite[];
+    /** The room's squad hatched at this time, unless it already has. */
+    hatch?: { squadId: string; at: number };
+    /** The room's squad: its stage follows its XP and hatching. */
+    stageOf?: string;
+    streakDays?: StreakDayWrite[];
+  }): Promise<void> {
     const statements = sync.participants.map((p) =>
       this.d1
         .prepare(PARTICIPANT_UPDATE)
@@ -774,24 +808,116 @@ export class Database {
       );
     }
     for (const event of sync.events) statements.push(this.eventInsert(event));
+    for (const credit of sync.credits ?? []) statements.push(...this.creditStatements(credit));
+    if (sync.hatch !== undefined) {
+      statements.push(this.d1.prepare("UPDATE squads SET hatched_at = ? WHERE id = ? AND hatched_at IS NULL").bind(Math.floor(sync.hatch.at), sync.hatch.squadId));
+    }
+    if (sync.stageOf !== undefined) statements.push(this.d1.prepare(`UPDATE squads SET pet_stage = ${STAGE_SQL} WHERE id = ?`).bind(sync.stageOf));
+    for (const day of sync.streakDays ?? []) statements.push(this.streakStatement(day));
     if (statements.length > 0) await this.d1.batch(statements);
   }
 
-  /**
-   * The squad's name and pet, its size, and how many members focused since `since` (a session
-   * that's running or completed). Null once the squad is gone.
-   */
-  squadSnapshot(squadId: string, since: number): Promise<SquadSnapshotRow | null> {
-    return this.d1
+  // The pet, streaks, the leaderboard and coins (M5, src/progress.ts, src/shop.ts)
+
+  /** Gives a squad from before M5 its egg's species. The first to set it wins; returns the squad as it is then. */
+  async assignSpecies(squadId: string, species: string): Promise<SquadRow | null> {
+    await this.d1.prepare("UPDATE squads SET pet_species = ? WHERE id = ? AND pet_species IS NULL").bind(species, squadId).run();
+    return this.squadById(squadId);
+  }
+
+  /** The squad's size, and how many members finished a session (and one long enough to count) in `[start, end)`. */
+  async squadDay(squadId: string, start: number, end: number): Promise<SquadDayRow> {
+    const finishedIn = `SELECT count(DISTINCT f.user_id) FROM focus_log f JOIN squad_members m ON m.user_id = f.user_id
+       WHERE m.squad_id = ? AND f.completed = 1 AND f.ended_at >= ? AND f.ended_at < ?`;
+    const row = await this.d1
       .prepare(
-        `SELECT s.name, s.pet_species, s.pet_stage, s.pet_xp,
-           (SELECT count(*) FROM squad_members m WHERE m.squad_id = s.id) AS size,
-           (SELECT count(DISTINCT p.user_id) FROM participants p JOIN squad_members m ON m.user_id = p.user_id
-              WHERE m.squad_id = s.id AND p.started_at >= ? AND p.state IN (0, 1, 2, 3)) AS focused
-         FROM squads s WHERE s.id = ?`,
+        `SELECT (SELECT count(*) FROM squad_members WHERE squad_id = ?) AS size,
+           (${finishedIn}) AS finished,
+           (${finishedIn} AND f.focused_sec >= ?) AS counting`,
       )
-      .bind(since, squadId)
-      .first<SquadSnapshotRow>();
+      .bind(squadId, squadId, start, end, squadId, start, end, PET_RULES.streakMinMinutes * 60)
+      .first<SquadDayRow>();
+    return row ?? { size: 0, finished: 0, counting: 0 };
+  }
+
+  /** Counts `day` for the squad's streak if enough members finished in it (`countStreakDay`). Returns the squad after. */
+  async countStreakDay(write: StreakDayWrite): Promise<SquadRow | null> {
+    await this.streakStatement(write).run();
+    return this.squadById(write.squadId);
+  }
+
+  /** The user's squads, their zones and open rooms: whose streak and mood a finished session touches. */
+  async squadZonesOf(userId: string): Promise<SquadZoneRow[]> {
+    const { results } = await this.d1
+      .prepare(
+        `SELECT m.squad_id, s.tz, (SELECT id FROM sessions WHERE squad_id = s.id AND status = 'open') AS open_session
+         FROM squad_members m JOIN squads s ON s.id = m.squad_id WHERE m.user_id = ? ORDER BY m.joined_at, s.id`,
+      )
+      .bind(userId)
+      .all<SquadZoneRow>();
+    return results;
+  }
+
+  /** The squads the user owns move to `tz` (they registered a phone there). */
+  async setOwnedSquadsZone(userId: string, tz: string): Promise<void> {
+    await this.d1.prepare("UPDATE squads SET tz = ? WHERE owner_id = ? AND tz <> ?").bind(tz, userId, tz).run();
+  }
+
+  /** The zone of the user's most recently registered phone, if they have one. */
+  latestDeviceZone(userId: string): Promise<string | null> {
+    return this.d1.prepare("SELECT tz FROM devices WHERE user_id = ? ORDER BY updated_at DESC, id LIMIT 1").bind(userId).first<string>("tz");
+  }
+
+  /** Every member's whole focused minutes and finished sessions with timers that stopped in `[start, end)`. */
+  async leaderboard(squadId: string, start: number, end: number): Promise<LeaderboardRow[]> {
+    const { results } = await this.d1
+      .prepare(
+        `SELECT u.id, u.handle, u.display_name,
+           coalesce(sum(f.focused_sec / 60), 0) AS minutes, coalesce(sum(f.completed), 0) AS sessions
+         FROM squad_members m JOIN users u ON u.id = m.user_id
+         LEFT JOIN focus_log f ON f.user_id = m.user_id AND f.ended_at >= ? AND f.ended_at < ?
+         WHERE m.squad_id = ? GROUP BY u.id`,
+      )
+      .bind(start, end, squadId)
+      .all<LeaderboardRow>();
+    return results;
+  }
+
+  /** The items the user bought (or imported), first acquired first. */
+  async cosmeticsOf(userId: string): Promise<string[]> {
+    const { results } = await this.d1
+      .prepare("SELECT item_id FROM cosmetics WHERE user_id = ? ORDER BY acquired_at, item_id")
+      .bind(userId)
+      .all<{ item_id: string }>();
+    return results.map((row) => row.item_id);
+  }
+
+  /**
+   * Takes `price` coins and adds the item, in one transaction, and returns the coins left. Both
+   * limits are the database's, so two purchases racing can't get past them: too few coins fails
+   * the CHECK on `users.coins` (`isCheckViolation(error, "coins")`), and an item already owned the
+   * primary key on `cosmetics` (`isUniqueViolation(error, "cosmetics.user_id")`). Either way
+   * nothing changes.
+   */
+  async buyItem(userId: string, itemId: string, price: number, now: number): Promise<number> {
+    const [paid] = await this.d1.batch([
+      this.d1.prepare("UPDATE users SET coins = coins - ? WHERE id = ? RETURNING coins").bind(price, userId),
+      this.d1.prepare("INSERT INTO cosmetics (user_id, item_id, acquired_at) VALUES (?, ?, ?)").bind(userId, itemId, now),
+    ]);
+    return (paid?.results[0] as { coins: number } | undefined)?.coins ?? 0;
+  }
+
+  /**
+   * Adds coins and items earned signed out, once per account, in one transaction. A second import
+   * fails the CHECK on `users.coins_imported` (`isCheckViolation(error, "coins_imported")`) and
+   * changes nothing. Items already owned are skipped. Returns the user after.
+   */
+  async importCoins(userId: string, coins: number, items: string[], now: number): Promise<UserRow | null> {
+    const [updated] = await this.d1.batch([
+      this.d1.prepare("UPDATE users SET coins = coins + ?, coins_imported = coins_imported + 1 WHERE id = ? RETURNING *").bind(coins, userId),
+      ...items.map((itemId) => this.d1.prepare("INSERT OR IGNORE INTO cosmetics (user_id, item_id, acquired_at) VALUES (?, ?, ?)").bind(userId, itemId, now)),
+    ]);
+    return (updated?.results[0] as UserRow | undefined) ?? null;
   }
 
   // "X is locking in" (M4, src/alerts.ts)
@@ -872,6 +998,54 @@ export class Database {
       ...done.goneTokens.map((token) => this.d1.prepare("DELETE FROM devices WHERE apns_token = ?").bind(token)),
       this.d1.prepare("DELETE FROM alerts WHERE sent_at < ?").bind(done.trimBefore),
     ]);
+  }
+
+  /** Coins, then XP and sadness, then the log row that stops them being added again. */
+  private creditStatements(credit: CreditWrite): D1PreparedStatement[] {
+    const key = [credit.sessionId, credit.userId, credit.startedAt];
+    const statements = [
+      this.d1.prepare(`UPDATE users SET coins = coins + ? WHERE id = ? AND ${UNCREDITED}`).bind(credit.coins, credit.userId, ...key),
+    ];
+    if (credit.squadId !== null && (credit.xp > 0 || credit.sad)) {
+      statements.push(
+        this.d1
+          .prepare(
+            `UPDATE squads SET pet_xp = pet_xp + ?,
+               last_sad_at = CASE WHEN ? = 1 THEN max(coalesce(last_sad_at, 0), ?) ELSE last_sad_at END
+             WHERE id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ?) AND ${UNCREDITED}`,
+          )
+          .bind(credit.xp, credit.sad ? 1 : 0, Math.floor(credit.endedAt), credit.squadId, credit.userId, ...key),
+      );
+    }
+    statements.push(
+      this.d1
+        .prepare(
+          `INSERT INTO focus_log (session_id, user_id, started_at, ended_at, squad_id, focused_sec, completed, coins, xp)
+           SELECT ?, ?, ?, ?, (SELECT id FROM squads WHERE id = ?), ?, ?, ?, ?
+           WHERE EXISTS (SELECT 1 FROM users WHERE id = ?) AND ${UNCREDITED}`,
+        )
+        .bind(...key, credit.endedAt, credit.squadId, credit.focusedSec, credit.completed ? 1 : 0, credit.coins, credit.xp, credit.userId, ...key),
+    );
+    return statements;
+  }
+
+  /**
+   * Counts `day` for the squad's streak when enough members (half, rounded up, at least one)
+   * finished a session of `streakMinMinutes` or more in it: one more than yesterday's count if
+   * yesterday counted, else 1. Only once per day, and never for a day before the last counted one.
+   */
+  private streakStatement(write: StreakDayWrite): D1PreparedStatement {
+    return this.d1
+      .prepare(
+        `UPDATE squads SET
+           streak_count = CASE WHEN streak_last_day = ? THEN streak_count + 1 ELSE 1 END,
+           streak_last_day = ?
+         WHERE id = ? AND (streak_last_day IS NULL OR streak_last_day < ?)
+           AND (SELECT count(DISTINCT f.user_id) FROM focus_log f JOIN squad_members m ON m.user_id = f.user_id
+                WHERE m.squad_id = squads.id AND f.completed = 1 AND f.focused_sec >= ? AND f.ended_at >= ? AND f.ended_at < ?)
+             >= max(1, (SELECT count(*) FROM squad_members WHERE squad_id = squads.id) * ?)`,
+      )
+      .bind(write.yesterday, write.day, write.squadId, write.day, PET_RULES.streakMinMinutes * 60, write.start, write.end, PET_RULES.streakShare);
   }
 
   private participantUpsert(p: ParticipantWrite): D1PreparedStatement {

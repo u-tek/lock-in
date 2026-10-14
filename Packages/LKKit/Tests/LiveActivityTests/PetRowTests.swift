@@ -59,7 +59,7 @@ import UIKit
             .dynamicTypeSize(textSize)
             .fixedSize(horizontal: false, vertical: true)
         return UIHostingController(rootView: sized)
-            .sizeThatFits(in: CGSize(width: 343, height: .greatestFiniteMagnitude))
+            .sizeThatFits(in: CGSize(width: 343, height: CGFloat.greatestFiniteMagnitude))
             .height
     }
 }
