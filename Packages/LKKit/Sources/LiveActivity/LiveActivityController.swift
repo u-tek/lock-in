@@ -74,11 +74,15 @@ public final class LiveActivityController {
 
     /// Starts an activity that receives updates by push token. Call it while the app is in the
     /// foreground, then upload each token from `pushTokens(of:)`.
+    ///
+    /// - Parameter takesPushes: False starts one the app updates itself, for a build without the
+    ///   push entitlement; ActivityKit refuses a push-token activity there.
     @discardableResult
     public func start(
         attributes: LockinAttributes,
         state: LockinAttributes.ContentState,
-        now: Date = Date()
+        now: Date = Date(),
+        takesPushes: Bool = true
     ) throws -> LockinActivity {
         do {
             guard ActivityAuthorizationInfo().areActivitiesEnabled else { throw LiveActivityError.disabled }
@@ -88,7 +92,9 @@ public final class LiveActivityController {
             let activity = try LockinActivity.request(
                 attributes: attributes,
                 content: content(attributes: attributes, state: state, now: now),
-                pushType: .token
+                // Without pushes only for a build that can't take them: the simulator builds CI
+                // films, which are unsigned and so have no push entitlement (IslandDemo).
+                pushType: takesPushes ? .token : nil
             )
             Log.liveActivity.info("Started activity for session \(attributes.sid, privacy: .public)")
             analytics.track(.liveActivityStarted)

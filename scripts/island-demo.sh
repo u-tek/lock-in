@@ -34,10 +34,29 @@ for _ in $(seq 1 24); do
   sleep 5
 done
 
-# The whole screen, island and Lock Screen included, for as long as the test runs.
-xcrun simctl io "$udid" recordVideo --codec=h264 --force "$out/island.mp4" &
-recorder=$!
-sleep 2
+# The app's and the system's side of Live Activities, in case nothing shows.
+xcrun simctl spawn "$udid" log stream --style compact --level info \
+  --predicate 'process == "Lockin" OR process == "LockinWidgets" OR process == "chronod" OR subsystem CONTAINS[c] "activitykit"' \
+  > build/island-system.log 2>&1 &
+logger=$!
+
+# Films only the demo: the test writes `ready` when it starts and waits for `recording`; it
+# writes `done` when it's finished. The whole screen, island and Lock Screen included.
+raw_video="$PWD/build/island-raw.mp4"
+(
+  for _ in $(seq 1 1200); do [[ -f "$out/ready" || -f "$out/done" ]] && break; sleep 0.5; done
+  [[ -f "$out/ready" ]] || exit 0
+  xcrun simctl io "$udid" recordVideo --codec=h264 --force "$raw_video" &
+  recorder=$!
+  sleep 2
+  touch "$out/recording"
+  for _ in $(seq 1 600); do [[ -f "$out/done" ]] && break; sleep 0.5; done
+  sleep 1
+  # recordVideo finishes the file when it's interrupted.
+  kill -INT "$recorder" 2>/dev/null || true
+  wait "$recorder" 2>/dev/null || true
+) &
+watcher=$!
 
 status=0
 TEST_RUNNER_LK_ISLAND_DIR="$out" \
@@ -46,9 +65,21 @@ TEST_RUNNER_LK_ISLAND_DIR="$out" \
     -only-testing:LockinUITests/IslandDemoTests 2>&1 \
   | tee build/island-test.log | xcbeautify || status=$?
 
-# recordVideo finishes the file when it's interrupted.
-kill -INT "$recorder" 2>/dev/null || true
-wait "$recorder" 2>/dev/null || true
+touch "$out/done"
+wait "$watcher" 2>/dev/null || true
+kill "$logger" 2>/dev/null || true
+rm -f "$out/ready" "$out/recording" "$out/done"
+
+# Small enough to commit and to play on a phone: H.264, at most 1920 × 1080.
+if [[ -f "$raw_video" ]]; then
+  if ! avconvert --source "$raw_video" --output "$out/island.mp4" --preset Preset1920x1080 --replace; then
+    echo "::warning::avconvert couldn't shrink the film; keeping it as recorded"
+    cp "$raw_video" "$out/island.mp4"
+  fi
+fi
+
+echo "Live Activity log, last lines:"
+tail -n 80 build/island-system.log || true
 
 ls -la "$out"
 echo "Filmed $(find "$out" -name '*.png' | wc -l | tr -d ' ') screenshots on $device"

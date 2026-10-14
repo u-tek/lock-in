@@ -18,6 +18,8 @@ final class IslandDemo: ObservableObject {
 
     /// Set once the activity is up: the test waits for its marker (`lk.island.started`).
     @Published private(set) var hasStarted = false
+    /// Why the activity couldn't start, for the test to report (`lk.island.failed`).
+    @Published private(set) var failure: String?
 
     static var isRequested: Bool {
         AppConfiguration.main.developerToolsEnabled && UserDefaults.standard.bool(forKey: "LKIslandDemo")
@@ -46,9 +48,16 @@ final class IslandDemo: ObservableObject {
         let attributes = LockinAttributes(sid: "dEm0Isl4nd", me: Self.me, sq: "Library Goblins")
         let activity: LockinActivity
         do {
-            activity = try controller.start(attributes: attributes, state: Self.state(v: 1, at: start, mateo: false, cheer: nil))
+            // CI's simulator build is unsigned, so it has no push entitlement: a local activity,
+            // updated below the way the room's pushes would.
+            activity = try controller.start(
+                attributes: attributes,
+                state: Self.state(v: 1, at: start, mateo: false, cheer: nil),
+                takesPushes: false
+            )
         } catch {
             Log.liveActivity.error("Island demo couldn't start its activity")
+            failure = String(describing: error)
             return
         }
         hasStarted = true
@@ -124,6 +133,13 @@ struct IslandDemoMarker: View {
                 .font(.system(size: 1))
                 .foregroundStyle(.clear)
                 .accessibilityIdentifier("lk.island.started")
+                .allowsHitTesting(false)
+        } else if let failure = demo.failure {
+            Text(verbatim: failure)
+                .font(.system(size: 1))
+                .foregroundStyle(.clear)
+                .accessibilityIdentifier("lk.island.failed")
+                .accessibilityLabel(failure)
                 .allowsHitTesting(false)
         }
     }

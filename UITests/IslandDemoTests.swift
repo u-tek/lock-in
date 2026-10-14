@@ -9,6 +9,9 @@ import XCTest
 ///
 /// Environment (from xcodebuild with a `TEST_RUNNER_` prefix): `LK_ISLAND_DIR`, where the PNGs
 /// go. Without it the test is skipped, so a plain `xcodebuild test` never runs it.
+///
+/// The script films only the demo: the test writes `ready` there when it starts, waits for the
+/// script's `recording`, and writes `done` at the end.
 final class IslandDemoTests: XCTestCase {
     private var outputDirectory: URL!
     private var started = Date()
@@ -20,12 +23,29 @@ final class IslandDemoTests: XCTestCase {
         }
         outputDirectory = URL(fileURLWithPath: path, isDirectory: true)
         try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        defer { signal("done") }
+        signal("ready")
+        waitForSignal("recording", atMost: 20)
 
         let app = XCUIApplication()
         app.launchArguments = ["-LKIslandDemo", "YES"]
         app.launch()
         let marker = app.descendants(matching: .any)["lk.island.started"]
-        XCTAssertTrue(marker.waitForExistence(timeout: 60), "The demo's Live Activity didn't start")
+        let failed = app.descendants(matching: .any)["lk.island.failed"]
+        let deadline = Date().addingTimeInterval(60)
+        while !marker.exists, !failed.exists, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        if failed.exists {
+            save("0-failed")
+            XCTFail("The demo's Live Activity didn't start: \(failed.label)")
+            return
+        }
+        guard marker.exists else {
+            save("0-failed")
+            XCTFail("The demo's Live Activity didn't start within a minute")
+            return
+        }
         started = Date()
 
         wait(until: 2)
@@ -33,7 +53,7 @@ final class IslandDemoTests: XCTestCase {
 
         // Home: the activity moves into the island.
         XCUIDevice.shared.press(.home)
-        wait(until: 5)
+        wait(until: 6)
         save("2-island")
 
         // Long-press the island to expand it.
@@ -63,6 +83,19 @@ final class IslandDemoTests: XCTestCase {
         // The cheer gone, the timers still running.
         wait(until: 44)
         save("7-lock-screen-later")
+    }
+
+    /// A file the script waits for.
+    private func signal(_ name: String) {
+        FileManager.default.createFile(atPath: outputDirectory.appendingPathComponent(name).path, contents: Data())
+    }
+
+    private func waitForSignal(_ name: String, atMost seconds: TimeInterval) {
+        let path = outputDirectory.appendingPathComponent(name).path
+        let deadline = Date().addingTimeInterval(seconds)
+        while !FileManager.default.fileExists(atPath: path), Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.25)
+        }
     }
 
     /// Waits until `seconds` after the activity started.
