@@ -82,12 +82,33 @@ xcrun simctl status_bar "$udid" override --time "9:41" --dataNetwork wifi --wifi
 packages=(-skipPackageUpdates)
 [[ -n "${SPM_DIR:-}" ]] && packages+=(-clonedSourcePackagesDirPath "$SPM_DIR")
 
-TEST_RUNNER_LK_SNAPSHOT_ROUTES="$routes" TEST_RUNNER_LK_SNAPSHOT_DIR="$raw" \
-  TEST_RUNNER_LK_SNAPSHOT_APPEARANCES="$appearances" \
-  xcodebuild test-without-building -project Lockin.xcodeproj -scheme Lockin \
-    -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$derived_data" "${packages[@]}" \
-    -only-testing:LockinUITests/SnapshotExportTests \
-    | xcbeautify || status=$?
+# A simulator created moments ago can be booted before xcodebuild's own device list has caught up
+# ("Unable to find a device matching the provided destination specifier"). Wait until xcodebuild
+# lists it, for up to two minutes.
+for _ in $(seq 1 24); do
+  if xcodebuild -project Lockin.xcodeproj -scheme Lockin -showdestinations 2>/dev/null | grep -q "id:$udid"; then
+    break
+  fi
+  sleep 5
+done
+
+run_tests() {
+  TEST_RUNNER_LK_SNAPSHOT_ROUTES="$routes" TEST_RUNNER_LK_SNAPSHOT_DIR="$raw" \
+    TEST_RUNNER_LK_SNAPSHOT_APPEARANCES="$appearances" \
+    xcodebuild test-without-building -project Lockin.xcodeproj -scheme Lockin \
+      -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$derived_data" "${packages[@]}" \
+      -only-testing:LockinUITests/SnapshotExportTests 2>&1 \
+    | tee build/snapshot-test.log | xcbeautify
+}
+
+run_tests || status=$?
+# The same race can still lose: try once more if the device wasn't found, and only then.
+if [[ "$status" -ne 0 ]] && grep -q "Unable to find a device matching" build/snapshot-test.log; then
+  echo "::warning::xcodebuild couldn't see $device yet; trying again"
+  sleep 20
+  status=0
+  run_tests || status=$?
+fi
 
 # How long each shot took to appear: a slow screen shows up here before it shows up as a
 # missing render.
