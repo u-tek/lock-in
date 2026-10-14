@@ -42,6 +42,7 @@ describe("the D1 schema", () => {
         "users",
         "auth_tokens",
         "alerts",
+        "focus_log",
       ]),
     );
   });
@@ -193,6 +194,54 @@ describe("the D1 schema", () => {
     // The limits' queries use the index.
     const plan = db.prepare("EXPLAIN QUERY PLAN SELECT count(*) FROM alerts WHERE recipient_id = ? AND sent_at > ?").all("x", 1);
     expect(JSON.stringify(plan)).toContain("alerts_recipient");
+  });
+
+  test("0005 gives existing squads their owner's latest phone's zone, else UTC", () => {
+    const before = new DatabaseSync(":memory:");
+    before.exec("PRAGMA foreign_keys = ON");
+    const sql = (file: string) => readFileSync(new URL(`../migrations/${file}`, import.meta.url), "utf8");
+    for (const file of migrationFiles().filter((name) => name < "0005")) before.exec(sql(file));
+    before.exec(`
+      INSERT INTO users (id, apple_sub, created_at) VALUES ('Av4Nq8sT2b', 'sub.ava', 1), ('Nr2Kx7pQ1m', 'sub.noor', 1);
+      INSERT INTO devices (id, user_id, apns_token, apns_env, tz, updated_at) VALUES
+        ('d1', 'Av4Nq8sT2b', 'a1', 'production', 'Europe/London', 1),
+        ('d2', 'Av4Nq8sT2b', 'a2', 'production', 'Australia/Sydney', 2);
+      INSERT INTO squads (id, name, owner_id, created_at) VALUES ('Sq00000001', 'Goblins', 'Av4Nq8sT2b', 1),
+        ('Sq00000002', 'Owls', 'Nr2Kx7pQ1m', 1), ('Sq00000003', 'Orphans', NULL, 1);`);
+    before.exec(sql("0005_pet.sql"));
+    const squads = before.prepare("SELECT id, tz, hatched_at, last_sad_at, pet_species FROM squads ORDER BY id").all().map((row) => ({ ...row }));
+    expect(squads).toEqual([
+      { id: "Sq00000001", tz: "Australia/Sydney", hatched_at: null, last_sad_at: null, pet_species: null },
+      { id: "Sq00000002", tz: "UTC", hatched_at: null, last_sad_at: null, pet_species: null },
+      { id: "Sq00000003", tz: "UTC", hatched_at: null, last_sad_at: null, pet_species: null },
+    ]);
+    expect({ ...(before.prepare("SELECT coins_imported FROM users WHERE id = 'Av4Nq8sT2b'").get() as object) }).toEqual({ coins_imported: 0 });
+  });
+
+  test("0005: coins are imported at most once; focus_log holds one row per timer", () => {
+    run("UPDATE users SET coins_imported = coins_imported + 1 WHERE id = 'Av4Nq8sT2b'");
+    expect(() => run("UPDATE users SET coins_imported = coins_imported + 1 WHERE id = 'Av4Nq8sT2b'")).toThrow(/CHECK constraint failed: coins_imported/);
+
+    run("INSERT INTO squads (id, name, owner_id, created_at) VALUES ('Sq00000001', 'Goblins', 'Av4Nq8sT2b', 1)");
+    run("INSERT INTO sessions (id, squad_id, host_id, created_at) VALUES ('r7Kq2xP9aL', 'Sq00000001', 'Av4Nq8sT2b', 1)");
+    const log = `INSERT INTO focus_log (session_id, user_id, started_at, ended_at, squad_id, focused_sec, completed, coins, xp)
+      VALUES ('r7Kq2xP9aL', ?, ?, ?, 'Sq00000001', ?, ?, ?, ?)`;
+    run(log, "Av4Nq8sT2b", 1791900000, 1791901500, 1500, 1, 30, 25);
+    expect(() => run(log, "Av4Nq8sT2b", 1791900000, 1791901500, 1500, 1, 30, 25)).toThrow(/UNIQUE|PRIMARY/);
+    run(log, "Av4Nq8sT2b", 1791901600, 1791901700, 100, 0, 1, 1);
+    expect(() => run(log, "Nr2Kx7pQ1m", 1791900000, 1791899999, 0, 0, 0, 0)).toThrow(/CHECK/);
+    expect(() => run(log, "Nr2Kx7pQ1m", 1791900000, 1791900001, 0, 2, 0, 0)).toThrow(/CHECK/);
+    expect(() => run(log, "Nr2Kx7pQ1m", 1791900000, 1791900001, -1, 0, 0, 0)).toThrow(/CHECK/);
+    expect(() => run(log, "Nobody0000", 1791900000, 1791900001, 0, 0, 0, 0)).toThrow(/FOREIGN KEY/);
+    // Streaks and the leaderboard read it by user and time.
+    const plan = db.prepare("EXPLAIN QUERY PLAN SELECT count(*) FROM focus_log WHERE user_id = ? AND ended_at >= ? AND ended_at < ?").all("x", 1, 2);
+    expect(JSON.stringify(plan)).toContain("focus_log_user");
+
+    // A squad that goes leaves its members' history, without it; an account that goes takes its own.
+    run("DELETE FROM squads WHERE id = 'Sq00000001'");
+    expect(count("SELECT count(*) AS n FROM focus_log WHERE squad_id IS NULL")).toBe(2);
+    run("DELETE FROM users WHERE id = 'Av4Nq8sT2b'");
+    expect(count("SELECT count(*) AS n FROM focus_log")).toBe(0);
   });
 
   test("a session's end and its status agree", () => {

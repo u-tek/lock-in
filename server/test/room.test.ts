@@ -180,3 +180,67 @@ test("the WebSocket close handler copes with a socket that's already closed", as
   expect((await call(ava, "POST", `/sessions/${sid}/pause`)).status).toBe(200);
   expect(socket.sent).toHaveLength(1);
 });
+
+describe("M5", () => {
+  test("a room saved before M5 (no credits, the old pet) carries on, credits and shows the pet", async () => {
+    const created = await call(ava, "POST", "/squads", { name: "Night Owls" });
+    const squadId = created.body.squad.id;
+    const code = (await call(ava, "POST", `/squads/${squadId}/invite`)).body.code;
+    await call(noor, "POST", `/squads/join/${code}`);
+    const sid = (await call(ava, "POST", "/sessions", { squadId, minutes: 25 })).body.session.id;
+    // What M3 stored: no credits or finishers, and the pet as species, stage, XP and mood.
+    const storage = app.rooms.entry(sid).state.storage;
+    const record = storage.data.get("room") as Record<string, unknown>;
+    delete record.credits;
+    delete record.finishers;
+    record.pet = { species: null, stage: 0, xp: 0, mood: 1 };
+    app.rooms.evict(sid);
+
+    expect((await direct(sid, ava.user.id, "state")).body.contentState.p).toBeUndefined();
+    const joined = await call(noor, "POST", "/sessions", { squadId, minutes: 25 });
+    const species = app.value("SELECT pet_species FROM squads WHERE id = ?", squadId);
+    expect(joined.body.contentState.p).toEqual({ k: `${species}.0`, md: 1, x: 0 });
+    await app.advance(25 * 60);
+    expect(app.value("SELECT coins FROM users WHERE id = ?", ava.user.id)).toBe(30);
+    expect(app.value("SELECT hatched_at FROM squads WHERE id = ?", squadId)).toBe(T0 + 25 * 60);
+  });
+
+  test("the 8-hour cap credits the minutes but doesn't make the pet sad: nobody chose it", async () => {
+    const created = await call(ava, "POST", "/squads", { name: "Night Owls" });
+    const squadId = created.body.squad.id;
+    const sid = (await call(ava, "POST", "/sessions", { squadId, minutes: 25 })).body.session.id;
+    await app.advance(10 * 60);
+    await call(ava, "POST", `/sessions/${sid}/pause`);
+    await app.advance(8 * 60 * 60);
+    expect(app.value("SELECT state FROM participants WHERE session_id = ?", sid)).toBe(4);
+    expect(app.value("SELECT coins FROM users WHERE id = ?", ava.user.id)).toBe(10);
+    expect(app.value("SELECT pet_xp FROM squads WHERE id = ?", squadId)).toBe(10);
+    expect(app.value("SELECT last_sad_at FROM squads WHERE id = ?", squadId)).toBeNull();
+  });
+
+  test("tells another squad's open room only after letting go of its own, so two rooms telling each other can't wait for ever", async () => {
+    // Ava and Noor are both in squads A and B, each in one of their rooms, and finish at the same
+    // moment: each room tells the other. Mila and Kai keep the rooms open.
+    const kai = await app.user("kai", "Kai");
+    const mila = await app.user("mila", "Mila");
+    for (const who of [ava, noor]) app.sqlite.prepare("UPDATE users SET plus_until = ? WHERE id = ?").run(T0 + 86_400, who.user.id);
+    const a = (await call(ava, "POST", "/squads", { name: "A Squad" })).body.squad.id;
+    const b = (await call(noor, "POST", "/squads", { name: "B Squad" })).body.squad.id;
+    const codeA = (await call(ava, "POST", `/squads/${a}/invite`)).body.code;
+    const codeB = (await call(noor, "POST", `/squads/${b}/invite`)).body.code;
+    for (const [who, code] of [[noor, codeA], [mila, codeA], [ava, codeB], [kai, codeB]] as const) await call(who, "POST", `/squads/join/${code}`);
+    const roomA = (await call(ava, "POST", "/sessions", { squadId: a, minutes: 25 })).body.session.id;
+    const roomB = (await call(noor, "POST", "/sessions", { squadId: b, minutes: 25 })).body.session.id;
+    await call(mila, "POST", "/sessions", { squadId: a, minutes: 60 });
+    await call(kai, "POST", "/sessions", { squadId: b, minutes: 60 });
+
+    // Time's up for both, and both say so at once (their alarms haven't fired yet).
+    app.clock.now = T0 + 25 * 60;
+    const ended = await Promise.all([call(ava, "POST", `/sessions/${roomA}/end`), call(noor, "POST", `/sessions/${roomB}/end`)]);
+    expect(ended.map((response) => response.status)).toEqual([200, 200]);
+    // Two of three in each squad finished today: both pets are happy, in both rooms.
+    expect((await direct(roomA, ava.user.id, "state")).body.contentState.p.md).toBe(3);
+    expect((await direct(roomB, noor.user.id, "state")).body.contentState.p.md).toBe(3);
+    expect(app.count("SELECT count(*) FROM focus_log WHERE completed = 1")).toBe(2);
+  });
+});
