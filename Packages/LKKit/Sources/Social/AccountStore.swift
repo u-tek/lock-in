@@ -65,7 +65,7 @@ public final class AccountStore: ObservableObject {
     @Published public private(set) var isRestoring = false
     /// Apple's given name from this sign-in: the handle picker's first guess at a display name.
     /// Apple shares it on the first sign-in only.
-    @Published public private(set) var suggestedName: String?
+    @Published public private(set) var suggestedName: String? = nil
 
     /// False when the build has no API host: there's nothing to sign into.
     public let isConfigured: Bool
@@ -309,7 +309,7 @@ public final class AccountStore: ObservableObject {
     }
 
     /// Runs an API call; a 401 ends the session before the error goes on.
-    func call<Value>(_ request: () async throws -> Value) async throws -> Value {
+    func call<Value>(_ request: @MainActor () async throws -> Value) async throws -> Value {
         do {
             return try await request()
         } catch let error as APIError where error.isUnauthorised {

@@ -9,15 +9,17 @@ import SwiftUI
 struct SessionCover: View {
     @ObservedObject var engine: SessionEngine
     @ObservedObject var plus: PlusStore
+    let social: SocialModels
 
     /// The phase on screen. It follows the engine's, except that it never becomes `.idle`: the
     /// last screen stays while the cover slides away.
     @State private var shown: SessionEngine.Phase
-    @State private var showsPaywall = false
+    @State private var showsFriends = false
 
-    init(engine: SessionEngine, plus: PlusStore) {
+    init(engine: SessionEngine, plus: PlusStore, social: SocialModels) {
         self.engine = engine
         self.plus = plus
+        self.social = social
         _shown = State(initialValue: engine.phase)
     }
 
@@ -30,7 +32,9 @@ struct SessionCover: View {
                 }
             }
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-            .lockinPaywall(isPresented: $showsPaywall, store: plus, avatar: engine.avatar)
+            .sheet(isPresented: $showsFriends) {
+                FriendsFlow(social: social, avatar: engine.avatar)
+            }
     }
 
     @ViewBuilder
@@ -50,7 +54,7 @@ struct SessionCover: View {
                 avatar: engine.avatar,
                 // The first session ever finished: the moment to mention friends (SPEC.md §1.1).
                 offersFriends: record.completed && engine.stats.completedSessions == 1,
-                onPlus: { showsPaywall = true },
+                onFriends: { showsFriends = true },
                 onDone: { engine.dismissFinished() }
             )
             .transition(.opacity)

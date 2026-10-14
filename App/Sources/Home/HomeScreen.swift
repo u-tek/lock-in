@@ -3,15 +3,16 @@ import DesignSystem
 import Model
 import Paywall
 import SessionEngine
+import Social
 import SwiftUI
 
 /// Home: your Lockling, how long, and one button. Coins, Plus and Settings sit in a row across
-/// the top; squads are a quiet row at the bottom until they arrive (M3).
+/// the top; friends are a quiet row at the bottom.
 struct HomeScreen: View {
     enum Sheet: String, Identifiable {
         case paywall
         case settings
-        case squads
+        case friends
         case customLength
 
         var id: String { rawValue }
@@ -19,15 +20,19 @@ struct HomeScreen: View {
 
     @ObservedObject var engine: SessionEngine
     @ObservedObject var plus: PlusStore
+    @ObservedObject var friends: FriendsStore
+    let social: SocialModels
 
     @State private var minutes: Int
     @State private var sheet: Sheet?
     @State private var pokes = 0
     @State private var lockIns = 0
 
-    init(engine: SessionEngine, plus: PlusStore, minutes: Int = SessionPreset.twentyFive.minutes) {
+    init(engine: SessionEngine, plus: PlusStore, social: SocialModels, minutes: Int = SessionPreset.twentyFive.minutes) {
         self.engine = engine
         self.plus = plus
+        self.friends = social.friends
+        self.social = social
         _minutes = State(initialValue: minutes)
     }
 
@@ -66,16 +71,27 @@ struct HomeScreen: View {
                     self.sheet = nil
                 }
             case .settings:
-                SettingsScreen(engine: engine, plus: plus) {
+                SettingsScreen(engine: engine, plus: plus, social: social) {
                     self.sheet = nil
                 }
-            case .squads:
-                // The made-up friends' timers count from when it opens.
-                SquadsTeaser(now: Date())
+            case .friends:
+                FriendsFlow(social: social, avatar: engine.avatar)
             case .customLength:
                 CustomLengthSheet(minutes: $minutes)
             }
         }
+        // An invite link opens Friends, once no session covers Home.
+        .onChange(of: friends.pendingInviteCode, initial: true) {
+            openPendingInvite()
+        }
+        .onChange(of: engine.phase) {
+            openPendingInvite()
+        }
+    }
+
+    private func openPendingInvite() {
+        guard friends.pendingInviteCode != nil, engine.phase == .idle, sheet != .friends else { return }
+        sheet = .friends
     }
 
     /// The Lockling, as large as the screen allows: 200 points on most phones, less on an SE.
@@ -109,7 +125,7 @@ struct HomeScreen: View {
 
     private var friendsButton: some View {
         Button {
-            sheet = .squads
+            sheet = .friends
         } label: {
             Label("Lock in with friends", systemImage: "person.2.fill")
                 .font(LKFont.subheadline.weight(.semibold))

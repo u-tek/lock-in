@@ -1,6 +1,9 @@
+import API
 import LiveActivity
+import Model
 import Paywall
 import SessionEngine
+import Social
 import SwiftUI
 import UIKit
 
@@ -11,9 +14,9 @@ import UIKit
 /// launch covers every screen. Arguments in this form land in the `UserDefaults` argument domain,
 /// so they never persist.
 ///
-/// Nothing in snapshot mode touches ActivityKit, StoreKit, the App Group or a permission prompt:
-/// app screens get preview models, the spike screen gets a fixed state, and orphaned activities
-/// are left alone.
+/// Nothing in snapshot mode touches ActivityKit, StoreKit, the App Group, the Keychain, the
+/// network or a permission prompt: app screens get preview models, the spike screen gets a fixed
+/// state, and orphaned activities are left alone.
 struct SnapshotMode: Sendable {
     enum Appearance: String, Sendable {
         case light
@@ -62,9 +65,9 @@ struct SnapshotMode: Sendable {
 /// Every screen the exporter can open, by route name. `scripts/snapshot-routes.txt` lists the
 /// ones CI exports; `lab.*` routes render on the iPhone 16 Pro only.
 ///
-/// App screens get preview models (`SessionEngine.preview`, `PlusStore.preview`): no store, no
-/// ActivityKit, no StoreKit, and no permission prompts. Sheets and covers are shown as screens of
-/// their own.
+/// App screens get preview models (`SessionEngine.preview`, `PlusStore.preview`,
+/// `AccountStore.preview`, `FriendsStore.preview`): no store, no ActivityKit, no StoreKit, no
+/// server and no permission prompts. Sheets and covers are shown as screens of their own.
 @MainActor
 enum SnapshotGallery {
     static func view(for route: String, now: Date) -> AnyView? {
@@ -81,17 +84,17 @@ enum SnapshotGallery {
 
         // The app
         case "home":
-            return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus in
-                HomeScreen(engine: engine, plus: plus)
+            return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus, social in
+                HomeScreen(engine: engine, plus: plus, social: social)
             })
         case "session":
             // The first session, so the "lock your phone" hint shows.
-            return AnyView(PreviewModels(phase: SnapshotData.running(now: now), stats: SnapshotData.newcomer) { engine, plus in
-                SessionCover(engine: engine, plus: plus)
+            return AnyView(PreviewModels(phase: SnapshotData.running(now: now), stats: SnapshotData.newcomer) { engine, plus, social in
+                SessionCover(engine: engine, plus: plus, social: social)
             })
         case "session.paused":
-            return AnyView(PreviewModels(phase: SnapshotData.paused(now: now), stats: SnapshotData.regular) { engine, plus in
-                SessionCover(engine: engine, plus: plus)
+            return AnyView(PreviewModels(phase: SnapshotData.paused(now: now), stats: SnapshotData.regular) { engine, plus, social in
+                SessionCover(engine: engine, plus: plus, social: social)
             })
         case "session.disabled":
             // Live Activities switched off in Settings: the session runs, and says how to fix it.
@@ -99,27 +102,72 @@ enum SnapshotGallery {
                 phase: SnapshotData.running(now: now),
                 stats: SnapshotData.regular,
                 liveActivityProblem: .disabled
-            ) { engine, plus in
-                SessionCover(engine: engine, plus: plus)
+            ) { engine, plus, social in
+                SessionCover(engine: engine, plus: plus, social: social)
             })
         case "finished":
-            return AnyView(PreviewModels(phase: SnapshotData.finished(now: now), stats: SnapshotData.regular) { engine, plus in
-                SessionCover(engine: engine, plus: plus)
+            return AnyView(PreviewModels(phase: SnapshotData.finished(now: now), stats: SnapshotData.regular) { engine, plus, social in
+                SessionCover(engine: engine, plus: plus, social: social)
             })
         case "finished.first":
-            return AnyView(PreviewModels(phase: SnapshotData.finished(now: now), stats: SnapshotData.firstFinish) { engine, plus in
-                SessionCover(engine: engine, plus: plus)
+            return AnyView(PreviewModels(phase: SnapshotData.finished(now: now), stats: SnapshotData.firstFinish) { engine, plus, social in
+                SessionCover(engine: engine, plus: plus, social: social)
             })
         case "paywall":
-            return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus in
+            return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus, _ in
                 PaywallView(store: plus, avatar: engine.avatar, onClose: {})
             })
         case "settings":
-            return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus in
-                SettingsScreen(engine: engine, plus: plus, onClose: {})
+            // Signed out: the Sign in row.
+            return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus, social in
+                SettingsScreen(engine: engine, plus: plus, social: social, onClose: {})
             })
-        case "squads":
-            return AnyView(SquadsTeaser(now: now))
+        case "settings.account":
+            return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me)) { engine, plus, social in
+                SettingsScreen(engine: engine, plus: plus, social: social, onClose: {})
+            })
+
+        // Friends (sheets, shown as screens)
+        case "friends.signin":
+            return AnyView(PreviewModels(stats: SnapshotData.firstFinish) { engine, _, social in
+                FriendsFlow(social: social, avatar: engine.avatar, now: now)
+            })
+        case "friends.unavailable":
+            // A build without LK_API_HOST.
+            return AnyView(PreviewModels(stats: SnapshotData.firstFinish, isConfigured: false) { engine, _, social in
+                FriendsFlow(social: social, avatar: engine.avatar, now: now)
+            })
+        case "friends.username":
+            // Just signed in; Apple shared a first name, and a free username is typed in.
+            return AnyView(PreviewModels(
+                stats: SnapshotData.firstFinish,
+                account: .needsHandle(SnapshotData.newAccount),
+                suggestedName: SnapshotData.me.displayName
+            ) { engine, _, social in
+                HandlePickerStep(
+                    account: social.account,
+                    user: SnapshotData.newAccount,
+                    avatar: engine.avatar,
+                    handle: SnapshotData.me.handle ?? "",
+                    focusesField: false
+                )
+            })
+        case "friends.list":
+            return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me), friends: SnapshotData.friends) { _, _, social in
+                FriendsScreen(account: social.account, friends: social.friends, onDone: {})
+            })
+        case "friends.empty":
+            return AnyView(PreviewModels(stats: SnapshotData.firstFinish, account: .signedIn(SnapshotData.me)) { _, _, social in
+                FriendsScreen(account: social.account, friends: social.friends, onDone: {})
+            })
+        case "friends.add":
+            return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me)) { _, _, social in
+                AddFriendSheet(friends: social.friends, code: "NR4K7WQE", focusesField: false)
+            })
+        case "friends.added":
+            return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me)) { _, _, social in
+                AddFriendSheet(friends: social.friends, added: SnapshotData.friends[1], focusesField: false)
+            })
 
         // Developer tools
         case "developer":
@@ -160,7 +208,7 @@ enum SnapshotGallery {
     }
 
     private static func onboarding(_ step: OnboardingFlow.Step, now: Date) -> AnyView {
-        AnyView(PreviewModels(stats: SnapshotData.newcomer) { engine, plus in
+        AnyView(PreviewModels(stats: SnapshotData.newcomer) { engine, plus, _ in
             OnboardingFlow(engine: engine, plus: plus, step: step, now: now, onFinish: {})
         })
     }
@@ -186,6 +234,29 @@ private enum SnapshotData {
     /// A few days in.
     static var regular: FocusStats {
         FocusStats(todayMinutes: 45, streakDays: 3, coins: 120, completedSessions: 7)
+    }
+
+    /// Sam's friend code.
+    static var code: FriendCode {
+        FriendCode(code: "KQ7M2XPA", url: URL(string: "https://lockin.example/j/KQ7M2XPA")!, expiresAt: 1_792_500_000)
+    }
+
+    /// The made-up user's account.
+    static var me: User {
+        User(id: "uSam000001", handle: "sam", displayName: "Sam", avatarCode: SampleLocklings.you.code, coins: 120, createdAt: 1_791_900_000)
+    }
+
+    /// The same account straight after Sign in with Apple: no handle yet.
+    static var newAccount: User {
+        User(id: "uSam000001", handle: nil, displayName: nil, avatarCode: SampleLocklings.you.code, createdAt: 1_791_900_000)
+    }
+
+    /// The pitch's three friends, as friends.
+    static var friends: [Friend] {
+        let handles = ["ava": "ava", "noor": "noor.k", "kai": "kai_lee"]
+        return SampleLocklings.friends.map { sample in
+            Friend(id: "u\(sample.id)", handle: handles[sample.id], displayName: sample.name, avatarCode: sample.avatar.code, since: 1_791_900_000)
+        }
     }
 
     /// Ten minutes into 25, as the Live Activity samples are.
@@ -223,14 +294,23 @@ private enum SnapshotData {
 private struct PreviewModels<Content: View>: View {
     @StateObject private var engine: SessionEngine
     @StateObject private var plus: PlusStore
-    private let content: (SessionEngine, PlusStore) -> Content
+    @StateObject private var account: AccountStore
+    @StateObject private var friends: FriendsStore
+    private let content: (SessionEngine, PlusStore, SocialModels) -> Content
 
+    /// - Parameters:
+    ///   - account: signed out unless a shot says otherwise.
+    ///   - isConfigured: false for a build without a server.
     init(
         phase: SessionEngine.Phase = .idle,
         stats: FocusStats,
         liveActivityProblem: LiveActivityError? = nil,
         isPlus: Bool = false,
-        @ViewBuilder content: @escaping (SessionEngine, PlusStore) -> Content
+        account: AccountStore.State = .signedOut,
+        isConfigured: Bool = true,
+        suggestedName: String? = nil,
+        friends: [Friend] = [],
+        @ViewBuilder content: @escaping (SessionEngine, PlusStore, SocialModels) -> Content
     ) {
         _engine = StateObject(wrappedValue: SessionEngine.preview(
             phase: phase,
@@ -239,11 +319,19 @@ private struct PreviewModels<Content: View>: View {
             liveActivityProblem: liveActivityProblem
         ))
         _plus = StateObject(wrappedValue: PlusStore.preview(isPlus: isPlus))
+        let accountStore = AccountStore.preview(account, isConfigured: isConfigured, suggestedName: suggestedName)
+        _account = StateObject(wrappedValue: accountStore)
+        _friends = StateObject(wrappedValue: FriendsStore.preview(
+            account: accountStore,
+            friends: friends,
+            code: SnapshotData.code,
+            redeems: SnapshotData.friends[1]
+        ))
         self.content = content
     }
 
     var body: some View {
-        content(engine, plus)
+        content(engine, plus, SocialModels(account: account, friends: friends))
     }
 }
 

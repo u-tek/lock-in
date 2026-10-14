@@ -13,17 +13,17 @@ public final class FriendsStore: ObservableObject {
     /// Sorted by name.
     @Published public private(set) var friends: [Friend] = []
     /// Your current code. Nil until the first refresh.
-    @Published public private(set) var code: FriendCode?
+    @Published public private(set) var code: FriendCode? = nil
     /// Sorted by name. Loaded by `refreshBlocked()`.
     @Published public private(set) var blocked: [Friend] = []
     /// The friends list has loaded at least once since signing in.
     @Published public private(set) var hasLoaded = false
     @Published public private(set) var isLoading = false
     /// Why the last refresh failed; nil once one works.
-    @Published public private(set) var problem: APIError?
+    @Published public private(set) var problem: APIError? = nil
     /// An invite link's code, waiting for the Friends screen (and, before that, maybe for
     /// signing in). The screen takes it with `takePendingInvite()`.
-    @Published public private(set) var pendingInviteCode: String?
+    @Published public private(set) var pendingInviteCode: String? = nil
 
     /// Invites shared and redeemed: counts only.
     public var analytics: Analytics = .disabled
@@ -193,7 +193,7 @@ public final class FriendsStore: ObservableObject {
 
     /// Runs an API call; a 401 ends the session (and so empties this store) before the error goes
     /// on.
-    private func call<Value>(_ request: () async throws -> Value) async throws -> Value {
+    private func call<Value>(_ request: @MainActor () async throws -> Value) async throws -> Value {
         do {
             return try await request()
         } catch let error as APIError where error.isUnauthorised {

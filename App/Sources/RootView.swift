@@ -2,20 +2,25 @@ import Core
 import DesignSystem
 import Paywall
 import SessionEngine
+import Social
 import SwiftUI
 
 /// Onboarding until it's done, then Home. Whenever a session exists, it covers either.
 struct RootView: View {
     @ObservedObject var engine: SessionEngine
     @ObservedObject var plus: PlusStore
+    @ObservedObject var account: AccountStore
+    let social: SocialModels
 
     @State private var hasOnboarded: Bool
     @State private var showsSession = false
     @Environment(\.scenePhase) private var scenePhase
 
-    init(engine: SessionEngine, plus: PlusStore) {
+    init(engine: SessionEngine, plus: PlusStore, social: SocialModels) {
         self.engine = engine
         self.plus = plus
+        self.account = social.account
+        self.social = social
         // Someone with finished sessions has been through it, even if the flag went missing
         // (a reinstall that kept the App Group, say).
         _hasOnboarded = State(initialValue: OnboardingState.isComplete() || engine.stats.completedSessions > 0)
@@ -24,7 +29,7 @@ struct RootView: View {
     var body: some View {
         ZStack {
             if hasOnboarded {
-                HomeScreen(engine: engine, plus: plus)
+                HomeScreen(engine: engine, plus: plus, social: social)
                     .transition(.opacity)
             } else {
                 OnboardingFlow(engine: engine, plus: plus) {
@@ -35,7 +40,7 @@ struct RootView: View {
             }
         }
         .fullScreenCover(isPresented: $showsSession) {
-            SessionCover(engine: engine, plus: plus)
+            SessionCover(engine: engine, plus: plus, social: social)
         }
         .onChange(of: engine.phase, initial: true) { _, phase in
             showsSession = phase != .idle
@@ -45,8 +50,25 @@ struct RootView: View {
                 engine.reconcile()
             }
         }
+        // Friends see the Lockling on this phone: send it when signing in and whenever it changes.
+        .onChange(of: account.state) { _, state in
+            if state.isSignedIn {
+                syncAvatar()
+            }
+        }
+        .onChange(of: engine.avatar) {
+            syncAvatar()
+        }
         .onOpenURL { url in
             open(url)
+        }
+    }
+
+    private func syncAvatar() {
+        let avatar = engine.avatar
+        let account = self.account
+        Task {
+            await account.updateAvatar(avatar)
         }
     }
 
@@ -60,6 +82,10 @@ struct RootView: View {
             // Tapping the Live Activity: the session cover is already up while a session runs.
             // Catch up in case it finished while the app was away.
             engine.reconcile()
+        case .invite(let invite):
+            // Home opens Friends for it (once no session is in the way), signing in first if
+            // need be; the Friends screen then adds the friend.
+            social.friends.openInvite(invite)
         }
     }
 }

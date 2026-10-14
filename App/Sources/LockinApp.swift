@@ -4,14 +4,19 @@ import SwiftUI
 
 @main
 struct LockinApp: App {
-    /// Nil in snapshot mode, which never touches ActivityKit, StoreKit, the App Group or the
-    /// notification prompt: its screens make preview models of their own.
+    @UIApplicationDelegateAdaptor(LockinAppDelegate.self) private var appDelegate
+
+    /// Nil in snapshot mode, which never touches ActivityKit, StoreKit, the App Group, the
+    /// Keychain, the network or the notification prompt: its screens make preview models of their
+    /// own.
     private let services: LiveServices?
 
     init() {
         if SnapshotMode.current == nil {
             AppServices.noteOrphanedActivities()
-            services = LiveServices()
+            let services = LiveServices()
+            AppServices.live = services
+            self.services = services
         } else {
             services = nil
         }
@@ -23,12 +28,22 @@ struct LockinApp: App {
                 if let snapshot = SnapshotMode.current {
                     SnapshotHost(mode: snapshot)
                 } else if let services {
-                    RootView(engine: services.engine, plus: services.plus)
+                    RootView(engine: services.engine, plus: services.plus, social: services.social)
                         .task {
                             await services.endOrphanedActivities()
                         }
                         .task {
                             await services.plus.load()
+                        }
+                        .task {
+                            // The saved session: still good, signed out elsewhere, or deleted.
+                            await services.social.account.restore()
+                        }
+                        .task {
+                            await services.watchLiveActivitySettings()
+                        }
+                        .task {
+                            await services.watchPushToStartTokens()
                         }
                 }
             }

@@ -1,25 +1,48 @@
+import API
 import Core
 import Creature
 import DesignSystem
 import Model
 import Paywall
 import SessionEngine
+import Social
 import SwiftUI
 import UIKit
 
-/// Settings, as a sheet from Home: Plus, notifications, your Lockling, and the version. Tapping
-/// the version five times shows the developer tools, in builds that have them
+/// Settings, as a sheet from Home: your account, Plus, notifications, your Lockling, and the
+/// version. Tapping the version five times shows the developer tools, in builds that have them
 /// (`LK_DEVELOPER_TOOLS`); nothing else leads to them.
 struct SettingsScreen: View {
+    enum AccountSheet: String, Identifiable {
+        case signIn
+        case profile
+
+        var id: String { rawValue }
+    }
+
     @ObservedObject var engine: SessionEngine
     @ObservedObject var plus: PlusStore
+    @ObservedObject var account: AccountStore
+    let social: SocialModels
     let onClose: () -> Void
 
     @State private var path: [AppRoute] = []
     @State private var showsPaywall = false
     @State private var editsLockling = false
+    @State private var accountSheet: AccountSheet? = nil
+    @State private var confirmsDeletion = false
+    @State private var isDeleting = false
+    @State private var failure: String? = nil
     @State private var versionTaps = 0
     @Environment(\.openURL) private var openURL
+
+    init(engine: SessionEngine, plus: PlusStore, social: SocialModels, onClose: @escaping () -> Void) {
+        self.engine = engine
+        self.plus = plus
+        self.account = social.account
+        self.social = social
+        self.onClose = onClose
+    }
 
     private static let tapsToReveal = 5
 
@@ -30,6 +53,8 @@ struct SettingsScreen: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                accountSection
+
                 Section {
                     Button {
                         showsPaywall = true
@@ -106,6 +131,104 @@ struct SettingsScreen: View {
         .sheet(isPresented: $editsLockling) {
             EditLocklingSheet(engine: engine, plus: plus)
         }
+        .sheet(item: $accountSheet) { sheet in
+            switch sheet {
+            case .signIn:
+                FriendsFlow(social: social, avatar: engine.avatar, purpose: .signIn)
+            case .profile:
+                if let user = account.user {
+                    ProfileEditSheet(account: account, user: user, avatar: engine.avatar)
+                }
+            }
+        }
+        .confirmationDialog("Delete your account?", isPresented: $confirmsDeletion, titleVisibility: .visible) {
+            Button("Delete account", role: .destructive, action: deleteAccount)
+        } message: {
+            Text("This deletes your friends and history from the Lockin server, and can't be undone. Your Lockling and sessions on this iPhone stay.")
+        }
+        .errorAlert("Couldn't delete your account", message: $failure)
+    }
+
+    // MARK: - Account
+
+    /// Signed in: who you are, blocked people, signing out and deleting the account. Signed out:
+    /// a way in. Nothing without a server (docs/milestones/M2.md).
+    @ViewBuilder
+    private var accountSection: some View {
+        if account.isConfigured {
+            switch account.state {
+            case .signedOut:
+                Section {
+                    Button {
+                        accountSheet = .signIn
+                    } label: {
+                        Label {
+                            Text("Sign in")
+                                .foregroundStyle(LKColor.textPrimary)
+                        } icon: {
+                            LKIconTile(systemName: "person.crop.circle.fill", color: LKColor.tint)
+                        }
+                    }
+                }
+            case .needsHandle:
+                Section {
+                    Button {
+                        accountSheet = .signIn
+                    } label: {
+                        Label {
+                            Text("Pick a username")
+                                .foregroundStyle(LKColor.textPrimary)
+                        } icon: {
+                            LKIconTile(systemName: "at", color: LKColor.tint)
+                        }
+                    }
+                }
+            case .signedIn(let user):
+                Section {
+                    Button {
+                        accountSheet = .profile
+                    } label: {
+                        ProfileRow(user: user, avatar: engine.avatar)
+                    }
+                    NavigationLink {
+                        BlockedScreen(friends: social.friends)
+                    } label: {
+                        ToolRow(title: "Blocked people", systemImage: "hand.raised.fill", color: .gray)
+                    }
+                    Button("Sign out") {
+                        account.signOut()
+                    }
+                    Button(role: .destructive) {
+                        confirmsDeletion = true
+                    } label: {
+                        HStack {
+                            Text("Delete account")
+                            if isDeleting {
+                                Spacer()
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isDeleting)
+                } header: {
+                    Text("Account")
+                }
+            }
+        }
+    }
+
+    private func deleteAccount() {
+        isDeleting = true
+        Task {
+            defer { isDeleting = false }
+            do {
+                try await account.deleteAccount()
+            } catch is CancellationError {
+                return
+            } catch {
+                failure = error.localizedDescription
+            }
+        }
     }
 
     private var developerSection: some View {
@@ -133,6 +256,34 @@ struct SettingsScreen: View {
         let version = info["CFBundleShortVersionString"] as? String ?? "?"
         let build = info["CFBundleVersion"] as? String ?? "?"
         return "\(version) (\(build))"
+    }
+}
+
+/// You, at the top of Settings: your Lockling, name and @handle.
+private struct ProfileRow: View {
+    let user: User
+    let avatar: AvatarCode
+
+    var body: some View {
+        HStack(spacing: LKSpacing.m) {
+            FriendAvatar(avatar: avatar, size: 52)
+            VStack(alignment: .leading, spacing: LKSpacing.xxs) {
+                Text(user.displayName ?? user.handle ?? "")
+                    .font(LKFont.headline)
+                    .foregroundStyle(LKColor.textPrimary)
+                if let handle = user.handle {
+                    Text(verbatim: "@\(handle)")
+                        .font(LKFont.subheadline)
+                        .foregroundStyle(LKColor.textSecondary)
+                }
+            }
+            .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, LKSpacing.xxs)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Edit your profile")
     }
 }
 

@@ -7,14 +7,41 @@
 	<false/>
 	<key>NSPrivacyTrackingDomains</key>
 	<array/>
-	<!-- M0 collects nothing: no account, no analytics vendor, no backend calls. Update this when
-	     Sign in with Apple (M2), push tokens sent to the server (M3) and analytics arrive. -->
+	<!-- Accounts (M2, optional): a display name, and the account's ids (Sign in with Apple's
+	     user id, the handle), linked to the person and used only to run the app. No email: Sign
+	     in with Apple is asked for the name only. Update this when analytics get a vendor. -->
 	<key>NSPrivacyCollectedDataTypes</key>
-	<array/>
+	<array>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeName</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeUserID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSPrivacyAccessedAPITypes</key>
 	<array>
-		<!-- This install's member id and settings, in UserDefaults (CA92.1) and in the App Group's
-		     shared defaults, which the widget extension reads (1C8F.1). -->
+		<!-- This install's member id, settings and the signed-in account's cache, in UserDefaults
+		     (CA92.1), and the App Group's shared defaults, which the widget extension reads
+		     (1C8F.1). -->
 		<dict>
 			<key>NSPrivacyAccessedAPIType</key>
 			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>

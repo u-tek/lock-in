@@ -5,14 +5,13 @@ import SessionEngine
 import SwiftUI
 
 /// The end of a session: the Lockling celebrates, the coins land. After the very first one it
-/// also mentions friends and Plus (SPEC.md §2's first paywall moment, solo until squads exist),
-/// never in the way of Done.
+/// also asks about friends (SPEC.md §1.1, step 5), never in the way of Done.
 struct FinishedScreen: View {
     let record: SessionRecord
     let avatar: AvatarCode
     /// Show the "Lock in with friends?" card.
     let offersFriends: Bool
-    let onPlus: () -> Void
+    let onFriends: () -> Void
     let onDone: () -> Void
 
     @State private var cheers = 0
@@ -41,7 +40,7 @@ struct FinishedScreen: View {
                 .accessibilityElement(children: .combine)
                 Spacer(minLength: LKSpacing.l)
                 if offersFriends {
-                    FriendsCard(onPlus: onPlus)
+                    FriendsCard(onFriends: onFriends)
                         .padding(.bottom, LKSpacing.l)
                 }
                 Button(action: onDone) {
@@ -96,10 +95,9 @@ struct FinishedScreen: View {
     }
 }
 
-/// After the first session: friends are the point, and they're coming. Plus is the quiet second
-/// action.
+/// After the first session: friends are the point. Their timers in your island is the pitch.
 private struct FriendsCard: View {
-    let onPlus: () -> Void
+    let onFriends: () -> Void
 
     var body: some View {
         VStack(spacing: LKSpacing.l) {
@@ -108,15 +106,15 @@ private struct FriendsCard: View {
                 VStack(alignment: .leading, spacing: LKSpacing.xxs) {
                     Text("Lock in with friends?")
                         .font(LKFont.headline)
-                    Text("Squads are coming soon.")
+                    Text("See them in your Dynamic Island.")
                         .font(LKFont.subheadline)
                         .foregroundStyle(LKColor.textSecondary)
                 }
                 Spacer(minLength: 0)
             }
             .accessibilityElement(children: .combine)
-            Button(action: onPlus) {
-                Label("Get Lockin Plus", systemImage: LockinSymbol.plus)
+            Button(action: onFriends) {
+                Label("Add friends", systemImage: "person.badge.plus")
                     .font(LKFont.headline)
                     .frame(maxWidth: .infinity)
             }

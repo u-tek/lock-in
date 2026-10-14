@@ -37,10 +37,11 @@ public enum Moderation {
         return isAllowed(lowered) ? .ok : .notAllowed
     }
 
-    /// 1–12 code points after trimming, no control characters; then the word lists.
-    public static func checkName(_ input: String) -> Verdict {
+    /// 1–12 code points after trimming, no control characters; then the word lists. Squad names
+    /// (M3) follow the same rules up to 20, as the server's `maxNameLength` option does.
+    public static func checkName(_ input: String, maxLength: Int = nameLength.upperBound) -> Verdict {
         let name = trimmed(input)
-        guard nameLength.contains(name.unicodeScalars.count),
+        guard (1...max(1, maxLength)).contains(name.unicodeScalars.count),
               !name.unicodeScalars.contains(where: { $0.properties.generalCategory == .control })
         else { return .invalid }
         return isAllowed(name.lowercased()) ? .ok : .notAllowed

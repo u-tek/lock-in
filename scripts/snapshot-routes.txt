@@ -16,9 +16,16 @@ session.paused
 session.disabled
 finished
 finished.first
+friends.signin
+friends.username
+friends.empty
+friends.add
+friends.added
+friends.list
+friends.unavailable
 paywall
 settings
-squads
+settings.account
 developer
 spike
 lab.tokens
