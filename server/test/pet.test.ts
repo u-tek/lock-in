@@ -119,6 +119,8 @@ describe("fixtures/shop/catalogue.json", () => {
     colour: { options: ["indigo", "blue", "teal", "mint", "green", "orange", "pink", "purple"], plus: [6, 7] },
     eyes: { options: ["dots", "happy", "sleepy", "sparkly", "wink"], plus: [3] },
     hat: { options: ["noHat", "beanie", "headphones", "cap", "flower", "crown"], plus: [2, 5] },
+    // M7, Squad Boost: the squad pet's accessories, all Plus (drawn by the app's PetView).
+    pet: { options: ["none", "scarf", "partyHat", "flowerCrown", "glasses", "bow", "starClip"], plus: [1, 2, 3, 4, 5, 6] },
   };
 
   test("is what the server sells", () => {

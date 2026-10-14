@@ -34,7 +34,8 @@ const setCoins = (who: SignedIn, coins: number) => app.sqlite.prepare("UPDATE us
 const coins = (who: SignedIn) => app.value("SELECT coins FROM users WHERE id = ?", who.user.id);
 const plus = (who: SignedIn, until = T0 + 30 * 86_400) => app.sqlite.prepare("UPDATE users SET plus_until = ? WHERE id = ?").run(until, who.user.id);
 const buy = (who: SignedIn, itemId: unknown) => call(who, "POST", "/shop/buy", { itemId });
-const PLUS_ITEMS = SHOP_ITEMS.filter((item) => item.plus).map((item) => item.id);
+/** Plus items a Lockling can wear: the pet's accessories (M7) are the squad's, never in `owned`. */
+const PLUS_ITEMS = SHOP_ITEMS.filter((item) => item.plus && item.part !== "pet").map((item) => item.id);
 
 describe("GET /shop", () => {
   test("the catalogue, to anyone", async () => {

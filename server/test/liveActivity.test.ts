@@ -13,6 +13,7 @@ import {
   buildLiveActivityPayload,
   encodeAttributes,
   encodeContentState,
+  isPetCode,
   parseAttributes,
   parseContentState,
   payloadByteCount,
@@ -41,7 +42,8 @@ function worstCase(): { state: ContentState; attributes: Attributes; time: numbe
       e: time,
       q: time - 1,
     })),
-    p: { k: "dragonling.99", md: 3, x: 1.234_567_890_123_456_7e-7 },
+    // M7: the longest pet code, accessory included.
+    p: { k: "dragonling.99.a99", md: 3, x: 1.234_567_890_123_456_7e-7 },
     c: { f: id(1), t: id(0), k: 99, at: time },
   };
   return { state, attributes: { sid: id(9), me: id(0), sq: "🔒".repeat(20) }, time };
@@ -191,6 +193,15 @@ describe("strict parsing", () => {
     expect(() => parseAttributes({ sid: "r7Kq2xP9aL" })).toThrow(/attributes\.me is missing/);
   });
 
+  test("pet codes: <species>.<stage>, with an accessory after the stage from M7", () => {
+    for (const k of ["sprout.2", "puff.0", "dragonling.99", "sprout.2.a3", "ember.1.a99"]) expect(isPetCode(k), k).toBe(true);
+    for (const k of ["sprout", "sprout.2.", "sprout.2.3", "sprout.2.a", "sprout.2.a100", "sprout.2.b3", "sprout.2.a3.a4", "Sprout.2"]) {
+      expect(isPetCode(k), k).toBe(false);
+    }
+    const state = { ...squad6(), p: { k: "sprout.2.a3", md: 2, x: 0.64 } };
+    expect(parseContentState(state).p?.k).toBe("sprout.2.a3");
+  });
+
   test("treats undefined as absent, as JSON.stringify does", () => {
     const state = { ...solo(), p: undefined, c: undefined, m: [{ ...solo().m[0], q: undefined }] };
     expect(encodeContentState(parseContentState(state))).toBe(encodeContentState(solo()));
@@ -205,9 +216,11 @@ describe("strict parsing", () => {
 describe("staleDateFor", () => {
   // The same moments as ModelTests' squadStaleDatesMatchTheServer: both sides must agree.
   test("is the latest end of the running members plus five minutes", () => {
-    // Noor (on a break) ends last among running members at 1791902700. Jules (slipped, 1791903060)
-    // and the others who are done or left don't hold the activity open.
-    expect(staleDateFor(squad6(), 1_791_900_650)).toBe(1_791_903_000);
+    // Jules (slipped: still running, decision 0009) ends last at 1791903060, after Noor (on a break,
+    // 1791902700). The others, done or left, don't hold the activity open.
+    expect(staleDateFor(squad6(), 1_791_900_650)).toBe(1_791_903_360);
+    // Without Jules, Noor is the last.
+    expect(staleDateFor({ ...squad6(), m: squad6().m.slice(0, 5) }, 1_791_900_650)).toBe(1_791_903_000);
   });
 
   test("uses everyone's end when nobody is running", () => {
@@ -217,7 +230,7 @@ describe("staleDateFor", () => {
       m: [
         { ...base, s: MemberState.done, b: 1000, e: 1000 },
         { ...base, i: "Nr2Kx7pQ1m", s: MemberState.left, b: 1000, e: 3000 },
-        { ...base, i: "Jl3Bt8Gc2f", s: MemberState.slipped, b: 1000, e: 2000 },
+        { ...base, i: "Jl3Bt8Gc2f", s: MemberState.done, b: 1000, e: 2000 },
       ],
     };
     expect(staleDateFor(state, 1_791_900_000)).toBe(3300);
@@ -245,7 +258,7 @@ describe("buildLiveActivityPayload", () => {
     });
     expect(Object.keys(payload.aps)).toEqual(["timestamp", "event", "content-state", "stale-date", "relevance-score"]);
     expect(payload.aps.timestamp).toBe(1_791_900_650);
-    expect(payload.aps["stale-date"]).toBe(1_791_903_000);
+    expect(payload.aps["stale-date"]).toBe(1_791_903_360);
     expect(JSON.stringify(payload.aps["content-state"])).toBe(compact(readFixture("squad-6", "content-state").text));
   });
 

@@ -134,7 +134,7 @@ struct SettingsScreen: View {
         }
         .lockinPaywall(isPresented: $showsPaywall, store: plus, avatar: engine.avatar)
         .sheet(isPresented: $editsLockling) {
-            EditLocklingSheet(engine: engine, plus: plus)
+            EditLocklingSheet(engine: engine, plus: plus, owned: social.shop.owned)
         }
         .sheet(item: $accountSheet) { sheet in
             switch sheet {
@@ -331,13 +331,17 @@ struct EditLocklingSheet: View {
     @ObservedObject var engine: SessionEngine
     @ObservedObject var plus: PlusStore
 
+    /// The items you own (M5): the editor offers those, the defaults and the Plus options.
+    let owned: Set<String>?
+
     @State private var draft: AvatarCode
     @State private var showsPaywall = false
     @Environment(\.dismiss) private var dismiss
 
-    init(engine: SessionEngine, plus: PlusStore) {
+    init(engine: SessionEngine, plus: PlusStore, owned: Set<String>? = nil) {
         self.engine = engine
         self.plus = plus
+        self.owned = owned
         _draft = State(initialValue: engine.avatar)
     }
 
@@ -345,7 +349,7 @@ struct EditLocklingSheet: View {
         NavigationStack {
             VStack {
                 Spacer(minLength: 0)
-                LocklingEditor(avatar: $draft, isPlus: plus.isPlus, onLockedOption: { showsPaywall = true })
+                LocklingEditor(avatar: $draft, isPlus: plus.isPlus, onLockedOption: { showsPaywall = true }, owned: owned)
                 Spacer(minLength: 0)
             }
             .navigationTitle("Your Lockling")

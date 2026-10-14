@@ -1,5 +1,6 @@
 import ActivityKit
 import API
+import Combine
 import Core
 import Foundation
 import LiveActivity
@@ -87,12 +88,17 @@ final class LiveServices {
         let account = AccountStore(api: api)
         let friends = FriendsStore(api: api, account: account)
         friends.analytics = AppServices.analytics
+        // Coins and Lockling items (M5): the server's signed in, this phone's signed out, which
+        // follow the engine's count.
+        let shop = ShopStore(api: api, account: account, wallet: .appGroup(), wearing: engine.avatar, localEarned: engine.stats.coins)
+        engine.$stats.map(\.coins).removeDuplicates().assign(to: &shop.$localEarned)
         social = SocialModels(
             account: account,
             friends: friends,
             // With the account, so signing out (or a 401) empties the list.
             squads: SquadsStore(api: api, account: account),
-            rooms: SquadRooms(api: api)
+            rooms: SquadRooms(api: api),
+            shop: shop
         )
         // Squad sessions go through the server; without one the engine runs solo only.
         if api.isConfigured {
@@ -275,6 +281,8 @@ struct SocialModels {
     let squads: SquadsStore
     /// How many are locked in in each squad's open room, for Home's picker.
     let rooms: SquadRooms
+    /// Coins, the Lockling items you own, and the coin shop (M5).
+    let shop: ShopStore
 
     /// Fetches the squads, then peeks into the ones with an open room. Signed out (or without a
     /// handle yet) there are no squads to fetch.

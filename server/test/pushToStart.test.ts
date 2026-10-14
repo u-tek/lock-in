@@ -241,8 +241,9 @@ describe("the payload", () => {
     expect(lockedInWith(state(0, 0), "me00000000")).toBe("You're locked in with Ava");
     expect(lockedInWith(state(0, 2, 0), "me00000000")).toBe("You're locked in with Ava and Noor");
     expect(lockedInWith(state(0, 0, 1, 0, 0), "me00000000")).toBe("You're locked in with Ava and 3 others");
-    // Whoever has finished, left or slipped doesn't count.
-    expect(lockedInWith(state(0, MemberState.done, MemberState.left, MemberState.slipped, 0), "me00000000")).toBe("You're locked in with Mila");
+    // Whoever has finished or left doesn't count; someone slipped is still running (decision 0009).
+    expect(lockedInWith(state(0, MemberState.done, MemberState.left, 0, 0), "me00000000")).toBe("You're locked in with Kai and Mila");
+    expect(lockedInWith(state(0, MemberState.done, MemberState.left, MemberState.slipped, 0), "me00000000")).toBe("You're locked in with Kai and Mila");
     expect(lockedInWith(state(0, 0), "ava0000000")).toBe("You're locked in with Me");
   });
 

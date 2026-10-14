@@ -19,6 +19,8 @@ struct FinishedScreen: View {
     var onPlus: () -> Void = {}
     /// What the Share button shares (M6); no button without one.
     var share: ShareCard? = nil
+    /// After a squad session (M5): the XP it gave the squad's pet, and its hatch if it hatched.
+    var squadPet: SquadPetResult? = nil
     let onDone: () -> Void
 
     @State private var cheers = 0
@@ -28,7 +30,11 @@ struct FinishedScreen: View {
             let hero = min(180, max(100, proxy.size.height * (offersFriends || offersPlus ? 0.22 : 0.3)))
             VStack(spacing: 0) {
                 Spacer(minLength: LKSpacing.l)
-                celebration(size: hero)
+                if let squadPet, squadPet.hatched, let pet = squadPet.pet {
+                    HatchMoment(pet: pet, mood: squadPet.mood, size: hero * 0.8)
+                } else {
+                    celebration(size: hero)
+                }
                 VStack(spacing: LKSpacing.xs) {
                     HStack(spacing: LKSpacing.s) {
                         Image(systemName: LockinSymbol.coin)
@@ -40,6 +46,10 @@ struct FinishedScreen: View {
                     Text(minutesText)
                         .font(.title3.weight(.medium))
                         .foregroundStyle(LKColor.textSecondary)
+                    if let squadPet, squadPet.xp > 0 {
+                        SquadXPLine(result: squadPet)
+                            .padding(.top, LKSpacing.xs)
+                    }
                 }
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)

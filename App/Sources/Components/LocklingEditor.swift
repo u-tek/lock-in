@@ -62,14 +62,24 @@ enum LocklingPart: String, CaseIterable, Identifiable {
 
 /// The Lockling maker: the creature, big, then a row of parts and the choices for the one picked.
 /// Used by onboarding and by Settings › Edit Lockling.
+///
+/// It offers what you own (M5): the defaults, the items you've bought (`owned`), the Plus options
+/// (which open the paywall without Plus) and whatever the Lockling had on when the editor opened.
+/// More come from the coin shop. Onboarding passes no `owned`: the first Lockling is free to make
+/// (SPEC.md §1.1), and the app keeps the parts picked there.
 struct LocklingEditor: View {
     @Binding var avatar: AvatarCode
     let isPlus: Bool
     /// A Plus-only choice was tapped without Plus: show the paywall.
     let onLockedOption: () -> Void
     var heroSize: CGFloat = 180
+    /// Item ids you own (`ShopStore.owned`); nil offers every option.
+    var owned: Set<String>? = nil
 
     @State private var part: LocklingPart = .body
+    /// The Lockling as the editor found it: its parts stay on offer even if they aren't items
+    /// you own (a Lockling made before the shop).
+    @State private var original: AvatarCode? = nil
 
     var body: some View {
         VStack(spacing: LKSpacing.xl) {
@@ -81,11 +91,29 @@ struct LocklingEditor: View {
             VStack(spacing: LKSpacing.l) {
                 PartTabs(selection: $part)
                     .padding(.horizontal, LKSpacing.xl)
-                OptionStrip(part: part, avatar: $avatar, isPlus: isPlus, onLockedOption: onLockedOption)
+                OptionStrip(part: part, options: offered(part), avatar: $avatar, isPlus: isPlus, onLockedOption: onLockedOption)
             }
         }
         .sensoryFeedback(.selection, trigger: avatar)
         .sensoryFeedback(.selection, trigger: part)
+        .onAppear {
+            if original == nil {
+                original = avatar
+            }
+        }
+    }
+
+    /// The part's options on offer: all of them without `owned`, else what's yours.
+    private func offered(_ part: LocklingPart) -> [CreatureOption] {
+        guard let owned, let shopPart = ShopPart(rawValue: part.rawValue) else { return part.options }
+        let wearing = part.selection(in: original ?? avatar)
+        return part.options.filter { option in
+            option.id == 0
+                || option.isPlus
+                || option.id == wearing
+                || option.id == part.selection(in: avatar)
+                || owned.contains(ShopItem.id(part: shopPart, option: option.id))
+        }
     }
 }
 
@@ -135,6 +163,8 @@ private struct PartTabs: View {
 /// (or the colour itself), with a crown on the Plus ones.
 private struct OptionStrip: View {
     let part: LocklingPart
+    /// The part's options on offer.
+    let options: [CreatureOption]
     @Binding var avatar: AvatarCode
     let isPlus: Bool
     let onLockedOption: () -> Void
@@ -143,7 +173,7 @@ private struct OptionStrip: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
                 HStack(spacing: 10) {
-                    ForEach(part.options) { option in
+                    ForEach(options) { option in
                         let isSelected = part.selection(in: avatar) == option.id
                         let isLocked = option.isPlus && !isPlus
                         Button {

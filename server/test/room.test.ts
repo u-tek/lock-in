@@ -205,6 +205,24 @@ describe("M5", () => {
     expect(app.value("SELECT hatched_at FROM squads WHERE id = ?", squadId)).toBe(T0 + 25 * 60);
   });
 
+  test("a room saved before gentle slips: a member whose slip stopped the timer has left, and doesn't hold the room open", async () => {
+    const created = await call(ava, "POST", "/squads", { name: "Night Owls" });
+    const squadId = created.body.squad.id;
+    const code = (await call(ava, "POST", `/squads/${squadId}/invite`)).body.code;
+    await call(noor, "POST", `/squads/join/${code}`);
+    const sid = (await call(ava, "POST", "/sessions", { squadId, minutes: 25 })).body.session.id;
+    await call(noor, "POST", "/sessions", { squadId, minutes: 25 });
+    // What M3 stored for Noor's slip: state 5, timer stopped (endedAt), no slipUntil.
+    const storage = app.rooms.entry(sid).state.storage;
+    const record = storage.data.get("room") as { members: Array<Record<string, unknown>> };
+    Object.assign(record.members[1] ?? {}, { s: 5, endedAt: T0 + 60, slips: 1 });
+    app.rooms.evict(sid);
+
+    expect((await direct(sid, ava.user.id, "state")).body.contentState.m[1].s).toBe(4);
+    expect((await call(ava, "POST", `/sessions/${sid}/end`)).status).toBe(200);
+    expect(app.value("SELECT status FROM sessions WHERE id = ?", sid)).toBe("ended");
+  });
+
   test("the 8-hour cap credits the minutes but doesn't make the pet sad: nobody chose it", async () => {
     const created = await call(ava, "POST", "/squads", { name: "Night Owls" });
     const squadId = created.body.squad.id;

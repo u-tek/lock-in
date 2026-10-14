@@ -114,16 +114,20 @@ describe("coins", () => {
     expect(coins(ava)).toBe(30);
   });
 
-  test("leaving early earns the whole minutes so far, without the bonus; a slip too; paused time doesn't count", async () => {
+  test("leaving early earns the whole minutes so far, without the bonus; a slip earns nothing by itself; paused time doesn't count", async () => {
     let sid = await start(ava, { minutes: 25 });
     await app.advance(10 * MINUTE + 59);
     await call(ava, "POST", `/sessions/${sid}/end`);
     expect(coins(ava)).toBe(10);
 
+    // A slip doesn't stop the timer (decision 0009): it's credited when it really stops, in full.
     sid = await start(ava, { minutes: 25 });
     await app.advance(5 * MINUTE);
     await call(ava, "POST", `/sessions/${sid}/slip`);
-    expect(coins(ava)).toBe(15);
+    expect(coins(ava)).toBe(10);
+    expect(app.count("SELECT count(*) FROM focus_log WHERE session_id = ?", sid)).toBe(0);
+    await app.advance(20 * MINUTE);
+    expect(coins(ava)).toBe(10 + 30);
 
     sid = await start(ava, { minutes: 25 });
     await app.advance(5 * MINUTE);
@@ -131,7 +135,7 @@ describe("coins", () => {
     await app.advance(10 * MINUTE);
     await call(ava, "POST", `/sessions/${sid}/resume`);
     await app.advance(20 * MINUTE);
-    expect(coins(ava)).toBe(15 + 25 + 5);
+    expect(coins(ava)).toBe(40 + 25 + 5);
     expect(app.count("SELECT count(*) FROM focus_log WHERE user_id = ?", ava.user.id)).toBe(3);
   });
 
@@ -219,7 +223,7 @@ describe("the pet", () => {
     expect(column(squadId, "pet_xp")).toBe(25);
     expect(column(squadId, "hatched_at")).toBeNull();
     expect((await stateOf(ava, sid)).p).toEqual({ k: `${species}.0`, md: 2, x: 0 });
-    expect((await mySquad(ava, squadId)).pet).toEqual({ species: expect.any(String), stage: 0, xp: 25, mood: 2, progress: 0 });
+    expect((await mySquad(ava, squadId)).pet).toEqual({ species: expect.any(String), stage: 0, xp: 25, mood: 2, progress: 0, accessory: null });
 
     // Noor finishes: two have, so it hatches, and today counts.
     app.apns.clear();
@@ -229,7 +233,7 @@ describe("the pet", () => {
     expect(column(squadId, "pet_xp")).toBe(75);
     expect(column(squadId, "pet_stage")).toBe(1);
     expect((await stateOf(ava, sid)).p).toEqual({ k: `${species}.1`, md: 3, x: 0.13 });
-    expect((await mySquad(noor, squadId)).pet).toEqual({ species, stage: 1, xp: 75, mood: 3, progress: 0.125 });
+    expect((await mySquad(noor, squadId)).pet).toEqual({ species, stage: 1, xp: 75, mood: 3, progress: 0.125, accessory: null });
     const [push] = app.apns.requests;
     expect(push?.priority).toBe(10);
     expect(push?.aps["content-state"].p).toEqual({ k: `${species}.1`, md: 3, x: 0.13 });
@@ -283,7 +287,7 @@ describe("the pet", () => {
     expect(column(squadId, "pet_xp")).toBe(640);
     expect(column(squadId, "pet_stage")).toBe(2);
     expect((await stateOf(ava, sid)).p).toEqual({ k: `${species}.2`, md: 3, x: 0.02 });
-    expect((await mySquad(ava, squadId)).pet).toEqual({ species, stage: 2, xp: 640, mood: 3, progress: 40 / 2400 });
+    expect((await mySquad(ava, squadId)).pet).toEqual({ species, stage: 2, xp: 640, mood: 3, progress: 40 / 2400, accessory: null });
   });
 
   test("an early leave or a slip makes it sad for 30 minutes; then the mood comes back by itself, at priority 5", async () => {
@@ -332,13 +336,13 @@ describe("the pet", () => {
     await app.advance(COALESCE_SECONDS);
     expect((await stateOf(kai, sid)).p.md).toBe(2);
     expect(app.apns.to(laToken(3)).map((request) => [request.priority, request.aps["content-state"].p.md])).toEqual([[5, 2]]);
-    expect((await mySquad(kai, squadId)).streak).toEqual({ count: 0, countedToday: false, doneToday: 1, needed: 2 });
+    expect((await mySquad(kai, squadId)).streak).toEqual({ count: 0, countedToday: false, doneToday: 1, needed: 2, frozenDays: [], freezes: 0 });
 
     // Noor too: two of three, so today counts.
     await solo(noor, 20);
     await app.advance(COALESCE_SECONDS);
     expect((await stateOf(kai, sid)).p.md).toBe(3);
-    expect((await mySquad(kai, squadId)).streak).toEqual({ count: 1, countedToday: true, doneToday: 2, needed: 2 });
+    expect((await mySquad(kai, squadId)).streak).toEqual({ count: 1, countedToday: true, doneToday: 2, needed: 2, frozenDays: [], freezes: 0 });
   });
 
   test("a session under 20 minutes feeds it but doesn't count for the streak", async () => {
@@ -377,7 +381,7 @@ describe("streaks", () => {
     const streak = async () => (await mySquad(ava, squadId)).streak;
 
     await solo(ava, 20);
-    expect(await streak()).toEqual({ count: 1, countedToday: true, doneToday: 1, needed: 1 });
+    expect(await streak()).toEqual({ count: 1, countedToday: true, doneToday: 1, needed: 1, frozenDays: [], freezes: 0 });
     expect([column(squadId, "streak_count"), column(squadId, "streak_last_day")]).toEqual([1, "2026-10-14"]);
     await solo(noor, 25);
     expect(await streak()).toMatchObject({ count: 1, doneToday: 2 });
@@ -388,7 +392,7 @@ describe("streaks", () => {
 
     // The next day it's still alive, just not counted yet.
     at("2026-10-16", 23);
-    expect(await streak()).toEqual({ count: 2, countedToday: false, doneToday: 0, needed: 1 });
+    expect(await streak()).toEqual({ count: 2, countedToday: false, doneToday: 0, needed: 1, frozenDays: [], freezes: 0 });
     expect((await mySquad(ava, squadId)).pet.mood).toBe(1);
 
     // The 16th went by without one: broken.
@@ -425,10 +429,11 @@ describe("streaks", () => {
     expect((await mySquad(ava, angeles)).streak).toMatchObject({ count: 2, countedToday: true });
     expect([column(sydney, "streak_last_day"), column(angeles, "streak_last_day")]).toEqual(["2026-10-15", "2026-10-15"]);
 
-    // Saturday morning in Sydney is still Friday in Los Angeles: Sydney's streak is broken, LA's alive.
+    // Saturday morning in Sydney is still Friday in Los Angeles: Sydney missed Friday, LA hasn't
+    // missed a day. Ava has Plus, so a freeze fills Sydney's Friday (M7) and its streak lives.
     app.clock.now = startOfDay("Australia/Sydney", "2026-10-17") + 6 * HOUR;
-    expect((await mySquad(ava, sydney)).streak.count).toBe(0);
-    expect((await mySquad(ava, angeles)).streak.count).toBe(2);
+    expect((await mySquad(ava, sydney)).streak).toMatchObject({ count: 1, frozenDays: ["2026-10-16"], freezes: 1 });
+    expect((await mySquad(ava, angeles)).streak).toMatchObject({ count: 2, frozenDays: [], freezes: 1 });
   });
 
   test("a finish written after midnight (D1 was down) counts for the day it happened", async () => {

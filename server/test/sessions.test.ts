@@ -12,7 +12,7 @@ import {
   payloadByteCount,
 } from "../src/liveActivity.ts";
 import { PET_RULES } from "../src/pet.ts";
-import { CHEER_SHOWN_SECONDS, COALESCE_SECONDS, ENDED_ROOM_KEPT_SECONDS, MEMBER_MAX_SECONDS } from "../src/room.ts";
+import { CHEER_SHOWN_SECONDS, COALESCE_SECONDS, ENDED_ROOM_KEPT_SECONDS, MEMBER_MAX_SECONDS, SLIP_SHOW_SECONDS } from "../src/room.ts";
 import { type SignedIn, T0, type TestApp, read, testApp } from "./app.ts";
 import { JWT_IN_LOG } from "./helpers.ts";
 import { laToken } from "./rooms.ts";
@@ -335,22 +335,109 @@ describe("pause, resume, end and slip", () => {
     expect(participant(sid, ava)).toMatchObject({ state: 4, focused_sec: 400, paused_at: null });
   });
 
-  test("a slip stops the timer (5) and counts", async () => {
+  test("a slip shows (5) for 5 minutes while the timer keeps running, then it's back to focusing at priority 5", async () => {
     const squadId = await squad(ava, noor);
     const sid = (await start(ava, { squadId, minutes: 25 })).session.id;
     await start(noor, { squadId, minutes: 25 });
-    app.clock.now = T0 + 120;
+    await upload(ava, sid, 1);
+    await app.advance(COALESCE_SECONDS);
+    app.apns.clear();
+    await app.advance(120 - COALESCE_SECONDS);
+
     const slipped = await call(noor, "POST", `/sessions/${sid}/slip`);
-    expect(slipped.body.contentState.m[1].s).toBe(MemberState.slipped);
-    expect(participant(sid, noor)).toMatchObject({ state: 5, slips: 1, focused_sec: 120, ended_at: T0 + 120 });
-    expect((await call(noor, "POST", `/sessions/${sid}/slip`)).body.code).toBe("bad_state");
+    // b and e as they were: the countdown carries on.
+    expect(slipped.body.contentState.m[1]).toEqual({ i: noor.user.id, n: "Noor", a: "b0.c0.e0.h0", s: MemberState.slipped, b: T0, e: T0 + 1500 });
+    expect(participant(sid, noor)).toMatchObject({ state: 5, slips: 1, focused_sec: 0, ended_at: null, paused_at: null });
     expect(app.value("SELECT type FROM events WHERE session_id = ? AND user_id = ? ORDER BY id DESC", sid, noor.user.id)).toBe("slip");
+    // Nothing credited until the timer really stops; the pet's sad spell starts now.
+    expect(app.count("SELECT count(*) FROM focus_log")).toBe(0);
+    expect(app.value("SELECT last_sad_at FROM squads WHERE id = ?", squadId)).toBe(T0 + 120);
+    // Still in a session: starting another is refused.
+    expect((await call(noor, "POST", "/sessions", { minutes: 25 })).body.code).toBe("already_in_session");
+
+    await app.advance(COALESCE_SECONDS);
+    expect(app.apns.requests.map((request) => [request.priority, request.aps["content-state"].m[1].s])).toEqual([[10, MemberState.slipped]]);
+    // The stale date still counts Noor: her timer runs to T0 + 1500.
+    expect(app.apns.requests[0]?.aps["stale-date"]).toBe(T0 + 1500 + STALE_AFTER_END_SECONDS);
+
+    app.apns.clear();
+    await app.advance(SLIP_SHOW_SECONDS - COALESCE_SECONDS - 1);
+    expect((await stateOf(noor, sid)).m[1].s).toBe(MemberState.slipped);
+    await app.advance(1 + COALESCE_SECONDS);
+    expect((await stateOf(noor, sid)).m[1]).toEqual({ i: noor.user.id, n: "Noor", a: "b0.c0.e0.h0", s: MemberState.focusing, b: T0, e: T0 + 1500 });
+    expect(participant(sid, noor)).toMatchObject({ state: 0, slips: 1, ended_at: null });
+    expect(app.apns.requests.map((request) => [request.priority, request.aps["content-state"].m[1].s])).toEqual([[5, MemberState.focusing]]);
+
+    // Her 25 minutes finish as usual, every minute focused, slip and all.
+    await app.advance(1500);
+    expect(participant(sid, noor)).toMatchObject({ state: MemberState.done, focused_sec: 1500, ended_at: T0 + 1500, slips: 1 });
+    expect(app.value("SELECT coins FROM focus_log WHERE user_id = ?", noor.user.id)).toBe(30);
+  });
+
+  test("another slip in the 5 minutes starts them again; slips only while focusing", async () => {
+    const squadId = await squad(ava, noor);
+    const sid = (await start(ava, { squadId, minutes: 25 })).session.id;
+    await start(noor, { squadId, minutes: 25 });
+    app.clock.now = T0 + 60;
+    await call(noor, "POST", `/sessions/${sid}/slip`);
+    app.clock.now = T0 + 200;
+    expect((await call(noor, "POST", `/sessions/${sid}/slip`)).status).toBe(200);
+    expect(participant(sid, noor)).toMatchObject({ state: 5, slips: 2 });
+    // 5 minutes from the second slip (T0 + 500), not the first (T0 + 360).
+    await app.advance(SLIP_SHOW_SECONDS - 1);
+    expect((await stateOf(noor, sid)).m[1].s).toBe(MemberState.slipped);
+    await app.advance(1);
+    expect((await stateOf(noor, sid)).m[1].s).toBe(MemberState.focusing);
+
+    // Paused, done or left: 409 bad_state, as before.
+    await call(noor, "POST", `/sessions/${sid}/pause`);
+    expect((await call(noor, "POST", `/sessions/${sid}/slip`)).body.code).toBe("bad_state");
+    await call(noor, "POST", `/sessions/${sid}/end`);
+    expect((await call(noor, "POST", `/sessions/${sid}/slip`)).body.code).toBe("bad_state");
+  });
+
+  test("slipped is running: pause, end and the timer running out work as they do while focusing", async () => {
+    const squadId = await squad(ava, noor, kai);
+    const sid = (await start(ava, { squadId, minutes: 25 })).session.id;
+    await start(noor, { squadId, minutes: 10 });
+    await start(kai, { squadId, minutes: 25 });
+
+    // Kai pauses while slipped: paused, and the slip is over.
+    app.clock.now = T0 + 60;
+    await call(kai, "POST", `/sessions/${sid}/slip`);
+    app.clock.now = T0 + 100;
+    expect((await call(kai, "POST", `/sessions/${sid}/pause`)).body.contentState.m[2]).toMatchObject({ s: MemberState.paused, q: T0 + 100 });
+    app.clock.now = T0 + 160;
+    expect((await call(kai, "POST", `/sessions/${sid}/resume`)).body.contentState.m[2]).toMatchObject({ s: MemberState.focusing, e: T0 + 1500 + 60 });
+
+    // Ava ends while slipped: she left early, with the time so far.
+    await call(ava, "POST", `/sessions/${sid}/slip`);
+    app.clock.now = T0 + 300;
+    expect((await call(ava, "POST", `/sessions/${sid}/end`)).body.contentState.m[0].s).toBe(MemberState.left);
+    expect(participant(sid, ava)).toMatchObject({ state: 4, focused_sec: 300, slips: 1 });
+
+    // Noor slips with under 5 minutes left: her time runs out while slipped, and she's done.
+    app.clock.now = T0 + 480;
+    await call(noor, "POST", `/sessions/${sid}/slip`);
+    await app.advance(120);
+    expect(participant(sid, noor)).toMatchObject({ state: MemberState.done, focused_sec: 600, ended_at: T0 + 600, slips: 1 });
+    expect(app.value("SELECT coins FROM focus_log WHERE user_id = ?", noor.user.id)).toBe(15);
+  });
+
+  test("a slip after the time ran out is a finish", async () => {
+    const squadId = await squad(ava, noor);
+    const sid = (await start(ava, { squadId, minutes: 25 })).session.id;
+    await start(noor, { squadId, minutes: 50 });
+    app.clock.now = T0 + 1500;
+    const response = await call(ava, "POST", `/sessions/${sid}/slip`);
+    expect(response.body.contentState.m[0].s).toBe(MemberState.done);
+    expect(participant(sid, ava)).toMatchObject({ slips: 0, focused_sec: 1500 });
   });
 
   test("the last one ending ends the room", async () => {
     const sid = (await start(ava, { minutes: 25 })).session.id;
     app.clock.now = T0 + 60;
-    await call(ava, "POST", `/sessions/${sid}/slip`);
+    await call(ava, "POST", `/sessions/${sid}/end`);
     expect({ ...(app.sqlite.prepare("SELECT status, ended_at FROM sessions").get() as object) }).toEqual({ status: "ended", ended_at: T0 + 60 });
     expect((await call(ava, "POST", `/sessions/${sid}/resume`)).body.code).toBe("session_ended");
     expect((await call(ava, "GET", `/sessions/${sid}`)).body.session.status).toBe("ended");

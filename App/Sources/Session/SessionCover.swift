@@ -29,6 +29,9 @@ struct SessionCover: View {
     /// The first squad session ever completed here: Lockin Plus's moment (SPEC.md §2, paywall
     /// moment 1).
     @State private var offersPlus: Bool
+    /// The squad pet's stage when this squad session began (M5): the finished screen shows the
+    /// hatch when it was an egg then and isn't now.
+    @State private var petStageAtStart: Int?
 
     /// - Parameters:
     ///   - squad: the room to show (snapshots); otherwise the engine's.
@@ -51,6 +54,7 @@ struct SessionCover: View {
         _shown = State(initialValue: engine.phase)
         _isSquad = State(initialValue: engine.mode != .solo || squad != nil || firstSquadFinish)
         _offersPlus = State(initialValue: firstSquadFinish)
+        _petStageAtStart = State(initialValue: Self.petStage(engine: engine, squads: social.squads))
     }
 
     var body: some View {
@@ -65,6 +69,11 @@ struct SessionCover: View {
             .onChange(of: engine.mode) { _, mode in
                 if mode != .solo {
                     isSquad = true
+                }
+            }
+            .onChange(of: engine.room?.p) { _, pet in
+                if petStageAtStart == nil, let pet {
+                    petStageAtStart = pet.code.stage
                 }
             }
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
@@ -96,6 +105,7 @@ struct SessionCover: View {
                 offersPlus: offersPlus,
                 onPlus: { showsPaywall = true },
                 share: shareCard(for: record),
+                squadPet: squadPetResult(for: record),
                 onDone: { engine.dismissFinished() }
             )
             .transition(.opacity)
@@ -116,6 +126,29 @@ struct SessionCover: View {
         )
     }
 
+    /// What the squad session did for the squad's pet (M5): your whole focused minutes as XP, and
+    /// the hatch when the pet has come out of its egg since this session began. Nil after a solo
+    /// session.
+    private func squadPetResult(for record: SessionRecord) -> SquadPetResult? {
+        guard isSquad, let squadID = engine.mode.squadId else { return nil }
+        let listed = squads.squad(id: squadID)
+        let pet = engine.room?.p
+        let stage = pet?.code.stage ?? listed?.pet.stage ?? 0
+        return SquadPetResult(
+            squadName: listed?.name ?? "your squad",
+            xp: record.focusedMinutes,
+            pet: pet?.code ?? listed?.pet.code,
+            mood: pet?.mood ?? listed?.pet.mood ?? PetMood.content.rawValue,
+            hatched: petStageAtStart == 0 && stage >= 1
+        )
+    }
+
+    /// The squad pet's stage now, from the room's state, else the squads list; nil when solo.
+    private static func petStage(engine: SessionEngine, squads: SquadsStore) -> Int? {
+        guard let squadID = engine.mode.squadId else { return nil }
+        return engine.room?.p?.code.stage ?? squads.squad(id: squadID)?.pet.stage
+    }
+
     /// The squad room on screen: the snapshot's, or the engine's in a squad session.
     private var squad: SquadSessionInfo? {
         if let squadPreview {
@@ -132,6 +165,9 @@ struct SessionCover: View {
             // A new session can start from the finish screen (a widget, say): it's whatever the
             // engine says now.
             isSquad = engine.mode != .solo
+            if petStageAtStart == nil || !isSquad {
+                petStageAtStart = Self.petStage(engine: engine, squads: squads)
+            }
         case .finished(let record):
             if record.completed, isSquad, !plus.isPlus {
                 offersPlus = PlusMoments.claimFirstSquadFinish()

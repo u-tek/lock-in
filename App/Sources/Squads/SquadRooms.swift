@@ -11,7 +11,8 @@ import Model
 /// squad, Plus three. A room it can't read just shows as open, without a count.
 @MainActor
 final class SquadRooms: ObservableObject {
-    /// People in the room who are still going (focusing, on a break or paused), by session id.
+    /// People in the room who are still going (focusing, on a break, paused, or slipped with the
+    /// timer still running), by session id.
     @Published private(set) var lockedIn: [String: Int]
 
     private let api: (any LockinAPI)?

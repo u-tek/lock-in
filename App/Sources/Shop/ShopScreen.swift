@@ -21,11 +21,11 @@ struct ShopScreen: View {
     @Binding var avatar: AvatarCode
     let onDone: () -> Void
 
-    @State private var confirming: ShopItem?
+    @State private var confirming: ShopItem? = nil
     /// Just bought: a note at the bottom for a moment.
-    @State private var bought: ShopItem?
+    @State private var bought: ShopItem? = nil
     @State private var showsPaywall = false
-    @State private var failure: String?
+    @State private var failure: String? = nil
 
     /// The parts in the order the shop shows them.
     static let parts: [ShopPart] = [.hat, .colour, .eyes, .body]

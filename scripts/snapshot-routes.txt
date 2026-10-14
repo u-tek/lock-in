@@ -22,6 +22,7 @@ finished
 finished.first
 finished.squad
 finished.share
+finished.hatch
 friends.signin
 friends.username
 friends.empty
@@ -32,9 +33,12 @@ friends.unavailable
 squads.list
 squads.new
 squads.detail
+squads.detail.egg
 squads.join
 squads.joined
 paywall
+shop
+shop.bought
 settings
 settings.account
 settings.notifications

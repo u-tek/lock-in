@@ -158,6 +158,39 @@ enum SnapshotGallery {
                 share: ShareSamples.squad,
                 onDone: {}
             ))
+        case "finished.hatch":
+            // The squad's egg hatched in this session (M5).
+            guard case .finished(let record) = SnapshotData.finished(now: now) else { return nil }
+            return AnyView(FinishedScreen(
+                record: record,
+                avatar: SampleLocklings.you,
+                offersFriends: false,
+                onFriends: {},
+                squadPet: SnapshotData.hatch,
+                onDone: {}
+            ))
+        case "shop":
+            // From Home's coin count: 120 coins, wearing a beanie (M5).
+            return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus, social in
+                ShopScreen(shop: social.shop, account: social.account, plus: plus, avatar: .constant(engine.avatar), onDone: {})
+            })
+        case "shop.bought":
+            // The cap, just bought for 100 and on.
+            let cap = ShopCatalogue.item(id: "hat.3")
+            return AnyView(PreviewModels(
+                stats: SnapshotData.regular,
+                coins: 20,
+                owned: ShopCatalogue.freeItemIDs(wornBy: SampleLocklings.you) + ["hat.3"]
+            ) { engine, plus, social in
+                ShopScreen(
+                    shop: social.shop,
+                    account: social.account,
+                    plus: plus,
+                    avatar: .constant(cap?.applied(to: engine.avatar) ?? engine.avatar),
+                    bought: cap,
+                    onDone: {}
+                )
+            })
         case "paywall":
             return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus, _ in
                 PaywallView(store: plus, avatar: engine.avatar, onClose: {})
@@ -264,17 +297,37 @@ enum SnapshotGallery {
                 NewSquadSheet(squads: social.squads, plus: plus, avatar: engine.avatar, name: "Night Owls", focusesField: false) { _ in }
             })
         case "squads.detail":
+            // The teen sprout, happy, six days running, and the week (M5).
             return AnyView(PreviewModels(
                 stats: SnapshotData.regular,
                 account: .signedIn(SnapshotData.me),
                 friends: SnapshotData.friends,
-                squads: [SnapshotData.squad]
+                squads: [SnapshotData.squad],
+                leaderboards: [SnapshotData.squad.id: SnapshotData.leaderboard]
             ) { _, _, social in
                 NavigationStack {
                     SquadDetailScreen(
                         squads: social.squads,
                         friends: social.friends,
                         squadID: SnapshotData.squad.id,
+                        myID: SnapshotData.me.id,
+                        invite: SnapshotData.squadCode
+                    )
+                }
+            })
+        case "squads.detail.egg":
+            // A new squad: its egg, tinted by what's inside, and nobody's focused yet this week.
+            return AnyView(PreviewModels(
+                stats: SnapshotData.regular,
+                account: .signedIn(SnapshotData.me),
+                friends: SnapshotData.friends,
+                squads: [SnapshotData.eggSquad]
+            ) { _, _, social in
+                NavigationStack {
+                    SquadDetailScreen(
+                        squads: social.squads,
+                        friends: social.friends,
+                        squadID: SnapshotData.eggSquad.id,
                         myID: SnapshotData.me.id,
                         invite: SnapshotData.squadCode
                     )
@@ -445,7 +498,45 @@ private enum SnapshotData {
             members: members,
             openSessionId: squadSessionID,
             muted: false,
-            pet: SquadPet(species: nil, stage: 0, xp: 0)
+            pet: SquadPet(species: "sprout", stage: 2, xp: 1_450, mood: PetMood.happy.rawValue),
+            streak: SquadStreak(count: 6, countedToday: true, doneToday: 2, needed: 2),
+            tz: "Europe/London"
+        )
+    }
+
+    /// The same four the day the squad was made: an ember's egg, hungry, nobody focused yet.
+    static var eggSquad: Squad {
+        var egg = Self.squad
+        egg.id = "sqNewEgg01"
+        egg.name = "Night Owls"
+        egg.openSessionId = nil
+        egg.pet = SquadPet(species: "ember", stage: 0, xp: 0, mood: PetMood.hungry.rawValue)
+        egg.streak = SquadStreak(count: 0, countedToday: false, doneToday: 0, needed: 2)
+        return egg
+    }
+
+    /// The squad's week: Noor ahead, Sam second.
+    static var leaderboard: Leaderboard {
+        let minutes = ["unoor": (310, 8), me.id: (245, 7), "uava": (180, 5), "ukai": (95, 3)]
+        let order = ["unoor", me.id, "uava", "ukai"]
+        return Leaderboard(
+            weekStart: "2026-10-12",
+            startsAt: 1_791_759_600,
+            endsAt: 1_792_364_400,
+            entries: order.map { id in
+                Leaderboard.Entry(userId: id, minutes: minutes[id]?.0 ?? 0, sessions: minutes[id]?.1 ?? 0)
+            }
+        )
+    }
+
+    /// A finish that hatched the squad's egg: a baby sprout, happy, and Sam's 25 minutes of XP.
+    static var hatch: SquadPetResult {
+        SquadPetResult(
+            squadName: squad.name,
+            xp: 25,
+            pet: PetCode(species: "sprout", stage: 1),
+            mood: PetMood.happy.rawValue,
+            hatched: true
         )
     }
 
@@ -524,11 +615,15 @@ private struct PreviewModels<Content: View>: View {
     @StateObject private var friends: FriendsStore
     @StateObject private var squads: SquadsStore
     @StateObject private var rooms: SquadRooms
+    @StateObject private var shop: ShopStore
     private let content: (SessionEngine, PlusStore, SocialModels) -> Content
 
     /// - Parameters:
     ///   - account: signed out unless a shot says otherwise.
     ///   - isConfigured: false for a build without a server.
+    ///   - coins: the shop's balance signed out (M5); the stats' coins unless said. Signed in,
+    ///     it's the account's.
+    ///   - owned: the shop items owned; what the sample Lockling wears unless said.
     init(
         phase: SessionEngine.Phase = .idle,
         stats: FocusStats,
@@ -539,7 +634,10 @@ private struct PreviewModels<Content: View>: View {
         suggestedName: String? = nil,
         friends: [Friend] = [],
         squads: [Squad] = [],
+        leaderboards: [String: Leaderboard] = [:],
         roomCounts: [String: Int] = [:],
+        coins: Int? = nil,
+        owned: [String]? = nil,
         @ViewBuilder content: @escaping (SessionEngine, PlusStore, SocialModels) -> Content
     ) {
         _engine = StateObject(wrappedValue: SessionEngine.preview(
@@ -557,13 +655,18 @@ private struct PreviewModels<Content: View>: View {
             code: SnapshotData.code,
             redeems: SnapshotData.friends[1]
         ))
-        _squads = StateObject(wrappedValue: SquadsStore.preview(squads: squads))
+        _squads = StateObject(wrappedValue: SquadsStore.preview(squads: squads, leaderboards: leaderboards))
         _rooms = StateObject(wrappedValue: SquadRooms.preview(roomCounts))
+        _shop = StateObject(wrappedValue: ShopStore.preview(
+            account: accountStore,
+            coins: coins ?? stats.coins,
+            owned: owned ?? ShopCatalogue.freeItemIDs(wornBy: SampleLocklings.you)
+        ))
         self.content = content
     }
 
     var body: some View {
-        content(engine, plus, SocialModels(account: account, friends: friends, squads: squads, rooms: rooms))
+        content(engine, plus, SocialModels(account: account, friends: friends, squads: squads, rooms: rooms, shop: shop))
     }
 }
 

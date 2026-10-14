@@ -210,7 +210,10 @@ private func range(_ member: WireMember) -> ClosedRange<Date> {
     @Test func mySlipKeepsMyTimeInTheIsland() throws {
         let mine = wire("me", .slipped)
         let presentation = squad([mine, wire("ava", .onBreak)])
-        #expect(presentation.compactTrailing == .countdown(.running(range(mine)), tone: .slipped))
+        let me = try #require(presentation.primary)
+        #expect(me.countdown == .running(range(mine)))
+        #expect(me.tone.rawValue == MemberState.slipped.rawValue)
+        #expect(presentation.compactTrailing == .countdown(me.countdown, tone: me.tone))
         #expect(presentation.compactTrailingAccessibilityLabel == "me, you, slipped")
     }
 
@@ -230,7 +233,7 @@ private func range(_ member: WireMember) -> ClosedRange<Date> {
         #expect(presentation.members[0].countdown == .running(range(ava)))
         #expect(presentation.members[1].countdown == .running(range(noor)))
         #expect(presentation.members[2].countdown == .running(range(jules)))
-        #expect(presentation.members[2].tone == .slipped)
+        #expect(presentation.members[2].tone.rawValue == MemberState.slipped.rawValue)
         #expect(presentation.members[2].countdown.staticText == nil)
         #expect(presentation.members[0].countdown.staticText == nil)
         #expect(presentation.members[0].countdown.frozenRemaining == nil)
