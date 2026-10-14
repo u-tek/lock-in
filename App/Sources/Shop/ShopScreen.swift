@@ -115,7 +115,6 @@ struct ShopScreen: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Your Lockling")
             CoinCount(coins: shop.coins)
-                .font(LKFont.headline)
                 .padding(.horizontal, LKSpacing.l)
                 .frame(minHeight: 36)
                 .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
@@ -149,19 +148,19 @@ struct ShopScreen: View {
     }
 
     private func tile(_ item: ShopItem) -> some View {
-        let state = state(of: item)
+        let itemStatus = status(of: item)
         return Button {
-            tap(item, state)
+            tap(item, itemStatus)
         } label: {
-            ItemTile(item: item, preview: item.applied(to: avatar), state: state)
+            ItemTile(item: item, preview: item.applied(to: avatar), status: itemStatus)
         }
         .buttonStyle(TileButtonStyle())
-        .disabled(state.isShort || shop.buying != nil)
+        .disabled(itemStatus.isShort || shop.buying != nil)
         .accessibilityLabel(Text(verbatim: item.name))
-        .accessibilityValue(Text(verbatim: state.spoken(price: item.price)))
+        .accessibilityValue(Text(verbatim: itemStatus.spoken(price: item.price)))
     }
 
-    private func state(of item: ShopItem) -> ItemTile.State {
+    private func status(of item: ShopItem) -> ItemTile.Status {
         if item.isWorn(by: avatar) {
             return .wearing
         }
@@ -179,8 +178,8 @@ struct ShopScreen: View {
 
     // MARK: - Actions
 
-    private func tap(_ item: ShopItem, _ state: ItemTile.State) {
-        switch state {
+    private func tap(_ item: ShopItem, _ status: ItemTile.Status) {
+        switch status {
         case .wearing, .buying:
             return
         case .owned:
@@ -216,7 +215,7 @@ struct ShopScreen: View {
 
 /// One item: your Lockling wearing it, its name, and its price, or that it's yours.
 private struct ItemTile: View {
-    enum State: Equatable {
+    enum Status: Equatable {
         /// On your Lockling now.
         case wearing
         /// Yours: tap to put it on.
@@ -247,7 +246,7 @@ private struct ItemTile: View {
 
     let item: ShopItem
     let preview: AvatarCode
-    let state: State
+    let status: Status
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: LKRadius.medium, style: .continuous)
@@ -259,12 +258,12 @@ private struct ItemTile: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-            status
+            statusLine
                 .font(LKFont.footnote.weight(.medium))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .monospacedDigit()
-            if case .forSale(let shortfall) = state, shortfall > 0 {
+            if case .forSale(let shortfall) = status, shortfall > 0 {
                 Text("\(shortfall) more")
                     .font(LKFont.caption)
                     .foregroundStyle(LKColor.textSecondary)
@@ -276,7 +275,7 @@ private struct ItemTile: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: shape)
         .overlay {
-            if state == .wearing {
+            if status == .wearing {
                 shape.strokeBorder(.tint, lineWidth: 2.5)
             }
         }
@@ -286,13 +285,13 @@ private struct ItemTile: View {
                     .padding(LKSpacing.s)
             }
         }
-        .opacity(state.isShort ? 0.55 : 1)
+        .opacity(status.isShort ? 0.55 : 1)
         .contentShape(shape)
     }
 
     @ViewBuilder
-    private var status: some View {
-        switch state {
+    private var statusLine: some View {
+        switch status {
         case .wearing:
             Label("Wearing", systemImage: "checkmark")
                 .foregroundStyle(.tint)
@@ -332,7 +331,6 @@ private struct BoughtNote: View {
         .padding(.vertical, LKSpacing.m)
         .background(.regularMaterial, in: Capsule())
         .padding(.bottom, LKSpacing.l)
-        .accessibilityAddTraits(.updatesFrequently)
     }
 }
 
