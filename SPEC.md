@@ -224,6 +224,8 @@ revenuecat_events(id PK, type, received_at)               -- webhook events, eac
 review_redemptions(at)                                    -- Demo Buddy's review code, rate limit
 events(id PK, session_id, user_id, type, at, meta_json)   -- for stats & debugging
 cosmetics(user_id, item_id, acquired_at)
+metrics_daily(day, event, count)                          -- app analytics as daily totals, no user (decision 0010, proposed)
+metrics_batches(day, batches)                             -- their daily cap
 ```
 
 ### 4.7 API (JSON over HTTPS; bearer token after Sign in with Apple)
@@ -248,6 +250,8 @@ PATCH  /squads/:id/pet                  { accessory }   (Squad Boost, Plus)
 POST   /me/plus/refresh   POST /webhooks/revenuecat
 POST   /squads/:id/demo-buddy/lock-in   (Review Squads only, §7)
 POST   /admin/push-test                 (dev only) send a test update to a session
+GET    /   /privacy   /terms   /support  web pages: home, and the policies from docs/launch/ (M9)
+POST   /metrics                         { counts } analytics counts, no auth (decision 0010, proposed)
 ```
 The server is authoritative for squads, streaks, XP and coins. The app is authoritative for its own timer while offline and reconciles on reconnect.
 

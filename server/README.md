@@ -14,6 +14,9 @@ the egg hatches when two members finish together, and coins buy Lockling cosmeti
 Plus** from RevenueCat (its webhook and a refresh route), **Squad Boost** (a Plus member unlocks pet
 accessories for the whole squad) and **streak freezes**. For App Review there's **Demo Buddy**, a
 labelled server bot that joins the reviewer's squad sessions (`docs/launch/app-review-notes.md` §3).
+For the launch (M9) it serves **the web pages**: a home page, and the privacy policy, terms and
+support page from the drafts in `docs/launch/`; and **`POST /metrics`**, the app's analytics counts
+as daily totals, if the owner picks that option (`docs/decisions/0010-analytics-provider.md`).
 The contracts the app is written against are `docs/milestones/M2.md` to `M5.md` and `M7.md`.
 
 | Route | Auth | What it does |
@@ -59,11 +62,15 @@ The contracts the app is written against are `docs/milestones/M2.md` to `M5.md` 
 | `POST /sessions/:id/cheer` | bearer | `{ to, kind }` (0–7) → 204, one per 10 s |
 | `GET /sessions/:id` | bearer | `{ session, contentState }`, for reconciling on foreground |
 | `GET /sessions/:id/live` | bearer | WebSocket: `{"type": "state", "status", "contentState"}` on connect and after every change |
+| `GET /` | | The home page (HTML): the name, one line, the App Store link (`APP_STORE_URL`) and links to the pages below. HEAD too |
+| `GET /privacy`, `/terms`, `/support` | | `docs/launch/privacy-policy.md`, `terms.md` and `support.md` as pages ("Web pages" below). HEAD too |
+| `POST /metrics` | | `{ counts: { "<event>": n } }` → 204: adds the app's counts to today's totals; nothing about the caller is kept ("Analytics counts" below) |
 
 Everything else answers `404`. Errors are `{"error": "<a sentence>", "code": "<machine code>"}`;
 the app switches on `code`. A few carry one more field: `limit` on 402 `plus_required`, `sessionId`
 on 409 `already_in_session`, `retryAfter` (seconds) on 429 `cheer_too_soon` and 429 `rate_limited`
-(the review code), `itemId` on 403 `item_not_owned`. The codes per route are
+(the review code, `/metrics`), which also goes in a `Retry-After` header, and `itemId` on 403
+`item_not_owned`. The codes per route are
 in `docs/milestones/M2.md` to `M5.md`; on top of those, any route can answer
 `400 bad_request` (a body that isn't a JSON object), `413 too_large` (a body over 16 KB) and
 `500 internal`, and `POST /auth/apple` answers `502 apple_unavailable` when Apple's keys can't be
@@ -75,6 +82,10 @@ fetched.
 | `src/accounts.ts` | `/auth/apple`, `/me`, `/handles/:handle`, `/devices` |
 | `src/friends.ts` | `/friends…`, `/blocks…`, `/reports` |
 | `src/invite.ts` | `/j/:code` and the apple-app-site-association file |
+| `src/pages.ts` | `/`, `/privacy`, `/terms`, `/support`: the drafts in `docs/launch/`, bundled as text |
+| `src/markdown.ts` | The small Markdown renderer behind those pages: escapes everything, links only to http(s), mailto and this site, highlights `[OWNER: …]` |
+| `src/web.ts` | The pages' shared shell and styles (the invite page uses it too), and `APP_STORE_URL` |
+| `src/metrics.ts` | `POST /metrics`: the event names in `fixtures/analytics/events.json`, the limits |
 | `src/squads.ts` | `/squads…`: limits, codes, joining, leaving and handing on, the leaderboard |
 | `src/shop.ts` | `/shop…`, `/me/cosmetics`: the catalogue, buying, what you own, and `PATCH /me`'s ownership check |
 | `src/pet.ts` | The pet's rules from `fixtures/pet/rules.json`: stages, progress, mood, the streak's share, coins |
@@ -98,13 +109,15 @@ fetched.
 | `src/apns.ts` | The APNs sender, for Live Activity pushes and alerts: token auth with an ES256 JWT (signed itself, or from `ApnsAuth`), one retry on `ExpiredProviderToken` (never on a 429), bodies over 4 KB refused before sending |
 | `src/jwt.ts` | ES256 signing with Web Crypto, from a `.p8` file |
 | `src/demo.ts` | The spike's scenarios: `squad`, `join`, `cheer`, `end` |
-| `migrations/` | The D1 schema (SPEC.md §4.6); `0002_accounts.sql` adds sessions, Apple's refresh token and report notes; `0003_squads.sql` adds `participants.la_env` and the indexes that keep one running timer per user and one open room per squad; `0004_invites.sql` adds quiet hours to `devices` and the `alerts` log; `0005_pet.sql` adds the squad's zone, hatching and sad spells, the one-off coins import, and `focus_log` (every timer that stopped, and what it earned); `0006_demo_buddy.sql` adds `users.is_bot`, `squads.review`, Demo Buddy's own row and the review code's redemption log; `0007_plus.sql` adds RevenueCat's handled events, `users.plus_event_ms`, `squads.pet_accessory` and `streak_freezes` |
+| `migrations/` | The D1 schema (SPEC.md §4.6); `0002_accounts.sql` adds sessions, Apple's refresh token and report notes; `0003_squads.sql` adds `participants.la_env` and the indexes that keep one running timer per user and one open room per squad; `0004_invites.sql` adds quiet hours to `devices` and the `alerts` log; `0005_pet.sql` adds the squad's zone, hatching and sad spells, the one-off coins import, and `focus_log` (every timer that stopped, and what it earned); `0006_demo_buddy.sql` adds `users.is_bot`, `squads.review`, Demo Buddy's own row and the review code's redemption log; `0007_plus.sql` adds RevenueCat's handled events, `users.plus_event_ms`, `squads.pet_accessory` and `streak_freezes`; `0008_metrics.sql` adds `metrics_daily` and `metrics_batches`, the analytics totals |
 | `test/` | vitest. Route tests run real SQL on an in-memory SQLite behind a D1 stand-in (`test/d1.ts`), against a fake Apple with generated keys (`test/app.ts`). Rooms run on a fake Durable Objects runtime (`test/rooms.ts`: storage, alarms the test fires as its clock moves, WebSockets, eviction) and push to a fake APNs. The shared fixtures in `fixtures/live-activity/`, `fixtures/moderation/`, `fixtures/pet/` and `fixtures/shop/` are tested here and by the Swift tests |
 
 The moderation word list is imported straight from `fixtures/moderation/words.json`: wrangler
 bundles it into the Worker like any other import, so there is one copy, and a word added there
-reaches the server and the app's tests together. Deploy from a full checkout of the repository
-(it is outside `server/`).
+reaches the server and the app's tests together. The same goes for `fixtures/analytics/events.json`
+and, as text, for the Markdown drafts in `docs/launch/` (the `[[rules]]` "Text" entry in
+`wrangler.toml`; `vitest.config.ts` loads `.md` files the same way). Deploy from a full checkout
+of the repository (they're outside `server/`).
 
 Logs say what happened, never who: no tokens, ids, handles or names, only counts and outcomes. The
 one id that appears is a room's (a session id), so a room's lines can be followed.
@@ -193,7 +206,8 @@ Objects) and, from the Apple developer portal:
      `https://lockin-api.yourname.workers.dev` and `LOCKIN_ADMIN_TOKEN` = the admin token, for the
      push-test workflow; `LK_API_HOST` = `lockin-api.yourname.workers.dev` (host only, no
      `https://`), for TestFlight builds. CI writes it into `Config/Local.xcconfig`, so there's
-     nothing to edit locally.
+     nothing to edit locally. Once the domain points at the Worker (M9), add `LK_WEB_HOST` = the
+     domain too: the app's Terms, Privacy and Support links go there instead of the API host.
 
 To watch requests as they happen: `npx wrangler tail`. The Worker logs the APNs status and the
 payload size, never a token or the key.
@@ -239,7 +253,68 @@ INVITE_HOST = "lockin.app"
 The same host serves `/.well-known/apple-app-site-association` (`applinks` for
 `<APNS_TEAM_ID>.<APNS_BUNDLE_ID>`, paths `/j/*`), so with the Associated Domains entitlement
 `applinks:<INVITE_HOST>` in the app, links open Lockin directly. The landing page's App Store link
-is a placeholder (`APP_STORE_URL` in `src/invite.ts`) until the app has its App Store page.
+is a placeholder until `APP_STORE_URL` is set under `[vars]` ("Web pages" below).
+
+## Web pages (M9)
+
+The Worker serves the launch pages from the same host as the invite links, so once the domain
+points at it (`docs/launch/checklist.md` §1) they're at `https://<domain>/privacy` and so on:
+
+| Path | Page |
+|---|---|
+| `/` | Home: "Lockin", one line, the App Store button, links to the three below |
+| `/privacy` | `docs/launch/privacy-policy.md`: the Privacy Policy URL for App Store Connect and the app |
+| `/terms` | `docs/launch/terms.md`: linked from the paywall (Guideline 3.1.2) |
+| `/support` | `docs/launch/support.md`: the Support URL for App Store Connect |
+
+The Markdown is bundled into the Worker when it's built, so **to change a page, edit the draft and
+deploy**. `src/markdown.ts` renders it: headings, paragraphs, bold and italic, `code`, links,
+lists, tables, quotes and rules, which is everything the drafts use. Raw HTML in a draft shows as
+text, and links only work to `https://`, `mailto:` and paths on this site (`/privacy`). An email
+address in the text becomes a mailto link by itself; end a line with `\` to break it there (the
+Contact sections do).
+
+The pages look like the invite page and have the same CSP: inline styles only, nothing loads from
+anywhere else. Every `[OWNER: …]` placeholder is highlighted in yellow, a "Draft" note at the top
+counts them, and the page answers with `x-robots-tag: noindex` (and a robots meta tag) until the
+last one is gone. The home page is a draft in the same way until `APP_STORE_URL` is set:
+
+```toml
+# wrangler.toml, [vars]: the app's page once it has an App Store ID
+APP_STORE_URL = "https://apps.apple.com/app/lockin/id1234567890"
+```
+
+It's the invite landing page's App Store link too. The pages are cached for 5 minutes.
+
+## Analytics counts (proposed)
+
+`docs/decisions/0010-analytics-provider.md` proposes no analytics provider: App Store Connect's
+App Analytics for retention, and the app's own integer counts sent here. Until the owner decides,
+the app keeps its counts in the unified log and never calls this route.
+
+`POST /metrics` takes `{ "counts": { "app.opened": 2, "session.completed": 1 } }` and answers 204.
+The names must be in `fixtures/analytics/events.json` (the app's `AnalyticsEvent`; both test
+suites check it), and each count is a whole number from 1 to 250. Anything else is 422
+`metrics_invalid`, and nothing from that batch is kept. No sign-in: a bearer token, if sent, is
+never read. Each count is added to `metrics_daily` (UTC day, event, total), so nothing is linked to
+anyone, and there's nothing to delete with an account.
+
+Limits, both 429 `rate_limited` with `Retry-After`:
+
+- **20 batches a minute from one IP address**, by Cloudflare's rate-limiting binding
+  (`[[ratelimits]]` `METRICS_LIMITER` in `wrangler.toml`; Cloudflare keeps the counter, we never
+  store the address). If your plan refuses the binding at deploy, delete that block: the daily cap
+  still applies.
+- **10,000 batches a day** in all (`DAILY_BATCH_LIMIT` in `src/metrics.ts`), so a flood can't use
+  up D1's free daily writes (100,000 rows) that the rest of the API needs. Each batch writes one
+  row per event in it plus one.
+
+The app is to send one batch a day, so `metrics_batches.batches` is also roughly how many phones
+opened Lockin that day. To read the totals:
+
+```powershell
+npx wrangler d1 execute lockin --remote --command "SELECT day, event, count FROM metrics_daily WHERE day >= date('now', '-7 days') ORDER BY day, event"
+```
 
 ## The rooms (M3)
 
@@ -393,6 +468,18 @@ expires; change it for each submission by putting a new one. Setting `DEMO_BUDDY
 anything else is the kill switch: the code is unknown (404), the lock-in route is 404 and Demo
 Buddy stops joining rooms (one already in a room finishes its script). Review Squads made earlier
 stay, with Demo Buddy listed.
+
+## Upgrading to M9
+
+```powershell
+cd server
+npx wrangler d1 migrations apply lockin --remote   # applies 0008_metrics.sql
+npx wrangler deploy
+```
+
+The web pages need nothing else; set `APP_STORE_URL` once the app has its App Store page ("Web
+pages" above). The deploy creates the `METRICS_LIMITER` rate limiter from `wrangler.toml`. No new
+secrets.
 
 ## Upgrading to M7
 

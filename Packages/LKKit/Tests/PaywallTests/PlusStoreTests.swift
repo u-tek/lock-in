@@ -1,3 +1,4 @@
+import Core
 import Creature
 import Foundation
 import Model
@@ -53,6 +54,22 @@ import Testing
     @Test func paywallBuildsWithAPreviewStore() {
         _ = PaywallView(store: .preview(), avatar: .default) {}
         _ = PaywallView(store: .preview(isPlus: true), avatar: AvatarCode("b1.c2.e3.h0")) {}
+    }
+
+    /// Terms and Privacy (Guideline 3.1.2) go to the website's pages (M9), and hide in a build
+    /// with no host rather than pointing at a placeholder.
+    @Test func termsAndPrivacyGoToTheWebsite() {
+        let site = AppConfiguration(apiHost: "lockin-api.example.workers.dev", webHost: "lockin.app")
+        let paywall = PaywallView(store: .preview(), avatar: .default, configuration: site) {}
+        #expect(paywall.termsURL?.absoluteString == "https://lockin.app/terms")
+        #expect(paywall.privacyURL?.absoluteString == "https://lockin.app/privacy")
+
+        let apiOnly = PaywallView(store: .preview(), avatar: .default, configuration: AppConfiguration(apiHost: "lockin-api.example.workers.dev")) {}
+        #expect(apiOnly.termsURL?.absoluteString == "https://lockin-api.example.workers.dev/terms")
+
+        let noHost = PaywallView(store: .preview(), avatar: .default, configuration: AppConfiguration()) {}
+        #expect(noHost.termsURL == nil)
+        #expect(noHost.privacyURL == nil)
     }
 
     @Test func theHeroWearsTheCrown() throws {

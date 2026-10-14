@@ -8,13 +8,18 @@
 //
 // The page is public: it shows a friend code's creator's display name, or a squad code's squad name,
 // and nothing else about them.
-// Everything is escaped and nothing loads from anywhere else (src/http.ts sets the CSP).
+// Everything is escaped and nothing loads from anywhere else (src/http.ts sets the CSP). The page's
+// shell and styles are shared with the home and policy pages (src/web.ts).
 
 import type { Context } from "./context.ts";
 import { canonicalFriendCode } from "./friends.ts";
 import { escapeHTML, html, json, notFound } from "./http.ts";
+import { appStoreURL, htmlDocument } from "./web.ts";
 
-/** M9: the app's App Store page once it has one. */
+/**
+ * Where "Get it on the App Store" goes until `APP_STORE_URL` is set (src/web.ts): the app's page
+ * once it has an App Store ID (M9).
+ */
 export const APP_STORE_URL = "https://apps.apple.com/app/lockin/id0000000000";
 
 type Landing =
@@ -28,20 +33,22 @@ type Landing =
 export async function invitePage(context: Context, rawCode: string): Promise<Response> {
   const code = canonicalFriendCode(rawCode);
   const invite = code === undefined ? null : await context.db.inviteCode(code);
-  if (code === undefined || invite === null) return html(landingPage({ kind: "unknown" }), 404);
-  if (invite.expires_at !== null && invite.expires_at <= context.now) return html(landingPage({ kind: "expired" }), 410);
+  const store = appStoreURL(context.env) ?? APP_STORE_URL;
+  if (code === undefined || invite === null) return html(landingPage({ kind: "unknown" }, store), 404);
+  if (invite.expires_at !== null && invite.expires_at <= context.now) return html(landingPage({ kind: "expired" }, store), 410);
   if (invite.kind === "squad") {
     // M3: a squad code shows the squad's name (moderated like display names), nothing about its members.
     const squad = await context.db.squadById(invite.target_id);
-    if (squad === null) return html(landingPage({ kind: "unknown" }), 404);
-    return html(landingPage({ kind: "squad", code, squad: squad.name }));
+    if (squad === null) return html(landingPage({ kind: "unknown" }, store), 404);
+    return html(landingPage({ kind: "squad", code, squad: squad.name }, store));
   }
   const creator = await context.db.userById(invite.created_by);
-  if (creator === null) return html(landingPage({ kind: "unknown" }), 404);
-  return html(landingPage({ kind: "invite", code, name: creator.display_name }));
+  if (creator === null) return html(landingPage({ kind: "unknown" }, store), 404);
+  return html(landingPage({ kind: "invite", code, name: creator.display_name }, store));
 }
 
-export function landingPage(landing: Landing): string {
+export function landingPage(landing: Landing, storeURL: string = APP_STORE_URL): string {
+  const store = escapeHTML(storeURL);
   let title: string;
   let body: string;
   if (landing.kind === "invite") {
@@ -51,7 +58,7 @@ export function landingPage(landing: Landing): string {
   <p class="lede">Focus together. Your friends' timers sit right on your Lock Screen while you all work.</p>
   <a class="button" href="lockin://j/${code}">Open in Lockin</a>
   <div class="card">
-    <p class="step">New to Lockin? <a href="${escapeHTML(APP_STORE_URL)}">Get it on the App Store</a>, then add your friend with this code:</p>
+    <p class="step">New to Lockin? <a href="${store}">Get it on the App Store</a>, then add your friend with this code:</p>
     <p class="code" aria-label="Friend code ${code.split("").join(" ")}">${code.slice(0, 4)} ${code.slice(4)}</p>
   </div>`;
   } else if (landing.kind === "squad") {
@@ -61,72 +68,23 @@ export function landingPage(landing: Landing): string {
   <p class="lede">Lock in together. Your squad's timers sit right on your Lock Screen while you all work.</p>
   <a class="button" href="lockin://j/${code}">Open in Lockin</a>
   <div class="card">
-    <p class="step">New to Lockin? <a href="${escapeHTML(APP_STORE_URL)}">Get it on the App Store</a>, then join the squad with this code:</p>
+    <p class="step">New to Lockin? <a href="${store}">Get it on the App Store</a>, then join the squad with this code:</p>
     <p class="code" aria-label="Squad code ${code.split("").join(" ")}">${code.slice(0, 4)} ${code.slice(4)}</p>
   </div>`;
   } else {
     title = landing.kind === "expired" ? "This invite has expired" : "This invite link doesn't work";
     body = `<h1>${escapeHTML(title)}</h1>
   <p class="lede">Ask your friend for a new link. Their code is on the Friends screen in Lockin.</p>
-  <a class="button secondary" href="${escapeHTML(APP_STORE_URL)}">Get Lockin on the App Store</a>`;
+  <a class="button secondary" href="${store}">Get Lockin on the App Store</a>`;
   }
-  const description = "Lockin: focus with friends, live on your Lock Screen.";
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
-<meta name="robots" content="noindex">
-<title>${escapeHTML(title)} · Lockin</title>
-<meta property="og:title" content="${escapeHTML(title)}">
-<meta property="og:description" content="${escapeHTML(description)}">
-<meta property="og:site_name" content="Lockin">
-<style>
-  :root {
-    --bg: #f2f2f7; --card: #ffffff; --text: #1c1c1e; --muted: #6c6c70; --accent: #5e5ce6; --on-accent: #ffffff;
-    --line: rgba(60, 60, 67, 0.18);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #000000; --card: #1c1c1e; --text: #f2f2f7; --muted: #a1a1a6; --accent: #7d7aff; --line: rgba(84, 84, 88, 0.6); }
-  }
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body {
-    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
-    font: 17px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    display: flex; justify-content: center;
-    padding: max(32px, env(safe-area-inset-top)) 16px max(32px, env(safe-area-inset-bottom));
-  }
-  main { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 20px; }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; letter-spacing: -0.01em; }
-  .mark { width: 32px; height: 32px; border-radius: 9px; background: var(--accent); position: relative; flex: none; }
-  .mark::before, .mark::after { content: ""; position: absolute; top: 12px; width: 5px; height: 7px; border-radius: 3px; background: var(--on-accent); }
-  .mark::before { left: 9px; } .mark::after { right: 9px; }
-  h1 { margin: 12px 0 0; font-size: 30px; line-height: 1.15; letter-spacing: -0.02em; overflow-wrap: anywhere; }
-  .lede { margin: 0; color: var(--muted); }
-  .button {
-    display: block; text-align: center; text-decoration: none; font-weight: 600; font-size: 17px;
-    padding: 15px 20px; border-radius: 14px; background: var(--accent); color: var(--on-accent);
-  }
-  .button.secondary { background: var(--card); color: var(--accent); border: 1px solid var(--line); }
-  .card { background: var(--card); border-radius: 16px; padding: 18px; border: 1px solid var(--line); }
-  .step { margin: 0 0 12px; color: var(--muted); font-size: 15px; }
-  .step a { color: var(--accent); font-weight: 600; text-decoration: none; }
-  .code {
-    margin: 0; text-align: center; font: 700 34px/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    letter-spacing: 0.14em; padding-left: 0.14em; white-space: nowrap; user-select: all; -webkit-user-select: all;
-  }
-</style>
-</head>
-<body>
-<main>
-  <div class="brand"><span class="mark" aria-hidden="true"></span>Lockin</div>
-  ${body}
-</main>
-</body>
-</html>
-`;
+  return htmlDocument({
+    title: `${title} · Lockin`,
+    shareTitle: title,
+    description: "Lockin: focus with friends, live on your Lock Screen.",
+    body,
+    // An invite is for the person it was sent to, never for search results.
+    noindex: true,
+  });
 }
 
 // GET /.well-known/apple-app-site-association

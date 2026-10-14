@@ -34,10 +34,29 @@ ENVIRONMENT = "development"
 # The host invite links point at: https://<INVITE_HOST>/j/<code>. Leave it out until the invite
 # domain exists (M9); links then use this Worker's own host, which serves the landing page too.
 # INVITE_HOST = "lockin.app"
+# M9: the app's App Store page. The home page (GET /) links to it, and so does the invite landing
+# page. Until it's set, the home page shows an "[OWNER: App Store link]" placeholder and asks search
+# engines not to index it, and the invite page links to a placeholder.
+# APP_STORE_URL = "https://apps.apple.com/app/lockin/id1234567890"
 # Demo Buddy's kill switch (docs/launch/app-review-notes.md §3): "true" turns the review code and
 # the bot on; anything else, or leaving it out, turns them off (the code is then unknown, 404).
 # Turn it on for App Review with DEMO_BUDDY_CODE set as a secret, and keep it on after approval.
 # DEMO_BUDDY_ENABLED = "true"
+
+# The web pages (src/pages.ts) are the Markdown drafts in docs/launch/, bundled as text. Deploy from
+# a full checkout: they're outside server/, like the fixtures.
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]
+fallthrough = true
+
+# POST /metrics (src/metrics.ts): at most 20 batches a minute from one IP address. Cloudflare keeps
+# the counter (per location, not stored by us). A school's Wi-Fi shares one address, and the app
+# sends one batch a day, so this is generous. The namespace_id is any number unique in the account.
+[[ratelimits]]
+name = "METRICS_LIMITER"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }
 
 [[d1_databases]]
 binding = "DB"

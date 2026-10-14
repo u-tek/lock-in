@@ -147,7 +147,7 @@ from your Apple Account. Squads you made carry on for the other members. It can'
 **Deleting your account doesn't cancel Lockin Plus.** Cancel it in **Settings → [your name] →
 Subscriptions** first.
 
-More detail is in our [privacy policy]([OWNER: https://yourdomain/privacy]).
+More detail is in our [privacy policy](/privacy).
 
 ### How do I change my name or handle?
 
@@ -166,7 +166,7 @@ Blocking someone removes them as a friend. They can't add you again or join your
 don't tell them. You can unblock people in **Settings → Account → Blocked**.
 
 When you report someone, we look at it within [OWNER: e.g. 24 hours]. We may change or remove a
-name, and suspend or delete an account that breaks our [terms]([OWNER: https://yourdomain/terms]).
+name, and suspend or delete an account that breaks our [terms](/terms).
 We never tell anyone who reported them.
 
 If someone is in danger, contact the police on **000** (in Australia). If you're worried about

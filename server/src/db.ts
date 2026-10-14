@@ -1010,6 +1010,35 @@ export class Database {
     return (updated?.results[0] as UserRow | undefined) ?? null;
   }
 
+  // Analytics counts (src/metrics.ts, migrations/0008_metrics.sql)
+
+  /**
+   * Counts one metrics batch for `day` unless `limit` batches already arrived that day: false then.
+   * One statement, so racing batches can't get past the cap.
+   */
+  async reserveMetricsBatch(day: string, limit: number): Promise<boolean> {
+    const result = await this.d1
+      .prepare(
+        `INSERT INTO metrics_batches (day, batches) VALUES (?, 1)
+         ON CONFLICT (day) DO UPDATE SET batches = batches + 1 WHERE batches < ?`,
+      )
+      .bind(day, limit)
+      .run();
+    return result.meta.changes > 0;
+  }
+
+  /** Adds each count to the day's total for its event, in one transaction. */
+  async addMetrics(day: string, counts: ReadonlyMap<string, number>): Promise<void> {
+    if (counts.size === 0) return;
+    await this.d1.batch(
+      [...counts].map(([event, count]) =>
+        this.d1
+          .prepare("INSERT INTO metrics_daily (day, event, count) VALUES (?, ?, ?) ON CONFLICT (day, event) DO UPDATE SET count = count + excluded.count")
+          .bind(day, event, count),
+      ),
+    );
+  }
+
   // Demo Buddy and Review Squads (src/reviewSquad.ts, docs/launch/app-review-notes.md §3)
 
   /**

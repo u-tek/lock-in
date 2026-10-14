@@ -284,6 +284,28 @@ describe("the D1 schema", () => {
     run("UPDATE users SET plus_event_ms = 1792000000000 WHERE id = 'Nr2Kx7pQ1m'");
   });
 
+  test("0008: metrics are a day, an event and a total; the batch counter stops at its cap", () => {
+    const add = "INSERT INTO metrics_daily (day, event, count) VALUES (?, ?, ?) ON CONFLICT (day, event) DO UPDATE SET count = count + excluded.count";
+    run(add, "2026-10-14", "app.opened", 2);
+    run(add, "2026-10-14", "app.opened", 3);
+    run(add, "2026-10-15", "app.opened", 1);
+    expect(count("SELECT count AS n FROM metrics_daily WHERE day = '2026-10-14'")).toBe(5);
+    expect(() => run(add, "14/10/2026", "app.opened", 1)).toThrow(/CHECK/);
+    expect(() => run(add, "2026-10-14", "x", 1)).toThrow(/CHECK/);
+    expect(() => run(add, "2026-10-16", "app.opened", -1)).toThrow(/CHECK/);
+
+    // The same statement as Database.reserveMetricsBatch: no change once the cap is reached.
+    const reserve = "INSERT INTO metrics_batches (day, batches) VALUES (?, 1) ON CONFLICT (day) DO UPDATE SET batches = batches + 1 WHERE batches < ?";
+    expect(Number(run(reserve, "2026-10-14", 2).changes)).toBe(1);
+    expect(Number(run(reserve, "2026-10-14", 2).changes)).toBe(1);
+    expect(Number(run(reserve, "2026-10-14", 2).changes)).toBe(0);
+    expect(count("SELECT batches AS n FROM metrics_batches WHERE day = '2026-10-14'")).toBe(2);
+
+    // Nothing in them refers to anyone, so deleting everyone leaves them as they are.
+    run("DELETE FROM users WHERE is_bot = 0");
+    expect(count("SELECT count(*) AS n FROM metrics_daily")).toBe(2);
+  });
+
   test("a session's end and its status agree", () => {
     const insert = "INSERT INTO sessions (id, host_id, status, created_at, ended_at) VALUES (?, 'Av4Nq8sT2b', ?, 1, ?)";
     expect(() => run(insert, "s1", "ended", null)).toThrow(/CHECK/);

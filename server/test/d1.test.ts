@@ -13,10 +13,11 @@ describe("TestD1", () => {
       "0005_pet.sql",
       "0006_demo_buddy.sql",
       "0007_plus.sql",
+      "0008_metrics.sql",
     ]);
     const d1 = new TestD1();
     const tables = d1.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
-    expect(tables.map((row) => row.name)).toEqual(expect.arrayContaining(["auth_tokens", "alerts", "focus_log", "review_redemptions", "revenuecat_events", "streak_freezes"]));
+    expect(tables.map((row) => row.name)).toEqual(expect.arrayContaining(["auth_tokens", "alerts", "focus_log", "review_redemptions", "revenuecat_events", "streak_freezes", "metrics_daily", "metrics_batches"]));
   });
 
   test("first, all, run and raw", async () => {

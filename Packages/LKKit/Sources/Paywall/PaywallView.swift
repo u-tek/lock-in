@@ -21,14 +21,20 @@ public struct PaywallView: View {
     @State private var showsNothingToRestore = false
     @Environment(\.purchase) private var purchaseAction
 
-    // Placeholders until the real pages exist: M9 adds the privacy policy and terms URLs.
-    private static let termsURL = URL(string: "https://example.com/terms")!
-    private static let privacyURL = URL(string: "https://example.com/privacy")!
+    /// The Terms of Use and Privacy Policy pages (`<web host>/terms`, `/privacy`; M9), which App
+    /// Review wants linked from the paywall (Guideline 3.1.2). Nil in a build with no web or API
+    /// host (the simulator's default): the links hide rather than point anywhere made up.
+    let termsURL: URL?
+    let privacyURL: URL?
 
-    public init(store: PlusStore, avatar: AvatarCode, onClose: @escaping () -> Void) {
+    /// `configuration` decides where Terms and Privacy go; the build's own unless a preview or a
+    /// snapshot says otherwise.
+    public init(store: PlusStore, avatar: AvatarCode, configuration: AppConfiguration = .main, onClose: @escaping () -> Void) {
         _store = ObservedObject(wrappedValue: store)
         self.avatar = avatar
         self.onClose = onClose
+        termsURL = configuration.webURL(.terms)
+        privacyURL = configuration.webURL(.privacy)
     }
 
     public var body: some View {
@@ -172,12 +178,16 @@ public struct PaywallView: View {
             HStack(spacing: LKSpacing.s) {
                 Button("Restore", action: restore)
                     .disabled(isWorking)
-                Text("·")
-                    .foregroundStyle(.tertiary)
-                Link("Terms", destination: Self.termsURL)
-                Text("·")
-                    .foregroundStyle(.tertiary)
-                Link("Privacy", destination: Self.privacyURL)
+                if let termsURL {
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+                    Link("Terms", destination: termsURL)
+                }
+                if let privacyURL {
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+                    Link("Privacy", destination: privacyURL)
+                }
             }
             .font(.footnote)
         }

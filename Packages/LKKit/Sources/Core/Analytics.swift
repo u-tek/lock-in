@@ -1,6 +1,9 @@
 import Foundation
 
 /// Everything the app ever reports (SPEC.md §5.6). Pushes per room are counted by the server.
+///
+/// The names are also in `fixtures/analytics/events.json`, the list the server's `POST /metrics`
+/// accepts; CoreTests checks the two match, so add an event to both.
 public enum AnalyticsEvent: String, CaseIterable, Sendable {
     // Onboarding
     case onboardingStarted = "onboarding.started"
@@ -72,8 +75,9 @@ public struct AnalyticsKey: Hashable, Sendable, ExpressibleByStringLiteral {
 /// Privacy-first analytics: event counts only.
 ///
 /// Parameters are integers under literal names by construction, so names, ids and anything people
-/// typed have no way to reach the analytics service. There's no vendor yet: the app picks a sink,
-/// and a vendor's SDK becomes one more sink when it's chosen.
+/// typed have no way to reach the analytics service. There's no provider yet
+/// (docs/decisions/0010-analytics-provider.md): the app picks a sink, and whatever the owner
+/// chooses becomes one more sink.
 public struct Analytics: Sendable {
     public typealias Sink = @Sendable (_ name: String, _ parameters: [String: String]) -> Void
 

@@ -44,8 +44,11 @@ export function json(body: unknown, status = 200, headers: Record<string, string
   });
 }
 
+/** The error as JSON. A `retryAfter` (seconds, on a 429) goes in a `Retry-After` header too. */
 export function errorResponse(error: HttpError): Response {
-  return json({ ...error.details, error: error.message, code: error.code }, error.status);
+  const retryAfter = error.details.retryAfter;
+  const headers: Record<string, string> = typeof retryAfter === "number" && Number.isFinite(retryAfter) ? { "retry-after": String(Math.max(1, Math.ceil(retryAfter))) } : {};
+  return json({ ...error.details, error: error.message, code: error.code }, error.status, headers);
 }
 
 export function noContent(): Response {
@@ -56,19 +59,27 @@ export function notFound(): Response {
   return json({ error: "Not found", code: "not_found" }, 404);
 }
 
+/** The policy every HTML page is served with: inline styles only, nothing else may load. */
+export const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
+export interface PageOptions {
+  /** Search engines may index it (no `x-robots-tag: noindex`). Off unless a page asks. */
+  index?: boolean;
+  /** `cache-control`; `no-store` unless a page asks. */
+  cacheControl?: string;
+}
+
 /** A whole HTML page with no external assets: inline styles only, nothing else may load. */
-export function html(body: string, status = 200): Response {
-  return new Response(body, {
-    status,
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-      "referrer-policy": "no-referrer",
-      "x-content-type-options": "nosniff",
-      "x-robots-tag": "noindex",
-    },
-  });
+export function html(body: string, status = 200, options: PageOptions = {}): Response {
+  const headers: Record<string, string> = {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": options.cacheControl ?? "no-store",
+    "content-security-policy": PAGE_CSP,
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+  };
+  if (options.index !== true) headers["x-robots-tag"] = "noindex";
+  return new Response(body, { status, headers });
 }
 
 /** Text made safe for HTML element content and quoted attribute values. */

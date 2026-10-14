@@ -282,6 +282,7 @@ On github.com, in a browser: the repository → **Settings** → **Secrets and v
 | `ASC_ISSUER_ID` | The Issuer ID (step 10) | TestFlight |
 | `ASC_KEY_P8` | The whole **API key's** `.p8`, `BEGIN` and `END` lines included (step 10) | TestFlight |
 | `LK_API_HOST` | Optional. The Worker's host only, e.g. `lockin-api.yourname.workers.dev`. It can also be a repository *variable* of the same name | TestFlight builds. The spike doesn't need it |
+| `LK_WEB_HOST` | Optional (M9). The website's host only, e.g. `lockin.app`, once the domain points at the Worker. Left out, the paywall's Terms and Privacy and Settings › About's pages open on `LK_API_HOST`. It can also be a repository *variable* | TestFlight builds |
 | `LOCKIN_API_URL` | `https://` plus the Worker's host (step 11) | Push test |
 | `LOCKIN_ADMIN_TOKEN` | The admin token (step 11) | Push test |
 

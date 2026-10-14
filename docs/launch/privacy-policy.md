@@ -238,6 +238,6 @@ collecting something new, we'll tell you in the app before it takes effect.
 
 ## Contact us
 
-[OWNER: your name or business name]
-Email: [OWNER: privacy email]
+[OWNER: your name or business name]\
+Email: [OWNER: privacy email]\
 Website: [OWNER: https://yourdomain/privacy]

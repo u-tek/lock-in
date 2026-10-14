@@ -51,7 +51,10 @@ describe("routes", () => {
 
   test("anything else is a JSON 404", async () => {
     for (const request of [
-      new Request("https://x.example/"),
+      new Request("https://x.example/index.html"),
+      new Request("https://x.example/privacy/"),
+      new Request("https://x.example/", { method: "POST" }),
+      new Request("https://x.example/metrics"),
       new Request("https://x.example/rooms/abc"),
       new Request("https://x.example/sessions"),
       new Request("https://x.example/health", { method: "POST" }),
@@ -111,9 +114,10 @@ describe("routes", () => {
       expect(await response.json()).toEqual({ error: expect.any(String), code: "unauthorised" });
     }
     // These don't. (The RevenueCat webhook has its own Authorization: without its secret, 503.)
-    for (const path of ["/health", "/j/ABCDEFGH", "/.well-known/apple-app-site-association", "/shop"]) {
+    for (const path of ["/health", "/j/ABCDEFGH", "/.well-known/apple-app-site-association", "/shop", "/", "/privacy", "/terms", "/support"]) {
       expect((await app.request("GET", path)).status, path).not.toBe(401);
     }
+    expect((await app.request("POST", "/metrics", { body: { counts: { "app.opened": 1 } } })).status).toBe(204);
     expect((await app.request("POST", "/webhooks/revenuecat", { body: {} })).status).toBe(503);
   });
 

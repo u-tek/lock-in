@@ -37,9 +37,14 @@
 //   POST   /webhooks/revenuecat   RevenueCat's events, behind REVENUECAT_WEBHOOK_AUTH  (src/plus.ts)
 //   POST   /me/plus/refresh                                                      (src/plus.ts)
 //   PATCH  /squads/:id/pet                                                       (src/squads.ts)
+//   M9, launch (docs/launch/checklist.md):
+//   GET    /  /privacy  /terms  /support   the home page and the policy pages, from the drafts in
+//                                  docs/launch/ (src/pages.ts). HEAD too.
+//   POST   /metrics                integer analytics counts, added to daily totals; no auth, nothing
+//                                  about the caller kept (src/metrics.ts, docs/decisions/0010)
 //
-// Every route but /health, /admin/*, /auth/apple, /shop, /webhooks/*, /j/:code and /.well-known/*
-// needs `Authorization: Bearer <token>`. Each session is a `Room` Durable Object (src/room.ts); the APNs
+// Every route but /health, /admin/*, /auth/apple, /shop, /webhooks/*, /j/:code, /.well-known/*, the
+// web pages and /metrics needs `Authorization: Bearer <token>`. Each session is a `Room` Durable Object (src/room.ts); the APNs
 // provider token comes from the one `ApnsAuth` Durable Object (src/apnsAuth.ts).
 //
 // The runtime treats every named export of this module as an entrypoint and refuses to start if
@@ -55,6 +60,8 @@ import { blockUser, fileReport, friendCode, listBlocks, listFriends, redeemFrien
 import { HttpError, errorResponse, json, notFound } from "./http.ts";
 import { isReviewCode } from "./demoBuddy.ts";
 import { appSiteAssociation, invitePage } from "./invite.ts";
+import { recordMetrics } from "./metrics.ts";
+import { type MarkdownPath, homePage, markdownPage } from "./pages.ts";
 import { refreshPlus, revenueCatWebhook } from "./plus.ts";
 import { askDemoBuddy, redeemReviewCode } from "./reviewSquad.ts";
 import { cheer, getSession, joinSession, liveSession, memberAction, startSession, uploadLiveActivityToken } from "./sessions.ts";
@@ -149,6 +156,14 @@ const ROUTES: Route[] = [
 
   open("GET", "/j/:code", (context, [code = ""]) => invitePage(context, code)),
   open("GET", "/.well-known/apple-app-site-association", async (context) => appSiteAssociation(context)),
+
+  // M9: the web pages (GET and HEAD) and the analytics counts.
+  ...["GET", "HEAD"].flatMap((method) => [
+    open(method, "/", homePage),
+    ...(["/privacy", "/terms", "/support"] satisfies MarkdownPath[]).map((path) => open(method, path, (context) => markdownPage(context, path))),
+  ]),
+  // Never `authed`: counts are the same signed in or out, and never linked to an account.
+  open("POST", "/metrics", recordMetrics),
 ];
 
 export async function handle(request: Request, env: Env, deps: Dependencies = {}): Promise<Response> {

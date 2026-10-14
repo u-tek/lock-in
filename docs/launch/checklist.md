@@ -7,15 +7,16 @@ videos).*
 **Who:** **Owner** is you, in a browser on Windows. **Eng** is Claude, working in this repo and CI.
 **Both** means Eng prepares it and you do the part that needs your accounts.
 
-**Where things stand** (14 October 2026): M1 is done, M2 is in progress, and M3 to M8 are planned.
-Most items below depend on those milestones. They're listed now so nothing is a surprise at the
-end. The drafts are in this folder:
+**Where things stand** (14 October 2026, updated): M1 and M2 are done; M3 to M7 are built and green,
+waiting on phones and the owner's setup; M8 is built and switched off until Family Controls is
+approved (`docs/milestones/`). Items done by Eng are ticked or marked **Eng done**; the owner's are
+unchanged. The drafts are in this folder:
 
 | File | What it's for | Published at |
 |---|---|---|
-| `privacy-policy.md` | Privacy policy | `https://<domain>/privacy` |
-| `terms.md` | Terms of use (alongside Apple's standard licence agreement) | `https://<domain>/terms` |
-| `support.md` | Support page and FAQs | `https://<domain>/support` |
+| `privacy-policy.md` | Privacy policy | `https://<domain>/privacy` (served by the Worker) |
+| `terms.md` | Terms of use (alongside Apple's standard licence agreement) | `https://<domain>/terms` (served by the Worker) |
+| `support.md` | Support page and FAQs | `https://<domain>/support` (served by the Worker) |
 | `app-review-notes.md` | Notes for App Review, Demo Buddy, the age rating and App Privacy drafts | Pasted into App Store Connect |
 | `app-store-listing.md` | Name, subtitle, description, keywords, categories, screenshot plan | Pasted into App Store Connect |
 
@@ -57,11 +58,19 @@ launch can't happen without them.
 - [ ] **Owner.** Fill in every `[OWNER: …]` in `privacy-policy.md`, `terms.md` and `support.md`,
   and decide the minimum age (open question 2). With a teenage audience, it's worth paying a
   privacy or consumer lawyer to read them once.
-- [ ] **Eng.** Publish them as pages on the domain (served by the Worker next to the invite landing
+- [x] **Eng.** Publish them as pages on the domain (served by the Worker next to the invite landing
   page, or with Cloudflare Pages), plus a one-screen home page with the App Store link.
-- [ ] **Eng.** Replace the `example.com` Terms and Privacy links in
+  *Done:* the Worker serves `GET /`, `/privacy`, `/terms` and `/support`, rendered from these drafts
+  at build time (`server/src/pages.ts`, `server/README.md` "Web pages"). Edit a draft and deploy to
+  change a page. Until every `[OWNER: …]` is filled in, a page shows them highlighted, says it's a
+  draft and answers `noindex`; the home page does the same until `APP_STORE_URL` is set. They're on
+  the domain once it points at the Worker (§1).
+- [x] **Eng.** Replace the `example.com` Terms and Privacy links in
   `Packages/LKKit/Sources/Paywall/PaywallView.swift`. Add Support, Privacy and Terms rows under
-  Settings → About.
+  Settings → About. *Done:* both go to `<web host>/terms`, `/privacy` and `/support`, from the new
+  `LK_WEB_HOST` build setting (optional secret of the same name), or the API host when it's empty.
+  With neither, the links are hidden, and CI warns that App Review needs them. Add `LK_WEB_HOST`
+  once the domain exists.
 - [ ] **Owner.** Put the Privacy Policy URL, Support URL and (optionally) Marketing URL into App
   Store Connect.
 
@@ -98,7 +107,9 @@ All the text is in `app-store-listing.md` and `app-review-notes.md`.
   products. The SDK key goes into the GitHub secrets, never into the repo (CLAUDE.md, "Secrets").
 - [ ] **Both.** A RevenueCat webhook to the Worker, so the server knows who has Plus for squad
   limits (open question 5). Eng builds it; you add the webhook's shared secret to RevenueCat and to
-  the Worker's secrets.
+  the Worker's secrets. **Eng done (M7):** `POST /webhooks/revenuecat` and `POST /me/plus/refresh`;
+  the secrets are `REVENUECAT_WEBHOOK_AUTH` and `REVENUECAT_SECRET_KEY` (`server/README.md`, "Lockin
+  Plus").
 
 ## 5. TestFlight with real students (Both)
 
@@ -122,7 +133,8 @@ All the text is in `app-store-listing.md` and `app-review-notes.md`.
 ## 6. Review account and submission (Both)
 
 - [ ] **Eng.** Demo Buddy, as specified in `app-review-notes.md` §3, deployed to the production
-  Worker with its tests green.
+  Worker with its tests green. **Built and green (M7);** the deploy is yours: `npx wrangler deploy`
+  with `DEMO_BUDDY_ENABLED = "true"` (`server/README.md`, "Demo Buddy").
 - [ ] **Owner.** Set the review code (`DEMO_BUDDY_CODE`) on the Worker. Test the whole flow from
   the notes on a fresh install, signed in with a second Apple Account (a family member's works).
 - [ ] **Owner.** Paste the notes and fill in the contact details. Optionally set up a review Apple
@@ -162,7 +174,9 @@ All the text is in `app-store-listing.md` and `app-review-notes.md`.
 **Analytics review** (SPEC.md §5.6, CLAUDE.md "integer event counts only")
 
 - [ ] **Both.** Choose the analytics provider: Eng writes the options up in `docs/decisions/` and
-  you decide. Requirements: integer counts only, nothing linked to the Lockin account, a privacy
+  you decide. **Eng done:** `docs/decisions/0010-analytics-provider.md` recommends no third-party
+  provider (App Store Connect for retention, the app's counts as daily totals on our own Worker,
+  `POST /metrics`, already built); TelemetryDeck is the fallback. Requirements: integer counts only, nothing linked to the Lockin account, a privacy
   manifest, a free tier. Options include a privacy-first service such as TelemetryDeck, or no
   provider at all, using App Store Connect's App Analytics for retention (opted-in users only) and
   the server's own counts (open question 11). Then write the sink in `AppServices.analytics`.
@@ -172,7 +186,8 @@ All the text is in `app-store-listing.md` and `app-review-notes.md`.
 
 **Demo Buddy**
 
-- [ ] Build it as specified in `app-review-notes.md` §3.
+- [x] Build it as specified in `app-review-notes.md` §3. *Done (M7):* `server/src/demoBuddy.ts`,
+  `reviewSquad.ts` and the rooms; deploying it is in §6.
 
 **Rate limits on the API**
 
@@ -183,7 +198,8 @@ All the text is in `app-store-listing.md` and `app-review-notes.md`.
   `POST /sessions`, which fans out the invite alerts. Cheers already return `429 cheer_too_soon`.
 - [ ] Caps on invite alerts per squad and per person (open question 10).
 - [ ] Every limit answers `429 { error, code: "rate_limited" }` with `Retry-After`, and the app
-  shows a friendly message.
+  shows a friendly message. (Every 429 with a `retryAfter` now also sends the `Retry-After`
+  header; `POST /metrics` has its limits. The routes above still need theirs.)
 
 **Universal links** (once the domain exists)
 
@@ -192,6 +208,8 @@ All the text is in `app-store-listing.md` and `app-review-notes.md`.
 - [ ] The Worker serves `/.well-known/apple-app-site-association` (the route exists from M2) for
   `<Team ID>.<bundle id>` and `/j/*`, and the invite URL host becomes `<domain>`.
 - [ ] The `/j/:code` landing page gets the real App Store link (it needs the app's App Store ID).
+  It now reads the `APP_STORE_URL` Worker var, the same one as the home page: set it under `[vars]`
+  in `wrangler.toml` once the app has its App Store page.
 - [ ] The app opens `https://<domain>/j/<code>` the same way it opens `lockin://j/<code>`.
 
 **Moderation** (Guideline 1.2: act on reports in a timely way)
@@ -205,7 +223,8 @@ All the text is in `app-store-listing.md` and `app-review-notes.md`.
 
 - [ ] The paywall lists exactly the Plus features in the build: fix the "6 friends" wording, add
   custom session lengths, and remove anything that hasn't shipped (open question 3).
-- [ ] The server's Plus status comes from RevenueCat (section 4).
+- [x] The server's Plus status comes from RevenueCat (section 4). *Done (M7):* the webhook and the
+  refresh route set `users.plus_until`.
 
 **Screenshots and monitoring**
 
@@ -264,7 +283,9 @@ the launch drafts.
    3 squads" reads as 7 people, but SPEC.md means squads of 6 including you. Deep Focus, Squad
    Boost, streak freezes and monthly drops don't exist yet. M1.md suggests "coming soon" labels;
    the drafts suggest leaving features off until they ship, which is safer under 3.1.2.
-4. **The paywall's Terms and Privacy links** still go to `example.com` (`PaywallView.swift`).
+4. **The paywall's Terms and Privacy links** ~~still go to `example.com`~~. *Resolved:* they go to
+   the Worker's `/terms` and `/privacy` (`LK_WEB_HOST`, or the API host), and hide in a build with
+   neither.
 5. **How does the server learn about Plus?** M3 enforces the free limits on the server
    (`402 plus_required`, `users.plus_until`), but Plus lives only in StoreKit on the phone
    (`PlusStore`). RevenueCat doesn't arrive until M7. Lifetime has no end date, so what goes in
@@ -299,7 +320,8 @@ the launch drafts.
     a provider can only work out with an ID for each install. `Core/Analytics.swift` sends event
     names and integer counts only, and no provider has been chosen. Decide on a provider with an
     anonymous install ID (and declare it), or use App Store Connect's retention numbers and no
-    provider.
+    provider. *Written up:* `docs/decisions/0010-analytics-provider.md` (proposed: no provider,
+    with optional ID-free retention events).
 12. **Email.** There's no email column, and the drafts say we never collect email. The M2 server
     in progress ignores the email in Apple's identity token (`src/appleAuth.ts`). Still to confirm:
     the app's Sign in with Apple request asks for the name scope only.

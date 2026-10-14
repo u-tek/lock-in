@@ -10,8 +10,9 @@ import StoreKit
 import SwiftUI
 import UIKit
 
-/// Settings, as a sheet from Home: your account, Plus, notifications, your Lockling, and the
-/// version. Tapping the version five times shows the developer tools, in builds that have them
+/// Settings, as a sheet from Home: your account, Plus, notifications, your Lockling, and About:
+/// the support, privacy and terms pages (when the build has a host for them) and the version.
+/// Tapping the version five times shows the developer tools, in builds that have them
 /// (`LK_DEVELOPER_TOOLS`); nothing else leads to them.
 struct SettingsScreen: View {
     enum AccountSheet: String, Identifiable {
@@ -39,6 +40,7 @@ struct SettingsScreen: View {
     @State private var isRestoring = false
     @State private var restoreNote: String? = nil
     @State private var showsManageSubscriptions = false
+    @Environment(\.openURL) private var openURL
 
     init(engine: SessionEngine, plus: PlusStore, social: SocialModels, onClose: @escaping () -> Void) {
         self.engine = engine
@@ -93,6 +95,14 @@ struct SettingsScreen: View {
                 }
 
                 Section {
+                    // The website's pages (M9), in Safari. None without a web or API host.
+                    ForEach(WebLink.all(AppConfiguration.main)) { link in
+                        Button {
+                            openURL(link.url)
+                        } label: {
+                            WebLinkRow(link: link)
+                        }
+                    }
                     LabeledContent("Version", value: Self.version)
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -345,6 +355,55 @@ private struct ProfileRow: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityHint("Edit your profile")
+    }
+}
+
+/// A page of the website that Settings › About opens: Support, Privacy Policy, Terms of Use.
+private struct WebLink: Identifiable {
+    let title: String
+    let systemImage: String
+    let color: Color
+    let url: URL
+
+    var id: String { title }
+
+    /// The pages `configuration` has a host for, in the order people look for them: none in a
+    /// build without `LK_WEB_HOST` or `LK_API_HOST` (the simulator's default).
+    static func all(_ configuration: AppConfiguration) -> [WebLink] {
+        var links: [WebLink] = []
+        if let url = configuration.webURL(.support) {
+            links.append(WebLink(title: "Support", systemImage: "questionmark.circle.fill", color: .blue, url: url))
+        }
+        if let url = configuration.webURL(.privacy) {
+            links.append(WebLink(title: "Privacy Policy", systemImage: "lock.fill", color: .gray, url: url))
+        }
+        if let url = configuration.webURL(.terms) {
+            links.append(WebLink(title: "Terms of Use", systemImage: "doc.text.fill", color: .gray, url: url))
+        }
+        return links
+    }
+}
+
+/// A row that leaves the app: the page's tile and title, and an arrow out.
+private struct WebLinkRow: View {
+    let link: WebLink
+
+    var body: some View {
+        HStack {
+            Label {
+                Text(link.title)
+                    .foregroundStyle(LKColor.textPrimary)
+            } icon: {
+                LKIconTile(systemName: link.systemImage, color: link.color)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "arrow.up.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+        }
+        .contentShape(Rectangle())
+        .accessibilityHint("Opens in Safari")
     }
 }
 

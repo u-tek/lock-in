@@ -7,12 +7,15 @@ import Testing
         let configuration = AppConfiguration(infoDictionary: [
             "LKAppGroupIdentifier": "group.com.example.lockin",
             "LKAPIHost": "  ",
+            "LKWebHost": "",
             "LKAPNsEnvironment": "",
             "LKDeveloperTools": "",
         ])
         #expect(configuration.appGroupIdentifier == "group.com.example.lockin")
         #expect(configuration.apiHost == nil)
         #expect(configuration.apiBaseURL == nil)
+        #expect(configuration.webHost == nil)
+        #expect(configuration.webBaseURL == nil)
         #expect(configuration.apnsEnvironment == nil)
         #expect(!configuration.developerToolsEnabled)
         #expect(AppConfiguration(infoDictionary: [:]) == AppConfiguration())
@@ -21,6 +24,7 @@ import Testing
     @Test func keysMatchProjectYML() {
         #expect(AppConfiguration.InfoKey.appGroup == "LKAppGroupIdentifier")
         #expect(AppConfiguration.InfoKey.apiHost == "LKAPIHost")
+        #expect(AppConfiguration.InfoKey.webHost == "LKWebHost")
         #expect(AppConfiguration.InfoKey.apnsEnvironment == "LKAPNsEnvironment")
         #expect(AppConfiguration.InfoKey.developerTools == "LKDeveloperTools")
         #expect(AppConfiguration.InfoKey.revenueCatKey == "LKRevenueCatKey")
@@ -42,6 +46,45 @@ import Testing
         #expect(AppConfiguration(apiHost: "localhost:8787").apiBaseURL?.absoluteString == "https://localhost:8787")
         #expect(AppConfiguration(apiHost: "https://api.example.com").apiBaseURL?.absoluteString == "https://api.example.com")
         #expect(AppConfiguration(apiHost: "/").apiBaseURL == nil)
+    }
+
+    /// M9: the privacy policy, terms and support page, which the paywall and Settings › About link
+    /// to. On `LK_WEB_HOST` when it's set, else on the API host (the Worker serves both), else
+    /// nowhere: the links hide rather than point at a placeholder.
+    @Test func webPagesAreOnTheWebHostElseTheAPIHost() {
+        let both = AppConfiguration(infoDictionary: ["LKAPIHost": "lockin-api.example.workers.dev", "LKWebHost": " lockin.app/ \n"])
+        #expect(both.webHost == "lockin.app/")
+        #expect(both.webBaseURL?.absoluteString == "https://lockin.app")
+        #expect(both.webURL(.privacy)?.absoluteString == "https://lockin.app/privacy")
+        #expect(both.webURL(.terms)?.absoluteString == "https://lockin.app/terms")
+        #expect(both.webURL(.support)?.absoluteString == "https://lockin.app/support")
+        // The API stays where it was.
+        #expect(both.apiBaseURL?.absoluteString == "https://lockin-api.example.workers.dev")
+
+        let apiOnly = AppConfiguration(infoDictionary: ["LKAPIHost": "lockin-api.example.workers.dev", "LKWebHost": ""])
+        #expect(apiOnly.webHost == nil)
+        #expect(apiOnly.webBaseURL?.absoluteString == "https://lockin-api.example.workers.dev")
+        #expect(apiOnly.webURL(.terms)?.absoluteString == "https://lockin-api.example.workers.dev/terms")
+
+        #expect(AppConfiguration(webHost: "https://example.com/site").webURL(.privacy)?.absoluteString == "https://example.com/site/privacy")
+        #expect(AppConfiguration(webHost: "localhost:8787").webURL(.support)?.absoluteString == "https://localhost:8787/support")
+    }
+
+    /// No host at all (the simulator's default, and the snapshots'): no page has a URL, so nothing
+    /// links to example.com or a half-made address.
+    @Test func withoutAHostThereAreNoPages() {
+        for configuration in [AppConfiguration(), AppConfiguration(infoDictionary: ["LKAPIHost": " ", "LKWebHost": "/"])] {
+            #expect(configuration.webBaseURL == nil)
+            for page in AppConfiguration.WebPage.allCases {
+                #expect(configuration.webURL(page) == nil)
+            }
+        }
+    }
+
+    /// The paths the Worker serves the pages at (server/src/pages.ts, tested in
+    /// server/test/pages.test.ts).
+    @Test func pagePathsMatchTheWorker() {
+        #expect(AppConfiguration.WebPage.allCases.map(\.path) == ["privacy", "terms", "support"])
     }
 
     @Test(arguments: [
@@ -103,6 +146,15 @@ import Testing
 
     @Test func deepFocusSlipsAreCounted() {
         #expect(AnalyticsEvent.deepFocusSlip.rawValue == "deepFocus.slip")
+    }
+
+    /// `fixtures/analytics/events.json` is the list the server's `POST /metrics` accepts
+    /// (docs/decisions/0010-analytics-provider.md): exactly these names, in this order.
+    @Test func theEventListMatchesTheSharedFixture() throws {
+        let object = try #require(JSONSerialization.jsonObject(with: AnalyticsEventsFixture.data()) as? [String: Any])
+        #expect(Set(object.keys) == ["events"])
+        let names = try #require(object["events"] as? [String])
+        #expect(names == AnalyticsEvent.allCases.map(\.rawValue))
     }
 
     @Test func disabledAndDebugSinksAcceptEveryEvent() {
@@ -233,5 +285,25 @@ private final class Recorder: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         storage.append(Event(name: name, parameters: parameters))
+    }
+}
+
+/// `fixtures/analytics/events.json` at the repository root, found by walking up from this file as
+/// the other shared fixtures are.
+enum AnalyticsEventsFixture {
+    struct NotFound: Error, CustomStringConvertible {
+        let description: String
+    }
+
+    static func data() throws -> Data {
+        var url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        for _ in url.pathComponents.indices {
+            let candidate = url.appendingPathComponent("fixtures/analytics/events.json", isDirectory: false)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return try Data(contentsOf: candidate)
+            }
+            url = url.deletingLastPathComponent()
+        }
+        throw NotFound(description: "No fixtures/analytics/events.json above \(#filePath)")
     }
 }

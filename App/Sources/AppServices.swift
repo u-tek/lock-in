@@ -15,7 +15,10 @@ import UserNotifications
 /// What the app's screens share, made once per launch.
 @MainActor
 enum AppServices {
-    /// Event counts only (SPEC.md §5.6). No vendor is chosen yet, so they go to the unified log.
+    /// Event counts only (SPEC.md §5.6). No provider is chosen yet, so they go to the unified log.
+    /// docs/decisions/0010-analytics-provider.md proposes none: a sink that batches the counts
+    /// once a day to the Worker's `POST /metrics` (built, server/src/metrics.ts). Left on the log
+    /// until the owner decides.
     static let analytics: Analytics = .debugLog
 
     static let liveActivities = LiveActivityController(analytics: analytics)

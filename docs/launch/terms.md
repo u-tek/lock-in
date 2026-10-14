@@ -126,6 +126,6 @@ Australia.
 
 ## 13. Contact
 
-[OWNER: your name or business name]
-Email: [OWNER: support email]
-Privacy: see our [privacy policy]([OWNER: https://yourdomain/privacy])
+[OWNER: your name or business name]\
+Email: [OWNER: support email]\
+Privacy: see our [privacy policy](/privacy)

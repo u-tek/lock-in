@@ -63,6 +63,8 @@ targets:
               - lockin
         LKAppGroupIdentifier: $(LK_APP_GROUP)
         LKAPIHost: $(LK_API_HOST)
+        # The website (privacy policy, terms, support; M9). Empty: they're on the API host.
+        LKWebHost: $(LK_WEB_HOST)
         LKAPNsEnvironment: $(LK_APNS_ENV)
         LKDeveloperTools: $(LK_DEVELOPER_TOOLS)
         # Lockin Plus through RevenueCat (M7); empty sells through StoreKit 2.

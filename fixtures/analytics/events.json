@@ -1,0 +1,25 @@
+{
+  "events": [
+    "onboarding.started",
+    "onboarding.creaturePicked",
+    "notifications.allowed",
+    "notifications.declined",
+    "session.firstCompleted",
+    "session.completed",
+    "liveActivity.started",
+    "liveActivity.failed",
+    "liveActivity.disabled",
+    "squad.created",
+    "invite.shared",
+    "invite.redeemed",
+    "squad.sessionJoined",
+    "notifications.join",
+    "notifications.opened",
+    "notifications.pushToStartJoin",
+    "deepFocus.slip",
+    "app.opened",
+    "paywall.shown",
+    "purchase.trialStarted",
+    "purchase.completed"
+  ]
+}

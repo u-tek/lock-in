@@ -92,7 +92,7 @@ let package = Package(
         .testTarget(name: "SessionEngineTests", dependencies: ["SessionEngine", "Core", "Model", "LiveActivity", "API"]),
         .testTarget(
             name: "PaywallTests",
-            dependencies: ["Paywall", "Creature", "Model", .product(name: "RevenueCat", package: "purchases-ios-spm")]
+            dependencies: ["Paywall", "Core", "Creature", "Model", .product(name: "RevenueCat", package: "purchases-ios-spm")]
         ),
         .testTarget(name: "APITests", dependencies: ["API", "Core", "Model"]),
         .testTarget(name: "SocialTests", dependencies: ["Social", "API", "Core", "Model"]),

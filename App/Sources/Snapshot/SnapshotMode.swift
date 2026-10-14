@@ -1,4 +1,5 @@
 import API
+import Core
 import DeepFocus
 import LiveActivity
 import Model
@@ -202,7 +203,8 @@ enum SnapshotGallery {
             })
         case "paywall":
             return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus, _ in
-                PaywallView(store: plus, avatar: engine.avatar, onClose: {})
+                // With a website, as a real build has, so Terms and Privacy show (M9).
+                PaywallView(store: plus, avatar: engine.avatar, configuration: SnapshotData.website, onClose: {})
             })
         case "settings":
             // Signed out: the Sign in row.
@@ -517,6 +519,12 @@ enum SnapshotData {
     /// Sam's friend code.
     static var code: FriendCode {
         FriendCode(code: "KQ7M2XPA", url: URL(string: "https://lockin.example/j/KQ7M2XPA")!, expiresAt: 1_792_500_000)
+    }
+
+    /// A build with its website set (`LK_WEB_HOST`, M9). Snapshot builds have no hosts, which
+    /// would hide the paywall's Terms and Privacy links.
+    static var website: AppConfiguration {
+        AppConfiguration(webHost: "lockin.example")
     }
 
     /// The made-up user's account.

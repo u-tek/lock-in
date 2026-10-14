@@ -24,6 +24,17 @@ export interface Env {
    * Worker's own host, which serves the landing page too.
    */
   INVITE_HOST?: string;
+  /**
+   * M9: the app's App Store page, e.g. "https://apps.apple.com/app/lockin/id1234567890". The home
+   * page links to it (until it's set, it shows an `[OWNER: App Store link]` placeholder and isn't
+   * indexed) and so does the invite landing page (until then, a placeholder URL).
+   */
+  APP_STORE_URL?: string;
+  /**
+   * Cloudflare's rate-limiting binding for `POST /metrics`, keyed by IP address (wrangler.toml,
+   * `[[ratelimits]]`). Without it only the daily cap applies.
+   */
+  METRICS_LIMITER?: RateLimit;
 
   /** The Apple Developer team ID: APNs, the Sign in with Apple client secret and universal links. */
   APNS_TEAM_ID?: string;

@@ -402,6 +402,8 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           LK_BUNDLE_ID: ${{ secrets.LK_BUNDLE_ID }}
           LK_API_HOST: ${{ secrets.LK_API_HOST || vars.LK_API_HOST }}
+          # Optional (M9): the website's host. Without it the policy pages are on LK_API_HOST.
+          LK_WEB_HOST: ${{ secrets.LK_WEB_HOST || vars.LK_WEB_HOST }}
           # Optional (M7): RevenueCat's public API key (appl_…). Without it Plus sells through StoreKit 2.
           LK_REVENUECAT_KEY: ${{ secrets.LK_REVENUECAT_KEY }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -413,12 +415,17 @@ jobs:
           host="${host#https://}"
           host="${host#http://}"
           host="${host%%/*}"
+          web="${LK_WEB_HOST//[[:space:]]/}"
+          web="${web#https://}"
+          web="${web#http://}"
+          web="${web%%/*}"
           revenuecat="${LK_REVENUECAT_KEY//[[:space:]]/}"
           {
             echo "// Written by CI from repository secrets for a TestFlight build."
             echo "LK_TEAM_ID = ${APPLE_TEAM_ID//[[:space:]]/}"
             echo "LK_BUNDLE_ID = ${LK_BUNDLE_ID//[[:space:]]/}"
             if [[ -n "$host" ]]; then echo "LK_API_HOST = $host"; fi
+            if [[ -n "$web" ]]; then echo "LK_WEB_HOST = $web"; fi
             if [[ -n "$revenuecat" ]]; then echo "LK_REVENUECAT_KEY = $revenuecat"; fi
           } > Config/Local.xcconfig
           key_id="${ASC_KEY_ID//[[:space:]]/}"
@@ -432,6 +439,11 @@ jobs:
           } >> "$GITHUB_ENV"
           if [[ -z "$host" ]]; then
             echo "::notice::No LK_API_HOST secret: this build runs without a backend (the APNs spike doesn't need one)."
+          fi
+          if [[ -z "$web" && -z "$host" ]]; then
+            echo "::warning title=No website for the paywall's links::Without LK_WEB_HOST or LK_API_HOST the paywall hides its Terms and Privacy links, which App Review requires (Guideline 3.1.2). Fine for testing; set one before submitting."
+          elif [[ -z "$web" ]]; then
+            echo "::notice::No LK_WEB_HOST secret: Terms, Privacy and Support open on the API host ($host), which serves those pages too."
           fi
           if [[ -z "$revenuecat" ]]; then
             echo "::notice::No LK_REVENUECAT_KEY secret: Lockin Plus sells through StoreKit 2, without RevenueCat (docs/milestones/M7.md)."
