@@ -107,12 +107,10 @@ extension WidgetData {
 extension WidgetData.Squad {
     /// A squad as `GET /squads` has it.
     ///
-    /// The pet's species and stage are the server's (an egg is stage 0, and may already carry its
-    /// species for its colour); its progress comes from its XP (`PetRules.progress`). The app's
-    /// `SquadPet` doesn't read the pet's mood or the squad's streak yet (M5 adds them to
-    /// `GET /squads`, docs/milestones/M5.md): until it does, the pet is content and the streak 0,
-    /// which the widgets leave unsaid rather than showing "No streak". Read them here when they
-    /// arrive.
+    /// The pet's species, stage, mood and progress, and the squad's streak, are the server's
+    /// (docs/milestones/M5.md; an egg is stage 0 and carries its species for its colour). From a
+    /// server older than M5 the pet reads as content, its progress comes from its XP and the streak
+    /// is 0, which the widgets leave unsaid rather than showing "No streak".
     ///
     /// - Parameter lockedIn: How many are in the squad's open room, when it could be read. An open
     ///   room it couldn't read has at least one.
@@ -125,10 +123,10 @@ extension WidgetData.Squad {
             id: squad.id,
             name: squad.name,
             pet: code.code,
-            mood: PetMood.content.rawValue,
-            progress: PetRules.progress(xp: pet.xp, stage: stage),
-            streak: 0,
-            countedToday: false,
+            mood: pet.petMood.rawValue,
+            progress: pet.clampedProgress,
+            streak: max(0, squad.streak.count),
+            countedToday: squad.streak.countedToday,
             lockedIn: lockedIn ?? (squad.isLive ? 1 : 0)
         )
     }

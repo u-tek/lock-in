@@ -82,7 +82,7 @@ async function register(who: SignedIn, seed: number, quietHours: unknown = { sta
 }
 
 const stateOf = async (who: SignedIn, sid: string) => (await call(who, "GET", `/sessions/${sid}`)).body.contentState;
-const bot = (state: { m: Array<{ i: string }> }) => state.m.find((member) => member.i === DEMO_BUDDY_ID);
+const bot = (state: { m: Array<{ i: string; s: number }> }) => state.m.find((member) => member.i === DEMO_BUDDY_ID);
 const alerts = (): APNsRequest[] => app.apns.requests.filter((request) => request.headers["apns-push-type"] === "alert");
 const livePushes = () => app.apns.requests.filter((request) => request.headers["apns-push-type"] === "liveactivity");
 
@@ -228,10 +228,12 @@ describe("in a Review Squad's room", () => {
     expect((await stateOf(ava, sid)).m).toHaveLength(1);
 
     const pushes: Array<[number, number | undefined, string | undefined, number]> = [];
+    const tokens = new Set<string>();
     const take = () => {
       for (const request of livePushes()) {
         const state = request.aps["content-state"];
-        pushes.push([request.priority, bot(state) === undefined ? undefined : (bot(state) as { s: number }).s, state.c?.f, request.aps.timestamp - T0]);
+        pushes.push([request.priority, bot(state)?.s, state.c?.f, request.aps.timestamp - T0]);
+        tokens.add(request.token);
       }
       app.apns.clear();
     };
@@ -261,8 +263,8 @@ describe("in a Review Squad's room", () => {
       [5, MemberState.focusing, undefined, 128],
       [10, MemberState.done, undefined, 218],
     ]);
-    // Every push went to Ava's activity: Demo Buddy has no token, and is counted like anyone.
-    expect(new Set(pushes.map(() => laToken(1))).size).toBe(1);
+    // Every push went to Ava's activity: Demo Buddy has no token.
+    expect([...tokens]).toEqual([laToken(1)]);
 
     // Three focused minutes, no coins; no participants row and no events. They feed the pet.
     expect({ ...(app.sqlite.prepare("SELECT focused_sec, completed, coins, xp FROM focus_log WHERE user_id = ?").get(DEMO_BUDDY_ID) as object) }).toEqual({

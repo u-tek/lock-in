@@ -13,6 +13,8 @@ struct LockinApp: App {
 
     init() {
         if SnapshotMode.current == nil {
+            // CI's filmed squad session skips onboarding (scripts/island-demo.sh).
+            IslandDemo.prepare()
             AppServices.noteOrphanedActivities()
             let services = LiveServices()
             AppServices.live = services
@@ -44,6 +46,14 @@ struct LockinApp: App {
                         }
                         .task {
                             await services.watchPushToStartTokens()
+                        }
+                        .task {
+                            await IslandDemo.shared.run(controller: AppServices.liveActivities)
+                        }
+                        .overlay {
+                            if IslandDemo.isRequested {
+                                IslandDemoMarker()
+                            }
                         }
                 }
             }

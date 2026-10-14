@@ -21,6 +21,10 @@ on:
         description: Archive a Release build and upload it to TestFlight
         type: boolean
         default: false
+      island:
+        description: Film a scripted squad session in the simulator's Dynamic Island and Lock Screen
+        type: boolean
+        default: false
 
 # macOS minutes are expensive: a newer push cancels the run it supersedes, TestFlight upload
 # included (the next [testflight] push uploads again, with a higher build number).
@@ -147,13 +151,16 @@ jobs:
   #                        lab.liveactivity.<part>), iPhone 16 Pro only; an unknown name fails
   #   [light] / [dark]     only that appearance (both render by default)
   #   [testflight]         archive, sign and upload to TestFlight
+  #   [island]             film a scripted squad session in the simulator's real Dynamic Island
+  #                        and Lock Screen (scripts/island-demo.sh), into design/island/
   plan:
     name: Opt-ins
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' &&
         (contains(github.event.head_commit.message, '[snapshots') ||
-         contains(github.event.head_commit.message, '[testflight]')))
+         contains(github.event.head_commit.message, '[testflight]') ||
+         contains(github.event.head_commit.message, '[island]')))
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
@@ -161,6 +168,7 @@ jobs:
       routes: ${{ steps.read.outputs.routes }}
       appearances: ${{ steps.read.outputs.appearances }}
       testflight: ${{ steps.read.outputs.testflight }}
+      island: ${{ steps.read.outputs.island }}
     steps:
       - name: Read the opt-ins
         id: read
@@ -170,15 +178,17 @@ jobs:
           SNAPSHOTS_INPUT: ${{ inputs.snapshots }}
           SCREENS_INPUT: ${{ inputs.screens }}
           TESTFLIGHT_INPUT: ${{ inputs.testflight }}
+          ISLAND_INPUT: ${{ inputs.island }}
         run: |
           # Matches contains() in the job's condition, which ignores case.
           shopt -s nocasematch
           subject="${COMMIT_MESSAGE%%$'\n'*}"
-          snapshots=false testflight=false routes="" appearances=""
+          snapshots=false testflight=false island=false routes="" appearances=""
           if [[ "$EVENT" == workflow_dispatch ]]; then
             routes="${SCREENS_INPUT// /}"
             if [[ "$SNAPSHOTS_INPUT" == true || -n "$routes" ]]; then snapshots=true; fi
             if [[ "$TESTFLIGHT_INPUT" == true ]]; then testflight=true; fi
+            if [[ "$ISLAND_INPUT" == true ]]; then island=true; fi
           else
             pattern='\[snapshots(:[[:space:]]*([^]]*))?\]'
             if [[ "$subject" =~ $pattern ]]; then
@@ -188,21 +198,24 @@ jobs:
             if [[ "$subject" == *"[light]"* ]]; then appearances="light"; fi
             if [[ "$subject" == *"[dark]"* ]]; then appearances="dark"; fi
             if [[ "$subject" == *"[testflight]"* ]]; then testflight=true; fi
+            if [[ "$subject" == *"[island]"* ]]; then island=true; fi
           fi
           {
             echo "snapshots=$snapshots"
             echo "routes=$routes"
             echo "appearances=$appearances"
             echo "testflight=$testflight"
+            echo "island=$island"
           } >> "$GITHUB_OUTPUT"
           echo "Snapshots: $snapshots${routes:+ (only $routes)}${appearances:+ ($appearances)}"
           echo "TestFlight: $testflight"
+          echo "Island film: $island"
 
   # One app launch per phone covers every screen (UITests/SnapshotExportTests.swift).
   snapshots:
     name: Design snapshots
     needs: plan
-    if: needs.plan.outputs.snapshots == 'true'
+    if: needs.plan.outputs.snapshots == 'true' || needs.plan.outputs.island == 'true'
     runs-on: macos-26
     timeout-minutes: 60
     permissions:
@@ -242,6 +255,7 @@ jobs:
       # Each phone runs even if another failed or got stuck, so one bad screen never hides the rest.
       - name: iPhone 16 Pro
         id: pro
+        if: needs.plan.outputs.snapshots == 'true'
         continue-on-error: true
         timeout-minutes: 15
         run: scripts/export-snapshots.sh "iPhone 16 Pro"
@@ -250,7 +264,7 @@ jobs:
       # out of this step's time, on top of every non-lab route in both appearances.
       - name: iPhone SE
         id: se
-        if: env.LK_ONLY_ROUTES == ''
+        if: needs.plan.outputs.snapshots == 'true' && env.LK_ONLY_ROUTES == ''
         continue-on-error: true
         timeout-minutes: 30
         run: scripts/export-snapshots.sh "iPhone SE (3rd generation)"
@@ -262,6 +276,14 @@ jobs:
         continue-on-error: true
         timeout-minutes: 20
         run: scripts/export-snapshots.sh "iPhone 16 Pro Max"
+
+      # The real island, filmed: a video and screenshots of a scripted squad session.
+      - name: Dynamic Island film
+        id: island
+        if: needs.plan.outputs.island == 'true'
+        continue-on-error: true
+        timeout-minutes: 15
+        run: scripts/island-demo.sh "iPhone 16 Pro"
 
       - name: Collect the renders
         if: always()
@@ -285,7 +307,7 @@ jobs:
           find design -type f -size +95M -print -delete
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add design/lab design/screens design/appstore 2>/dev/null || git add design
+          git add design/lab design/screens design/appstore design/island 2>/dev/null || git add design
           if git diff --cached --quiet; then
             echo "Snapshots unchanged"
             exit 0
@@ -315,7 +337,7 @@ jobs:
           key: ${{ env.SIM_CACHE_KEY }}
 
       - name: Fail if a screen didn't render
-        if: always() && (steps.pro.outcome == 'failure' || steps.se.outcome == 'failure' || steps.store.outcome == 'failure')
+        if: always() && (steps.pro.outcome == 'failure' || steps.se.outcome == 'failure' || steps.store.outcome == 'failure' || steps.island.outcome == 'failure')
         run: exit 1
 
   # Archives a Release build, signs it with the App Store Connect API key and uploads it; it then

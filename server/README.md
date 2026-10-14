@@ -10,8 +10,11 @@ provider token for all of them from the `ApnsAuth` Durable Object. M4 adds **inv
 joining**: opening a squad's room tells the rest of the squad "Ava is locking in 🔒" (muted squads,
 blocks, quiet hours and limits permitting), and the push-to-start spike. M5 adds **the squad pet,
 streaks, the weekly leaderboard and the coin shop**: rooms credit coins and pet XP as timers stop,
-the egg hatches when two members finish together, and coins buy Lockling cosmetics. The contracts
-the app is written against are `docs/milestones/M2.md`, `M3.md`, `M4.md` and `M5.md`.
+the egg hatches when two members finish together, and coins buy Lockling cosmetics. M7 adds **Lockin
+Plus** from RevenueCat (its webhook and a refresh route), **Squad Boost** (a Plus member unlocks pet
+accessories for the whole squad) and **streak freezes**. For App Review there's **Demo Buddy**, a
+labelled server bot that joins the reviewer's squad sessions (`docs/launch/app-review-notes.md` §3).
+The contracts the app is written against are `docs/milestones/M2.md` to `M5.md` and `M7.md`.
 
 | Route | Auth | What it does |
 |---|---|---|
@@ -37,7 +40,7 @@ the app is written against are `docs/milestones/M2.md`, `M3.md`, `M4.md` and `M5
 | `POST /squads` | bearer | `{ name, tz? }` → `{ squad }`. Free: 1 squad; Plus: 3 |
 | `PATCH /squads/:id` | bearer | `{ name }` → `{ squad }`, the owner only |
 | `POST /squads/:id/invite` | bearer | Your code for the squad (`{ code, url, expiresAt }`), like a friend code |
-| `POST /squads/join/:code` | bearer | → `{ squad }`. Free squads hold 4, a Plus owner's (or Plus joiner's) 6 |
+| `POST /squads/join/:code` | bearer | → `{ squad }`. Free squads hold 4, a Plus owner's (or Plus joiner's) 6. The review code (`DEMO_BUDDY_CODE`) makes a fresh Review Squad with Demo Buddy instead |
 | `PATCH /squads/:id/members/me` | bearer | `{ muted }` → `{ squad }` |
 | `DELETE /squads/:id/members/me` | bearer | Leaves → 204. An owner hands the squad to the longest-standing member; the last one out deletes it |
 | `GET /squads/:id/leaderboard?week=YYYY-MM-DD` | bearer | The week's minutes and finished sessions per member, Monday to Monday in the squad's zone |
@@ -45,6 +48,10 @@ the app is written against are `docs/milestones/M2.md`, `M3.md`, `M4.md` and `M5
 | `POST /shop/buy` | bearer | `{ itemId }` → `{ coins, owned }` |
 | `GET /me/cosmetics` | bearer | `{ owned }`: items bought or imported, and Plus items while Plus lasts |
 | `POST /me/coins/import` | bearer | `{ coins, owned }` → `{ user, owned }`, once per account: what the app earned signed out |
+| `POST /me/plus/refresh` | bearer | → `{ user }`: asks RevenueCat's REST API what the caller has and sets `plusUntil` (M7). 503 `not_configured` without `REVENUECAT_SECRET_KEY`, 503 `try_again` when RevenueCat fails |
+| `POST /webhooks/revenuecat` | RevenueCat's `Authorization` | RevenueCat's events set `plus_until` (M7) → `{ ok: true, result }`. 401 with the wrong `Authorization`, 503 without `REVENUECAT_WEBHOOK_AUTH` |
+| `PATCH /squads/:id/pet` | bearer | `{ accessory: n \| null }` → `{ squad }`: the pet's accessory, in a boosted squad (M7). 402 `plus_required` (`limit: "boost"`), 422 `accessory_invalid` |
+| `POST /squads/:id/demo-buddy/lock-in` | bearer | → `{ session }`: Demo Buddy locks in, and the squad gets the alert (Review Squads only, 404 otherwise) |
 | `POST /sessions` | bearer | `{ squadId?, minutes, pushToStart? }` → `Joined`: solo, or the squad's room (joined, or opened; opening alerts the squad) |
 | `POST /sessions/:id/join` | bearer | `{ minutes, pushToStart? }` → `Joined`. With `pushToStart: { token, env }`, also starts the Live Activity by push and adds `pushedToStart` |
 | `POST /sessions/:id/la-token` | bearer | `{ token, env }` → 204: the Live Activity's push token and its APNs environment |
@@ -55,8 +62,8 @@ the app is written against are `docs/milestones/M2.md`, `M3.md`, `M4.md` and `M5
 
 Everything else answers `404`. Errors are `{"error": "<a sentence>", "code": "<machine code>"}`;
 the app switches on `code`. A few carry one more field: `limit` on 402 `plus_required`, `sessionId`
-on 409 `already_in_session`, `retryAfter` (seconds) on 429 `cheer_too_soon`, `itemId` on 403
-`item_not_owned`. The codes per route are
+on 409 `already_in_session`, `retryAfter` (seconds) on 429 `cheer_too_soon` and 429 `rate_limited`
+(the review code), `itemId` on 403 `item_not_owned`. The codes per route are
 in `docs/milestones/M2.md` to `M5.md`; on top of those, any route can answer
 `400 bad_request` (a body that isn't a JSON object), `413 too_large` (a body over 16 KB) and
 `500 internal`, and `POST /auth/apple` answers `502 apple_unavailable` when Apple's keys can't be
@@ -74,6 +81,9 @@ fetched.
 | `src/progress.ts` | A squad's pet and streak now, from D1: what `GET /squads` and the rooms' `p` show |
 | `src/days.ts` | Calendar days in a time zone: the squad's today, its midnight, its Monday |
 | `src/sessions.ts` | `/sessions…`: checks what only D1 knows (squad membership, your other session), then forwards to the room |
+| `src/plus.ts` | M7: RevenueCat's webhook and `/me/plus/refresh`: who has Plus (`users.plus_until`) |
+| `src/demoBuddy.ts` | Demo Buddy's constants (id, name, Lockling, script timings) and its switch |
+| `src/reviewSquad.ts` | The review code (Review Squads) and `/squads/:id/demo-buddy/lock-in` |
 | `src/alerts.ts` | "X is locking in": who's told, quiet hours in each phone's time zone, the limits, the payload |
 | `src/pushToStart.ts` | The push-to-start spike: `pushToStart` on joins, the `start` payload |
 | `src/push.ts` | The Worker's own APNs client for those two, on `ApnsAuth`'s provider token |
@@ -88,7 +98,7 @@ fetched.
 | `src/apns.ts` | The APNs sender, for Live Activity pushes and alerts: token auth with an ES256 JWT (signed itself, or from `ApnsAuth`), one retry on `ExpiredProviderToken` (never on a 429), bodies over 4 KB refused before sending |
 | `src/jwt.ts` | ES256 signing with Web Crypto, from a `.p8` file |
 | `src/demo.ts` | The spike's scenarios: `squad`, `join`, `cheer`, `end` |
-| `migrations/` | The D1 schema (SPEC.md §4.6); `0002_accounts.sql` adds sessions, Apple's refresh token and report notes; `0003_squads.sql` adds `participants.la_env` and the indexes that keep one running timer per user and one open room per squad; `0004_invites.sql` adds quiet hours to `devices` and the `alerts` log; `0005_pet.sql` adds the squad's zone, hatching and sad spells, the one-off coins import, and `focus_log` (every timer that stopped, and what it earned) |
+| `migrations/` | The D1 schema (SPEC.md §4.6); `0002_accounts.sql` adds sessions, Apple's refresh token and report notes; `0003_squads.sql` adds `participants.la_env` and the indexes that keep one running timer per user and one open room per squad; `0004_invites.sql` adds quiet hours to `devices` and the `alerts` log; `0005_pet.sql` adds the squad's zone, hatching and sad spells, the one-off coins import, and `focus_log` (every timer that stopped, and what it earned); `0006_demo_buddy.sql` adds `users.is_bot`, `squads.review`, Demo Buddy's own row and the review code's redemption log; `0007_plus.sql` adds RevenueCat's handled events, `users.plus_event_ms`, `squads.pet_accessory` and `streak_freezes` |
 | `test/` | vitest. Route tests run real SQL on an in-memory SQLite behind a D1 stand-in (`test/d1.ts`), against a fake Apple with generated keys (`test/app.ts`). Rooms run on a fake Durable Objects runtime (`test/rooms.ts`: storage, alarms the test fires as its clock moves, WebSockets, eviction) and push to a fake APNs. The shared fixtures in `fixtures/live-activity/`, `fixtures/moderation/`, `fixtures/pet/` and `fixtures/shop/` are tested here and by the Swift tests |
 
 The moderation word list is imported straight from `fixtures/moderation/words.json`: wrangler
@@ -240,8 +250,10 @@ Worker's own code can reach a Durable Object, and it never forwards a client's r
 so the room trusts that header.
 
 The room holds each member's timer (`b`, `e`, `q`) and state (0 focusing, 2 paused, 3 done, 4 left,
-5 slipped; 1, a break, isn't used yet) and builds the one content-state every member's Live
-Activity shows: host first, then in the order people joined, at most 6, the squad pet and the
+5 slipped; 1, a break, isn't used yet). A slip (`POST /sessions/:id/slip`, while focusing) shows as 5
+for 5 minutes while the timer keeps running, then the room puts them back to 0 (or done, if their
+time ran out); another slip starts the 5 minutes again (decision 0009). The room builds the one
+content-state every member's Live Activity shows: host first, then in the order people joined, at most 6, the squad pet and the
 latest cheer, `v` one higher on every change. Then:
 
 - **Pushes, coalesced.** The first change opens a 2-second window; when it closes, the latest
@@ -277,9 +289,9 @@ than in code, so racing requests can't get past them: one running timer per user
 `already_in_session`, naming the session so the app can end it) and one open room per squad (two
 members locking in together end up in the same room).
 
-Placeholders until M5: the pet is left out of the content-state until its egg hatches
-(`squads.pet_species` set); its mood is 3 if at least half the squad has a running or finished
-session in the last 24 hours, otherwise 1; its progress `x` is XP within a 600-XP stage.
+Since M5 the squad's pet is in every squad room's content-state (an egg is `"<species>.0"`); see "The
+pet, streaks and coins" below. From M7 a boosted squad's pet carries its accessory after the stage,
+`"sprout.2.a3"`.
 
 ## The APNs provider token (M3)
 
@@ -327,6 +339,73 @@ so a room that writes again after a failure never credits twice. The room then r
 refreshes the content-state's `p` (priority 5, 10 for a hatch), and tells the open rooms of the
 member's other squads to do the same. It looks again by itself when a sad spell ends and at the
 squad's midnight.
+
+## Lockin Plus (M7)
+
+`users.plus_until` is who has Plus; it's active while it's in the future. RevenueCat sets it:
+
+- **The webhook.** In RevenueCat → Project settings → Integrations → Webhooks, add
+  `https://<api host>/webhooks/revenuecat` with an **Authorization header value** of your choosing
+  (a long random string, e.g. `Bearer` plus 32 random hex characters), and set the same value as
+  the `REVENUECAT_WEBHOOK_AUTH` secret. RevenueCat's "Send test event" answers 200 (`TEST`).
+  `INITIAL_PURCHASE`, `RENEWAL`, `PRODUCT_CHANGE`, `UNCANCELLATION` and `SUBSCRIPTION_EXTENDED` set
+  `plus_until` to `expiration_at_ms`; `NON_RENEWING_PURCHASE` (lifetime) to the end of year 9999;
+  `EXPIRATION` to the expiry; a `CANCELLATION` that's a refund (`cancel_reason` `CUSTOMER_SUPPORT`)
+  to now; `TRANSFER` moves it between our user ids. Other events are recorded and ignored. Each
+  event id counts once, and an event older than the last one applied to that user changes nothing.
+  A subscription event never takes away a lifetime Plus; refunding the lifetime purchase does.
+- **The refresh.** `POST /me/plus/refresh` asks `GET https://api.revenuecat.com/v1/subscribers/<id>`
+  with the `REVENUECAT_SECRET_KEY` secret (RevenueCat → API keys → a **secret** key, `sk_…`) and sets
+  `plus_until` from the `plus` entitlement. The app calls it after a purchase or a restore.
+
+The app logs in to RevenueCat with our user id, so ids are ours; anonymous ones are ignored.
+Squad Boost and streak freezes need nothing more: a squad is boosted while any member has Plus, and
+each Plus member has 2 freezes a calendar month (docs/milestones/M7.md).
+
+```powershell
+"Bearer <a long random string>" | npx wrangler secret put REVENUECAT_WEBHOOK_AUTH
+"sk_…" | npx wrangler secret put REVENUECAT_SECRET_KEY
+```
+
+## Demo Buddy (App Review)
+
+A server bot (`users.is_bot`, id `DemoBuddy0`, made by `0006_demo_buddy.sql`) that joins App
+Review's squad sessions so the social Live Activity can be seen with one phone. Redeeming the
+**review code** (Squads → Join with code) makes a fresh private "Review Squad" with the redeemer
+and Demo Buddy; it doesn't count against the squad limit. In that squad's rooms Demo Buddy joins 6
+seconds after someone locks in, with a 3-minute timer: it cheers them at +60 s, pauses at +90 s,
+resumes at +120 s and finishes at +210 s, all through the room's usual pushes, and leaves when
+nobody else is running. `POST /squads/:id/demo-buddy/lock-in` has it open a session and alert the
+squad (quiet hours don't apply; mute and the limits do). It never joins other squads, has no
+friends, earns no coins and isn't on any leaderboard or counted for streaks. Logs name it, never
+the reviewer.
+
+To turn it on for a submission:
+
+```powershell
+node -e "const a='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';console.log([...require('crypto').randomBytes(8)].map(b=>a[b&31]).join(''))"
+"<that code>" | npx wrangler secret put DEMO_BUDDY_CODE
+```
+
+then set `DEMO_BUDDY_ENABLED = "true"` under `[vars]` in `wrangler.toml` and deploy. The code works
+10 times an hour for everyone together (429 `rate_limited` with `retryAfter` after that) and never
+expires; change it for each submission by putting a new one. Setting `DEMO_BUDDY_ENABLED` to
+anything else is the kill switch: the code is unknown (404), the lock-in route is 404 and Demo
+Buddy stops joining rooms (one already in a room finishes its script). Review Squads made earlier
+stay, with Demo Buddy listed.
+
+## Upgrading to M7
+
+```powershell
+cd server
+npx wrangler d1 migrations apply lockin --remote   # applies 0006_demo_buddy.sql and 0007_plus.sql
+npx wrangler deploy
+```
+
+Then the RevenueCat secrets and, for App Review, Demo Buddy's (above). Without them everything else
+works: the webhook answers 503, the refresh 503 `not_configured`, and the review code is unknown.
+Slips change with this deploy too (decision 0009): a member a room stored as slipped before it is
+shown as having left.
 
 ## Upgrading to M5
 

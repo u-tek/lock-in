@@ -168,11 +168,13 @@ public final class SquadsStore: ObservableObject {
     /// minutes; members the leaderboard doesn't have yet (none loaded, or someone just joined) come
     /// last, in joining order, with nil.
     public func ranking(of squad: Squad) -> [(member: SquadMember, entry: Leaderboard.Entry?)] {
-        let entries = leaderboards[squad.id]?.entries ?? []
-        var ranked: [(member: SquadMember, entry: Leaderboard.Entry?)] = entries.compactMap { entry in
-            squad.member(id: entry.userId).map { (member: $0, entry: entry) }
+        var ranked: [(member: SquadMember, entry: Leaderboard.Entry?)] = []
+        var listed: Set<String> = []
+        for entry in leaderboards[squad.id]?.entries ?? [] {
+            guard let member = squad.member(id: entry.userId), !listed.contains(member.id) else { continue }
+            ranked.append((member: member, entry: entry))
+            listed.insert(member.id)
         }
-        let listed = Set(ranked.map { $0.member.id })
         for member in squad.members where !listed.contains(member.id) {
             ranked.append((member: member, entry: nil))
         }

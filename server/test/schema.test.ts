@@ -244,6 +244,46 @@ describe("the D1 schema", () => {
     expect(count("SELECT count(*) AS n FROM focus_log")).toBe(0);
   });
 
+  test("0006: Demo Buddy is the one bot; Review Squads are flagged; the redemption log is just times", () => {
+    expect(db.prepare("SELECT id, handle, is_bot, apple_sub FROM users WHERE is_bot = 1").all().map((row) => ({ ...row }))).toEqual([
+      { id: "DemoBuddy0", handle: "demobuddy", is_bot: 1, apple_sub: null },
+    ]);
+    expect(count("SELECT count(*) AS n FROM users WHERE is_bot = 0")).toBe(2);
+    expect(() => run("UPDATE users SET is_bot = 2 WHERE id = 'Av4Nq8sT2b'")).toThrow(/CHECK/);
+    // Nobody else can have its handle, whatever the case.
+    expect(() => run("UPDATE users SET handle = 'DemoBuddy' WHERE id = 'Av4Nq8sT2b'")).toThrow(/UNIQUE/);
+    run("INSERT INTO squads (id, name, owner_id, created_at, review) VALUES ('Sq00000001', 'Review Squad', 'Av4Nq8sT2b', 1, 1)");
+    expect(() => run("INSERT INTO squads (id, name, owner_id, created_at, review) VALUES ('Sq00000002', 'Goblins', 'Av4Nq8sT2b', 1, 2)")).toThrow(/CHECK/);
+    run("INSERT INTO squads (id, name, owner_id, created_at) VALUES ('Sq00000003', 'Goblins', 'Av4Nq8sT2b', 1)");
+    expect(count("SELECT count(*) AS n FROM squads WHERE review = 0")).toBe(1);
+    run("INSERT INTO review_redemptions (at) VALUES (1)");
+    const plan = db.prepare("EXPLAIN QUERY PLAN SELECT count(*) FROM review_redemptions WHERE at > ?").all(0);
+    expect(JSON.stringify(plan)).toContain("review_redemptions_at");
+  });
+
+  test("0007: one freeze per squad per day, kept when its member goes; events once; accessories 1–99", () => {
+    run("INSERT INTO squads (id, name, owner_id, created_at) VALUES ('Sq00000001', 'Goblins', 'Av4Nq8sT2b', 1)");
+    const freeze = "INSERT INTO streak_freezes (squad_id, day, user_id, used_at) VALUES ('Sq00000001', ?, ?, 1)";
+    run(freeze, "2026-10-15", "Av4Nq8sT2b");
+    expect(() => run(freeze, "2026-10-15", "Nr2Kx7pQ1m")).toThrow(/UNIQUE|PRIMARY/);
+    expect(() => run(freeze, "15/10/2026", "Nr2Kx7pQ1m")).toThrow(/CHECK/);
+    expect(() => run(freeze, "2026-10-16", "Nobody0000")).toThrow(/FOREIGN KEY/);
+    run("DELETE FROM users WHERE id = 'Av4Nq8sT2b'");
+    expect({ ...(db.prepare("SELECT day, user_id FROM streak_freezes").get() as object) }).toEqual({ day: "2026-10-15", user_id: null });
+    run("DELETE FROM squads WHERE id = 'Sq00000001'");
+    expect(count("SELECT count(*) AS n FROM streak_freezes")).toBe(0);
+
+    run("INSERT INTO squads (id, name, owner_id, created_at) VALUES ('Sq00000002', 'Owls', 'Nr2Kx7pQ1m', 1)");
+    expect(() => run("UPDATE squads SET pet_accessory = 0")).toThrow(/CHECK/);
+    expect(() => run("UPDATE squads SET pet_accessory = 100")).toThrow(/CHECK/);
+    run("UPDATE squads SET pet_accessory = 6");
+    run("UPDATE squads SET pet_accessory = NULL");
+
+    run("INSERT INTO revenuecat_events (id, type, received_at) VALUES ('evt-1', 'RENEWAL', 1)");
+    expect(() => run("INSERT INTO revenuecat_events (id, type, received_at) VALUES ('evt-1', 'RENEWAL', 2)")).toThrow(/UNIQUE|PRIMARY/);
+    run("UPDATE users SET plus_event_ms = 1792000000000 WHERE id = 'Nr2Kx7pQ1m'");
+  });
+
   test("a session's end and its status agree", () => {
     const insert = "INSERT INTO sessions (id, host_id, status, created_at, ended_at) VALUES (?, 'Av4Nq8sT2b', ?, 1, ?)";
     expect(() => run(insert, "s1", "ended", null)).toThrow(/CHECK/);

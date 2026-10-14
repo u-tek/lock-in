@@ -33,8 +33,9 @@
 // the room trusts that header; the Worker never forwards a client's request as it came.
 //
 // Every timed job shares the one alarm a Durable Object has: the next push, timer end, 8-hour cap,
-// cheer to clear, slip to lift, Demo Buddy's next move, D1 retry or clean-up, whichever is soonest. State lives in storage under "room",
-// so the object can be evicted (and its WebSockets hibernate) at any time.
+// cheer to clear, slip to lift, Demo Buddy's next move, D1 retry or clean-up, whichever is soonest.
+// State lives in storage under "room", so the object can be evicted (and its WebSockets hibernate)
+// at any time.
 //
 // Logs carry the room id and counts only: never tokens, names or user ids.
 //
@@ -519,7 +520,7 @@ export class Room {
     if (existing !== undefined) return { existing };
     if (room.members.length < MAX_MEMBERS) return {};
     // Make room by moving out whoever left first; if nobody has, the room is full.
-    const evicted = room.members.find((member) => member.s === MemberState.left && member.bot !== true);
+    const evicted = room.members.find((member) => member.s === MemberState.left);
     return evicted === undefined ? null : { evicted };
   }
 

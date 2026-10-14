@@ -96,6 +96,13 @@ describe("routes", () => {
       ["POST", "/sessions/r7Kq2xP9aL/cheer"],
       ["GET", "/sessions/r7Kq2xP9aL"],
       ["GET", "/sessions/r7Kq2xP9aL/live"],
+      ["GET", "/squads/Sq00000001/leaderboard"],
+      ["GET", "/me/cosmetics"],
+      ["POST", "/me/coins/import"],
+      ["POST", "/shop/buy"],
+      ["POST", "/me/plus/refresh"],
+      ["PATCH", "/squads/Sq00000001/pet"],
+      ["POST", "/squads/Sq00000001/demo-buddy/lock-in"],
     ];
     const app = await testApp();
     for (const [method, path] of authed) {
@@ -103,10 +110,11 @@ describe("routes", () => {
       expect(response.status, `${method} ${path}`).toBe(401);
       expect(await response.json()).toEqual({ error: expect.any(String), code: "unauthorised" });
     }
-    // These don't.
-    for (const path of ["/health", "/j/ABCDEFGH", "/.well-known/apple-app-site-association"]) {
+    // These don't. (The RevenueCat webhook has its own Authorization: without its secret, 503.)
+    for (const path of ["/health", "/j/ABCDEFGH", "/.well-known/apple-app-site-association", "/shop"]) {
       expect((await app.request("GET", path)).status, path).not.toBe(401);
     }
+    expect((await app.request("POST", "/webhooks/revenuecat", { body: {} })).status).toBe(503);
   });
 
   test("an unexpected failure is a JSON 500 whose log names the route, not the path", async () => {

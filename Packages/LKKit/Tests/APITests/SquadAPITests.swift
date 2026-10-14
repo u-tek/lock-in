@@ -54,7 +54,7 @@ extension Sample {
             _ = try await client.squads()
         },
         .init(name: "createSquad", method: "POST", path: "/squads", reply: .ok(#"{"squad":\#(Sample.squad)}"#), body: #"{"name":"Library Goblins"}"#) { client in
-            _ = try await client.createSquad(name: "Library Goblins")
+            _ = try await client.createSquad(name: "Library Goblins", tz: nil)
         },
         .init(name: "renameSquad", method: "PATCH", path: "/squads/Sq7Lb2Kd9P", reply: .ok(#"{"squad":\#(Sample.squad)}"#), body: #"{"name":"Night Owls"}"#) { client in
             _ = try await client.renameSquad(id: "Sq7Lb2Kd9P", name: "Night Owls")
@@ -285,7 +285,7 @@ extension Sample {
     @Test func aBrokenSquadIsAnInvalidResponse() async {
         let server = StubServer { _ in .ok(#"{"squad":{"id":"Sq7Lb2Kd9P","name":"x"}}"#) }
         await #expect(throws: APIError.invalidResponse) {
-            try await server.client().createSquad(name: "x")
+            try await server.client().createSquad(name: "x", tz: nil)
         }
     }
 }

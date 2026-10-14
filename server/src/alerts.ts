@@ -15,6 +15,10 @@
 //
 // APNs answering 410, or 400 BadDeviceToken, deletes that device. Logs carry the session id and
 // counts only.
+//
+// Demo Buddy locking in because the reviewer asked (POST /squads/:id/demo-buddy/lock-in,
+// src/reviewSquad.ts) goes through here too, with `ignoreQuietHours`: everything above applies
+// except quiet hours.
 
 import { type ApnsResult, isGoneToken } from "./apns.ts";
 import type { Context } from "./context.ts";

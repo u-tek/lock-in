@@ -24,8 +24,8 @@ Solo, no account:
 With friends, using Demo Buddy:
 2. Home > "Lock in with friends" > Sign in with Apple (any Apple Account works), then pick a handle.
 3. Squads > Join with code > [OWNER: REVIEW CODE]. This makes a private "Review Squad" with Demo Buddy, a test bot run by our server and labelled as one.
-4. On Home, choose Review Squad and tap Lock in. Within about 10 seconds Demo Buddy joins and the island shows +1. Long-press it to see both timers, or lock the phone. Over the next 3 minutes Demo Buddy sends a cheer, pauses, resumes and finishes.
-5. To see the invite notification: end your session, open Review Squad, tap "Ask Demo Buddy to lock in" and lock the phone. You'll get "Demo Buddy is locking in" with Join actions.
+4. On Home, choose Review Squad and tap Lock in. Within about 10 seconds Demo Buddy joins and the island shows +1. Long-press it to see both timers, or lock the phone. Over the next 4 minutes Demo Buddy sends a cheer, pauses, resumes and finishes. If you end your session first, Demo Buddy leaves with you.
+5. To see the invite notification: end your session, open Review Squad, tap "Ask Demo Buddy to lock in" and lock the phone. You'll get "Demo Buddy is locking in" with Join actions (at most once every 30 minutes, like any squad).
 Demo Buddy only ever joins squads made with the review code.
 
 ACCOUNTS AND SAFETY
@@ -65,7 +65,7 @@ In **App Review Information**:
   authentication, so keep its trusted device with you and approve the code when App Review signs
   in. Sign this account into the review squad in advance, so it's ready.
 
-## 3. Demo Buddy (planned, M9)
+## 3. Demo Buddy (server built)
 
 SPEC.md §7: a clearly labelled server bot that joins the reviewer's squad sessions, so the social
 Live Activity can be seen with one phone. It's also how you test squads alone on TestFlight.
@@ -74,15 +74,15 @@ Live Activity can be seen with one phone. It's also how you test squads alone on
 
 | Area | Requirement |
 |---|---|
-| Identity | A server-side user named **Demo Buddy** (10 characters, within the Live Activity's 12-character `n`), handle `demobuddy`, with its own Lockling. Both words are already reserved in `fixtures/moderation/words.json`, so no real person can take or copy them. An admin script or migration creates the user and skips the name filter |
-| Labelled | Wherever the app lists squad members, Demo Buddy shows a "Test bot" label. In the Live Activity, its name says enough |
-| Where it lives | Only in squads made by redeeming the **review code**. Each redemption creates a fresh private "Review Squad" with the redeemer and Demo Buddy, so two reviewers never share one. The code never expires and is rate-limited (e.g. 10 redemptions an hour). It's set by Worker variables (`DEMO_BUDDY_CODE`, and `DEMO_BUDDY_ENABLED` as a kill switch), so it can be changed for each submission |
-| Never | Joins real squads, accepts or redeems friend codes, appears in real squads' leaderboards, or counts in analytics |
-| Joining | When a Review Squad member opens or joins a session, Demo Buddy joins 5 to 10 seconds later with a 3-minute timer. That's a priority-10 push, through the same Room code path as a real member, so the reviewer sees real pushes |
-| Script | At +60 s it cheers the reviewer (priority 5; the room clears the cheer about 10 s later). At +90 s it pauses, and at +120 s it resumes (priority 5). When its timer runs out it's done (priority 10). The room ends as usual when the reviewer finishes or leaves. If the reviewer locks in again, Demo Buddy joins again |
-| On request | `POST /squads/:id/demo-buddy/lock-in` (squads with Demo Buddy only), behind an **Ask Demo Buddy to lock in** button in the squad. Demo Buddy opens a session and sends the normal "Demo Buddy is locking in" alert, with the normal Join actions. It respects mute and the rate limit, but not quiet hours, because the reviewer asked for it |
-| Limits | It obeys every rule in SPEC.md §4.4: coalescing, priorities, no tick pushes, the 3.5 KB payload limit. Its pushes are counted per room like any other |
-| Tests | vitest for the timeline (using the fake clock `handle` already takes), isolation from real squads, a fresh squad on every redemption, the kill switch and the rate limit |
+| Identity | A server-side user named **Demo Buddy** (10 characters, within the Live Activity's 12-character `n`), handle `demobuddy`, id `DemoBuddy0`, with its own Lockling (`b2.c5.e4.h3`). Both words are already reserved in `fixtures/moderation/words.json`, so no real person can take or copy them. `server/migrations/0006_demo_buddy.sql` creates it (`users.is_bot = 1`, no Apple ID, so nobody can sign in as it) |
+| Labelled | Wherever the app lists squad members, Demo Buddy shows a "Test bot" label: `GET /squads` gives every member `isBot`, true for Demo Buddy. In the Live Activity, its name says enough |
+| Where it lives | Only in squads made by redeeming the **review code** (`POST /squads/join/<code>`, the usual Join with code). Each redemption creates a fresh private "Review Squad" with the redeemer (its owner) and Demo Buddy, so two reviewers never share one. A Review Squad doesn't count against the free squad limit, so App Review never meets the paywall on the way. The code never expires and works 10 times in any hour for everyone together (then 429 `rate_limited` with `retryAfter`). It's set by Worker variables, `DEMO_BUDDY_CODE` (a secret: 8 characters of the friend-code alphabet, the only codes the app accepts) and `DEMO_BUDDY_ENABLED` (`"true"`; anything else is the kill switch: the code is unknown, 404, the lock-in route is 404 and Demo Buddy stops joining rooms), so it can be changed for each submission (server/README.md, "Demo Buddy"). When the last person leaves a Review Squad it's deleted; Demo Buddy never keeps one or takes one over |
+| Never | Joins real squads, accepts or redeems friend codes (one naming it is 404), appears on any leaderboard, counts towards a streak, earns coins, or counts in analytics (no `events` rows; a room's end log counts it apart). Its minutes do feed the Review Squad's pet, and its finish can hatch the egg |
+| Joining | When a person opens or joins a Review Squad's session, Demo Buddy joins 6 seconds later with a 3-minute timer (unless it's already running there). That's a priority-10 push, through the same Room code path as a real member, so the reviewer sees real pushes |
+| Script | At +60 s it cheers the reviewer (whoever brought it; priority 5; the room clears the cheer 10 s later). At +90 s it pauses, and at +120 s it resumes (priority 5), so its timer runs out at +210 s: done (priority 10). Driven by the room's alarm. Once nobody else in the room is running (the reviewer finished or left), Demo Buddy leaves too (not a sad spell), so the room ends as usual. If the reviewer locks in again, or someone joins after it finished, Demo Buddy joins again |
+| On request | `POST /squads/:id/demo-buddy/lock-in` → `{ session }` (squads with Demo Buddy only: 404 `not_found` otherwise, 403 `not_member` outside the squad), behind an **Ask Demo Buddy to lock in** button in the squad. Demo Buddy opens a 3-minute session (it runs its script, cheering whoever joins) and sends the normal "Demo Buddy is locking in" alert, with the normal Join actions. It respects mute, blocks, "already in a session" and the limits (one alert per squad per person every 30 minutes; none if Demo Buddy opened another room in that squad in the last 10 minutes), but not quiet hours, because the reviewer asked for it. With the squad's room already open, Demo Buddy joins it at once instead, with no alert |
+| Limits | It obeys every rule in SPEC.md §4.4: coalescing, priorities, no tick pushes, the 3.5 KB payload limit. Its pushes are counted per room like any other. It has no push token of its own |
+| Tests | `server/test/demoBuddy.test.ts`: the timeline on the fake clock, isolation from real squads, a fresh squad on every redemption, the squad limit, the kill switch, the rate limit, the lock-in route and its alert in quiet hours |
 | After approval | Keep it running. Every update goes through review again |
 
 ## 4. Where things are (for the notes, and to check before submitting)

@@ -14,6 +14,14 @@ compatibility_date = "2026-10-01"
 #   SIWA_PRIVATE_KEY   the contents of that key's AuthKey_XXXXXXXXXX.p8. With SIWA_KEY_ID, sign-in
 #                      keeps Apple's refresh token so account deletion can revoke it (Apple requires
 #                      that); without them sign-in still works and nothing is revoked
+#   DEMO_BUDDY_CODE    the App Review code (docs/launch/app-review-notes.md §3): 8 characters of
+#                      ABCDEFGHJKLMNPQRSTUVWXYZ23456789 (no 0, O, 1 or I), e.g. what
+#                      `node -e "…"` in README.md prints. A secret so it isn't committed; change it
+#                      for each submission. Works only with DEMO_BUDDY_ENABLED below
+#   REVENUECAT_WEBHOOK_AUTH   M7: the exact Authorization value RevenueCat's webhook sends (set the
+#                      same in RevenueCat → Integrations → Webhooks). Unset, the webhook answers 503
+#   REVENUECAT_SECRET_KEY     M7: RevenueCat's secret API key (sk_…), for POST /me/plus/refresh.
+#                      Unset, that answers 503 not_configured
 # For `npm run dev`, put the same names in server/.dev.vars (gitignored) instead.
 
 [vars]
@@ -26,6 +34,10 @@ ENVIRONMENT = "development"
 # The host invite links point at: https://<INVITE_HOST>/j/<code>. Leave it out until the invite
 # domain exists (M9); links then use this Worker's own host, which serves the landing page too.
 # INVITE_HOST = "lockin.app"
+# Demo Buddy's kill switch (docs/launch/app-review-notes.md §3): "true" turns the review code and
+# the bot on; anything else, or leaving it out, turns them off (the code is then unknown, 404).
+# Turn it on for App Review with DEMO_BUDDY_CODE set as a secret, and keep it on after approval.
+# DEMO_BUDDY_ENABLED = "true"
 
 [[d1_databases]]
 binding = "DB"
