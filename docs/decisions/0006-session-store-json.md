@@ -23,3 +23,9 @@ Keep the JSON store through M4. Move to GRDB in M5, when the weekly leaderboard,
 history (a Plus feature) and cached squad data need real queries; the store is behind
 `SessionStore`, so only that type changes. SPEC.md §5.5 would then read "GRDB from M5; a JSON
 file before".
+
+## Update (M5)
+
+M5 put the weekly leaderboard and streaks on the server, so the phone still only keeps its own
+recent sessions. The JSON store stays through M5; the move to GRDB waits for full stats history
+(Plus, M7) or cached squad data that needs queries, whichever comes first.
