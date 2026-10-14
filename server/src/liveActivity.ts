@@ -46,7 +46,7 @@ export interface Member {
 }
 
 export interface Pet {
-  /** Species and stage, e.g. `fox.2`. */
+  /** Species and stage, e.g. `sprout.2`. */
   k: string;
   /** Mood, 0–3. */
   md: number;
@@ -116,7 +116,7 @@ export class LiveActivityError extends Error {
   override name = "LiveActivityError";
 }
 
-/** A pet code the parser accepts: `<species>.<stage>`, e.g. `fox.2`. */
+/** A pet code the parser accepts: `<species>.<stage>`, e.g. `sprout.2`. */
 export function isPetCode(value: unknown): value is string {
   return typeof value === "string" && PET_CODE.test(value);
 }
@@ -239,7 +239,7 @@ function parseMember(value: unknown, path: string): Member {
 function parsePet(value: unknown, path: string): Pet {
   const record = object(value, path, ["k", "md", "x"]);
   return {
-    k: matching(record.k, `${path}.k`, PET_CODE, "fox.2"),
+    k: matching(record.k, `${path}.k`, PET_CODE, "sprout.2"),
     md: integer(record.md, `${path}.md`, 0, 3),
     x: fraction(record.x, `${path}.x`),
   };

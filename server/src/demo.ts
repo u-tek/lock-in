@@ -55,20 +55,20 @@ export function demoScenario(scenario: DemoScenario, options: DemoOptions): Demo
 
   switch (scenario) {
     case "squad":
-      return { event: "update", priority: 10, attributes, state: { v: now, m: squad(), p: { k: "fox.1", md: 2, x: 0.42 } } };
+      return { event: "update", priority: 10, attributes, state: { v: now, m: squad(), p: { k: "sprout.1", md: 2, x: 0.42 } } };
     case "join":
       return {
         event: "update",
         priority: 10,
         attributes,
-        state: { v: now, m: [focusing(you, 3, 25), focusing(NOOR, 0, 50)], p: { k: "fox.1", md: 2, x: 0.4 } },
+        state: { v: now, m: [focusing(you, 3, 25), focusing(NOOR, 0, 50)], p: { k: "sprout.1", md: 2, x: 0.4 } },
       };
     case "cheer":
       return {
         event: "update",
         priority: 5,
         attributes,
-        state: { v: now, m: squad(), p: { k: "fox.1", md: 3, x: 0.43 }, c: { f: NOOR.i, t: me, k: 2, at: now } },
+        state: { v: now, m: squad(), p: { k: "sprout.1", md: 3, x: 0.43 }, c: { f: NOOR.i, t: me, k: 2, at: now } },
       };
     case "end":
       return {
@@ -78,7 +78,7 @@ export function demoScenario(scenario: DemoScenario, options: DemoOptions): Demo
         state: {
           v: now,
           m: [done(you, 0, 25), done(NOOR, 1, 50), done(KAI, 2, 25), done(MILA, 0, 90)],
-          p: { k: "fox.2", md: 3, x: 0.05 },
+          p: { k: "sprout.2", md: 3, x: 0.05 },
         },
       };
   }

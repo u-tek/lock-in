@@ -1,0 +1,24 @@
+{
+  "items": [
+    { "id": "body.1", "part": "body", "option": 1, "price": 120, "plus": false },
+    { "id": "body.2", "part": "body", "option": 2, "price": 150, "plus": false },
+    { "id": "body.3", "part": "body", "option": 3, "price": 180, "plus": false },
+    { "id": "body.4", "part": "body", "option": 4, "price": 0, "plus": true },
+    { "id": "colour.1", "part": "colour", "option": 1, "price": 40, "plus": false },
+    { "id": "colour.2", "part": "colour", "option": 2, "price": 45, "plus": false },
+    { "id": "colour.3", "part": "colour", "option": 3, "price": 50, "plus": false },
+    { "id": "colour.4", "part": "colour", "option": 4, "price": 50, "plus": false },
+    { "id": "colour.5", "part": "colour", "option": 5, "price": 60, "plus": false },
+    { "id": "colour.6", "part": "colour", "option": 6, "price": 0, "plus": true },
+    { "id": "colour.7", "part": "colour", "option": 7, "price": 0, "plus": true },
+    { "id": "eyes.1", "part": "eyes", "option": 1, "price": 60, "plus": false },
+    { "id": "eyes.2", "part": "eyes", "option": 2, "price": 70, "plus": false },
+    { "id": "eyes.3", "part": "eyes", "option": 3, "price": 0, "plus": true },
+    { "id": "eyes.4", "part": "eyes", "option": 4, "price": 80, "plus": false },
+    { "id": "hat.1", "part": "hat", "option": 1, "price": 80, "plus": false },
+    { "id": "hat.2", "part": "hat", "option": 2, "price": 0, "plus": true },
+    { "id": "hat.3", "part": "hat", "option": 3, "price": 100, "plus": false },
+    { "id": "hat.4", "part": "hat", "option": 4, "price": 120, "plus": false },
+    { "id": "hat.5", "part": "hat", "option": 5, "price": 0, "plus": true }
+  ]
+}
