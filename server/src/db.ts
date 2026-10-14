@@ -10,6 +10,7 @@
 // never by a read followed by a write.
 
 import type { ApnsEnvironment } from "./apns.ts";
+import { PET_RULES } from "./pet.ts";
 
 /** A `users` row as stored. Never sent as is: `publicUser` picks what the app sees. */
 export interface UserRow {
@@ -23,6 +24,8 @@ export interface UserRow {
   created_at: number;
   deleted_at: number | null;
   apple_refresh_token: string | null;
+  /** 1 once POST /me/coins/import has run (M5). */
+  coins_imported: number;
 }
 
 /** Another user as a friend (or a blocked person): `since` is when the friendship (or block) began. */
@@ -103,6 +106,12 @@ export interface SquadRow {
   streak_count: number;
   streak_last_day: string | null;
   created_at: number;
+  /** IANA zone: the squad's days and Monday (M5). */
+  tz: string;
+  /** Unix seconds; null while the pet is an egg (M5). */
+  hatched_at: number | null;
+  /** The latest slip or early leave in one of its rooms, Unix seconds (M5). */
+  last_sad_at: number | null;
 }
 
 /** A squad as one of its members sees it: their own mute switch and when they joined. */
@@ -129,16 +138,60 @@ export interface SessionRow {
   ended_at: number | null;
 }
 
-/** What the room knows of its squad: the name for `sq`, the pet, and today's activity for its mood. */
-export interface SquadSnapshotRow {
-  name: string;
-  pet_species: string | null;
-  pet_stage: number;
-  pet_xp: number;
+/** A squad's day so far (M5): its size, and how many members finished a session in it. */
+export interface SquadDayRow {
   /** Members now. */
   size: number;
-  /** Members with a session since `since` that's running or completed (not left or slipped). */
-  focused: number;
+  /** Members who finished (done) at least one session, solo or squad. */
+  finished: number;
+  /** Members who finished one of `streakMinMinutes` or more: the streak's count. */
+  counting: number;
+}
+
+/** One of a user's squads, its zone and its open room: whose streak and mood a finish may change (M5). */
+export interface SquadZoneRow {
+  squad_id: string;
+  tz: string;
+  open_session: string | null;
+}
+
+/** A member's week for the leaderboard (M5). */
+export interface LeaderboardRow {
+  id: string;
+  handle: string | null;
+  display_name: string | null;
+  minutes: number;
+  sessions: number;
+}
+
+/**
+ * What one timer earned, credited when it stopped (M5): coins to the member, XP (and a sad spell)
+ * to the room's squad, and a `focus_log` row. Credited at most once: see `syncRoom`.
+ */
+export interface CreditWrite {
+  sessionId: string;
+  userId: string;
+  /** The timer's start, REAL Unix seconds: with the session and user, what makes it this timer. */
+  startedAt: number;
+  endedAt: number;
+  /** The room's squad; null when solo. */
+  squadId: string | null;
+  focusedSec: number;
+  completed: boolean;
+  coins: number;
+  xp: number;
+  /** A slip or an early leave in a squad's room: the pet is sad from `endedAt`. */
+  sad: boolean;
+}
+
+/** A squad's day that may now count for its streak (M5). Days are 'YYYY-MM-DD' in the squad's zone. */
+export interface StreakDayWrite {
+  squadId: string;
+  day: string;
+  yesterday: string;
+  /** `day` as Unix seconds, `[start, end)`. */
+  start: number;
+  end: number;
 }
 
 /** One `participants` row, written whole by its room (src/room.ts). Times are REAL Unix seconds. */
@@ -170,6 +223,11 @@ export interface EventWrite {
 /** Whether `error` is D1 refusing a duplicate in `column` (e.g. `users.handle`). */
 export function isUniqueViolation(error: unknown, column: string): boolean {
   return error instanceof Error && error.message.includes(`UNIQUE constraint failed: ${column}`);
+}
+
+/** Whether `error` is D1 refusing a row because a CHECK on `column` failed (e.g. `coins`). */
+export function isCheckViolation(error: unknown, column: string): boolean {
+  return error instanceof Error && new RegExp(`CHECK constraint failed: [^:]*\\b${column}\\b`).test(error.message);
 }
 
 const FRIEND_COLUMNS = "u.id, u.handle, u.display_name, u.avatar_code";
