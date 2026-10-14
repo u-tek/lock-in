@@ -59,9 +59,12 @@ public final class SessionEngine: ObservableObject {
     /// ActivityKit calls in the order they were made: an update must never overtake the end.
     private var activityWork: Task<Void, Never>?
 
+    /// - Parameter liveActivities: The controller that mirrors the session as a Live Activity, or
+    ///   nil for none (tests). No default: `LiveActivityController()` is main-actor isolated, and a
+    ///   default argument is evaluated outside the actor in this Swift 5 mode module.
     public init(
         store: SessionStore = .appGroup(),
-        liveActivities: LiveActivityController? = LiveActivityController(),
+        liveActivities: LiveActivityController?,
         now: @escaping () -> Date = Date.init
     ) {
         let loaded = store.load()
