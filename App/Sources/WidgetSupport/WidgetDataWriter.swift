@@ -122,9 +122,9 @@ extension WidgetData.Squad {
     ///   room it couldn't read has at least one.
     init(_ squad: API.Squad, lockedIn: Int?) {
         let pet = squad.pet
-        let stage = max(0, pet.stage)
         // Read leniently, like a pushed `Pet.k`: a species this version can't draw still reads.
-        let code = PetCode("\(pet.species ?? PetCode.defaultSpecies).\(stage)")
+        // A boosted squad's pet wears its accessory on the widgets too (M7).
+        let code = pet.code
         self.init(
             id: squad.id,
             name: squad.name,

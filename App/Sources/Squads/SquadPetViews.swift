@@ -41,9 +41,11 @@ enum PetNames {
 // MARK: - Squad page
 
 /// The squad page's first section: the pet, big, its name and mood, and how far it is from its
-/// next stage.
+/// next stage. A boosted squad's (M7) wears its accessory and a "Boosted" badge.
 struct SquadPetCard: View {
     let pet: SquadPet
+    /// Squad Boost: someone in the squad has Lockin Plus.
+    var boosted = false
 
     var body: some View {
         let mood = pet.petMood
@@ -58,6 +60,10 @@ struct SquadPetCard: View {
                     .font(LKFont.subheadline)
                     .foregroundStyle(LKColor.textSecondary)
                     .multilineTextAlignment(.center)
+                if boosted {
+                    BoostedBadge()
+                        .padding(.top, LKSpacing.xs)
+                }
             }
             growth
         }
@@ -101,11 +107,53 @@ struct SquadPetCard: View {
     }
 }
 
-/// The squad's streak: a flame, the days, and how many have counted today.
+/// "Boosted": Squad Boost is on (M7), because someone in the squad has Lockin Plus.
+struct BoostedBadge: View {
+    var body: some View {
+        Label("Boosted", systemImage: "sparkles")
+            .font(LKFont.caption.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, LKSpacing.s)
+            .padding(.vertical, 3)
+            .background(LockinColour.plus.gradient, in: Capsule())
+            .accessibilityLabel("Squad Boost on")
+    }
+}
+
+/// The squad's streak: a flame, the days, and how many have counted today; under it the last
+/// seven days, with the days a streak freeze filled (M7), and your freezes left when you have Plus.
 struct SquadStreakRow: View {
     let streak: SquadStreak
+    /// The squad's zone, which says what today is.
+    var timeZone: TimeZone = .current
+    /// You have Lockin Plus: your freezes left this month show.
+    var showsFreezes = false
+    var now = Date()
 
     var body: some View {
+        VStack(alignment: .leading, spacing: LKSpacing.m) {
+            summary
+            StreakWeek(days: streak.days(endingOn: SquadStreak.day(of: now, in: timeZone)))
+            if showsFreezes {
+                Label {
+                    Text(freezesLeft)
+                        .monospacedDigit()
+                } icon: {
+                    Image(systemName: "snowflake")
+                        .foregroundStyle(.cyan)
+                }
+                .font(LKFont.footnote)
+                .foregroundStyle(LKColor.textSecondary)
+            }
+        }
+        .padding(.vertical, LKSpacing.xxs)
+    }
+
+    private var freezesLeft: String {
+        streak.freezes == 1 ? "1 freeze left this month" : "\(max(0, streak.freezes)) freezes left this month"
+    }
+
+    private var summary: some View {
         HStack(spacing: LKSpacing.m) {
             Image(systemName: "flame.fill")
                 .font(.title2)
@@ -127,7 +175,6 @@ struct SquadStreakRow: View {
                     .accessibilityLabel("Today counts")
             }
         }
-        .padding(.vertical, LKSpacing.xxs)
         .accessibilityElement(children: .combine)
     }
 
@@ -140,8 +187,97 @@ struct SquadStreakRow: View {
     }
 }
 
+/// The last seven days, oldest first: a flame on each day the streak counted, a snowflake where a
+/// freeze filled one, a ring for today until it counts.
+private struct StreakWeek: View {
+    let days: [SquadStreak.Day]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(days) { day in
+                VStack(spacing: LKSpacing.xs) {
+                    Text(Self.initial(day.weekday))
+                        .font(LKFont.caption.weight(.medium))
+                        .foregroundStyle(LKColor.textSecondary)
+                    DayMark(mark: day.mark)
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(verbatim: Self.spoken(day)))
+            }
+        }
+    }
+
+    private static let calendar = Calendar(identifier: .gregorian)
+
+    /// "M" for Monday, in the phone's language.
+    private static func initial(_ weekday: Int) -> String {
+        let symbols = calendar.veryShortStandaloneWeekdaySymbols
+        return symbols.indices.contains(weekday - 1) ? symbols[weekday - 1] : ""
+    }
+
+    /// "Monday, frozen". English only until the app has a string catalogue.
+    private static func spoken(_ day: SquadStreak.Day) -> String {
+        let symbols = calendar.weekdaySymbols
+        let name = symbols.indices.contains(day.weekday - 1) ? symbols[day.weekday - 1] : day.day
+        switch day.mark {
+        case .counted: return "\(name), counted"
+        case .frozen: return "\(name), saved by a streak freeze"
+        case .pending: return "\(name), today, not counted yet"
+        case .missed: return "\(name), not counted"
+        }
+    }
+}
+
+/// One day's mark in the week.
+private struct DayMark: View {
+    let mark: SquadStreak.Day.Mark
+
+    private static let size: CGFloat = 28
+
+    var body: some View {
+        switch mark {
+        case .counted:
+            symbol("flame.fill", on: .orange)
+        case .frozen:
+            symbol("snowflake", on: .cyan)
+        case .pending:
+            Circle()
+                .strokeBorder(Color.orange, style: StrokeStyle(lineWidth: 2, dash: [3, 3]))
+                .frame(width: Self.size, height: Self.size)
+        case .missed:
+            Circle()
+                .fill(Color(uiColor: .tertiarySystemFill))
+                .frame(width: Self.size, height: Self.size)
+        }
+    }
+
+    private func symbol(_ name: String, on colour: Color) -> some View {
+        Image(systemName: name)
+            .font(.footnote.weight(.bold))
+            .foregroundStyle(.white)
+            .frame(width: Self.size, height: Self.size)
+            .background(colour.gradient, in: Circle())
+    }
+}
+
+/// "Test bot", beside Demo Buddy's name wherever squad members are listed
+/// (docs/launch/app-review-notes.md §3).
+struct TestBotLabel: View {
+    var body: some View {
+        Text("Test bot")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(LKColor.textSecondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+            .fixedSize()
+    }
+}
+
 /// One member's week: their place, their Lockling, their name and their minutes. Minutes show as
-/// a placeholder until the leaderboard has loaded.
+/// a placeholder until the leaderboard has loaded. Demo Buddy, the test bot, is labelled as one and
+/// has no minutes: it's never on a leaderboard.
 struct LeaderboardRow: View {
     let place: Int
     let member: SquadMember
@@ -159,12 +295,17 @@ struct LeaderboardRow: View {
             Text(member.nameForDisplay)
                 .font(LKFont.body.weight(isMe ? .semibold : .regular))
                 .lineLimit(1)
+            if member.isBot {
+                TestBotLabel()
+            }
             Spacer(minLength: LKSpacing.s)
-            Text("\(entry?.minutes ?? 0, format: .number) min")
-                .font(LKFont.body)
-                .foregroundStyle(LKColor.textSecondary)
-                .monospacedDigit()
-                .redacted(reason: entry == nil ? .placeholder : [])
+            if !member.isBot {
+                Text("\(entry?.minutes ?? 0, format: .number) min")
+                    .font(LKFont.body)
+                    .foregroundStyle(LKColor.textSecondary)
+                    .monospacedDigit()
+                    .redacted(reason: entry == nil ? .placeholder : [])
+            }
         }
         .accessibilityElement(children: .combine)
     }
