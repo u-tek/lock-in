@@ -10,11 +10,19 @@
 // - finishes timers itself: an alarm at the next `e` marks that member done;
 // - clears a cheer 10 seconds after it arrives;
 // - credits what each timer earned when it stops (M5): coins to the member, XP to the squad's pet,
-//   a sad spell for a slip or an early leave, the egg hatching once two members finished, and the
-//   streak days the finish makes count, all in the same D1 transaction as the room's own rows and
-//   each exactly once (`Database.syncRoom`); then it reads the pet back and refreshes `p`, and tells
-//   the open rooms of the member's other squads to do the same (their mood and streak can change);
+//   a sad spell for an early leave, the egg hatching once two members finished, and the streak days
+//   the finish makes count, all in the same D1 transaction as the room's own rows and each exactly
+//   once (`Database.syncRoom`); then it reads the pet back and refreshes `p`, and tells the open
+//   rooms of the member's other squads to do the same (their mood and streak can change);
+// - shows a slip for 5 minutes (decision 0009): the member is state 5 while their timer keeps
+//   running, the pet has a sad spell, and the alarm puts them back to focusing (or done, if their
+//   time ran out meanwhile). Nothing is credited until the timer really stops;
 // - looks at the pet again when its mood changes by itself: a sad spell ending, the squad's midnight;
+// - in a Review Squad's room, runs Demo Buddy (src/demoBuddy.ts): it joins a few seconds after a
+//   person opens or joins the room, with a 3-minute timer, cheers them at +60 s, pauses at +90 s,
+//   resumes at +120 s and finishes when its time runs out, through the same changes and pushes as a
+//   person; it leaves when nobody else is running any more. It has no `participants` row, no push
+//   token and no events, and earns no coins (its minutes do feed the squad's pet);
 // - ends when nobody's timer is running any more: one `end` push with dismissal-date now + 30 min,
 //   the session marked ended in D1, and the room's push counts logged;
 // - serves the app's live view over a WebSocket (the hibernation API), sending the state on connect
@@ -25,7 +33,7 @@
 // the room trusts that header; the Worker never forwards a client's request as it came.
 //
 // Every timed job shares the one alarm a Durable Object has: the next push, timer end, 8-hour cap,
-// cheer to clear, D1 retry or clean-up, whichever is soonest. State lives in storage under "room",
+// cheer to clear, slip to lift, Demo Buddy's next move, D1 retry or clean-up, whichever is soonest. State lives in storage under "room",
 // so the object can be evicted (and its WebSockets hibernate) at any time.
 //
 // Logs carry the room id and counts only: never tokens, names or user ids.
@@ -37,6 +45,18 @@
 import { ApnsClient, type ApnsEnvironment, type ApnsPriority, type ApnsResult, isDeviceToken, isGoneToken } from "./apns.ts";
 import { SharedProviderToken } from "./apnsAuth.ts";
 import { type CreditWrite, Database, type EventWrite, type ParticipantWrite, type StreakDayWrite, isUniqueViolation } from "./db.ts";
+import {
+  DEMO_BUDDY_CHEER_AFTER_SECONDS,
+  DEMO_BUDDY_CHEER_KIND,
+  DEMO_BUDDY_ID,
+  DEMO_BUDDY_JOIN_DELAY_SECONDS,
+  DEMO_BUDDY_MINUTES,
+  DEMO_BUDDY_PAUSE_AFTER_SECONDS,
+  DEMO_BUDDY_PROFILE,
+  DEMO_BUDDY_RESUME_AFTER_SECONDS,
+  demoBuddyEnabled,
+  isDemoBuddy,
+} from "./demoBuddy.ts";
 import type { Env } from "./env.ts";
 import { HttpError, apiError, errorResponse, isRecord, json, noContent, readJSON } from "./http.ts";
 import {
@@ -76,6 +96,8 @@ export const MAX_CHEER_KIND = 7;
  * and it stops one abandoned pause from holding a room, and its owner, open for ever.
  */
 export const MEMBER_MAX_SECONDS = 8 * 60 * 60;
+/** A slip shows for this long while the timer keeps running (decision 0009); another slip starts it again. */
+export const SLIP_SHOW_SECONDS = 5 * 60;
 /** A D1 write that failed is tried again this much later. */
 export const D1_RETRY_SECONDS = 30;
 /** An ended room keeps its final state this long for GET /sessions/:id, then deletes it. */
@@ -161,6 +183,21 @@ interface RoomMember {
   slips: number;
   laToken?: string;
   laEnv?: ApnsEnvironment;
+  /** While slipped (state 5): when they go back to focusing. */
+  slipUntil?: number;
+  /** Demo Buddy: no participants row, no token, no events, no coins. */
+  bot?: true;
+}
+
+/** Demo Buddy's next move in a Review Squad's room. */
+interface BuddyPlan {
+  step: "join" | "cheer" | "pause" | "resume";
+  /** Unix seconds. */
+  at: number;
+  /** When its current timer started: the script is timed from it. */
+  startedAt?: number;
+  /** Whose lock-in brought it: the one it cheers, if they're still here. */
+  forId: string | null;
 }
 
 /** The squad's pet as the room last read it (M5). */
@@ -231,6 +268,12 @@ interface RoomRecord {
   events: EventWrite[];
   syncRetryAt?: number;
   cleanupAt?: number;
+  /** The room's squad is a Review Squad: Demo Buddy joins its sessions. */
+  review?: boolean;
+  /** Demo Buddy's next move, while it has one. */
+  buddy?: BuddyPlan;
+  /** A slip's sad spell for the squad's pet (Unix seconds), not in D1 yet. */
+  sadAt?: number;
 }
 
 interface PreparedPush {
@@ -248,17 +291,25 @@ interface Batch {
 
 type Outcome = { result: ApnsResult } | { error: string };
 
-/** What a D1 write took with it (M5): the credits, and whether the egg hatched. */
+/** What a D1 write took with it (M5): the credits, whether the egg hatched, and a slip's sad spell. */
 interface Synced {
   credits: CreditWrite[];
   hatched: boolean;
+  sad: boolean;
 }
 
 const STORAGE_KEY = "room";
-const RUNNING: readonly MemberState[] = [MemberState.focusing, MemberState.break, MemberState.paused];
+/** A slipped member's timer is running too (decision 0009). */
+const RUNNING: readonly MemberState[] = [MemberState.focusing, MemberState.break, MemberState.paused, MemberState.slipped];
+/** Running and not paused: the clock is going. */
+const TICKING: readonly MemberState[] = [MemberState.focusing, MemberState.break, MemberState.slipped];
 
 function isRunning(member: RoomMember): boolean {
   return RUNNING.includes(member.s);
+}
+
+function isTicking(member: RoomMember): boolean {
+  return TICKING.includes(member.s);
 }
 
 function badState(message: string): HttpError {
@@ -353,12 +404,19 @@ export class Room {
       case "pet":
         await this.petChanged(room);
         return noContent();
+      case "buddy":
+        if (!isDemoBuddy(userId)) throw new HttpError(404, "Not found");
+        await this.buddyNow(room);
+        return json({ session: this.sessionView(room) });
       default:
         throw new HttpError(404, "Not found");
     }
   }
 
-  /** Opens the room with its host (POST /sessions). */
+  /**
+   * Opens the room with its host (POST /sessions). Demo Buddy opens one too, in a Review Squad
+   * (POST /squads/:id/demo-buddy/lock-in), with no participants row and its script from the start.
+   */
   private async open(sid: string, userId: string, body: Record<string, unknown>): Promise<Joined> {
     if ((await this.load()) !== null) throw apiError(409, "room_exists", "This session already exists");
     const squadId = body.squadId === null || body.squadId === undefined ? null : body.squadId;
@@ -366,14 +424,20 @@ export class Room {
     const minutes = plannedMinutes(body.minutes);
     const profile = roomProfile(body.profile);
     const now = this.now();
+    const bot = isDemoBuddy(userId);
 
     let squadName: string | null = null;
+    let review = false;
     if (squadId !== null) {
       const squad = await this.db.squadById(squadId);
       if (squad === null) throw apiError(403, "not_member", "You're not in this squad");
       squadName = squad.name;
+      review = squad.review === 1;
     }
+    // Demo Buddy lives in Review Squads only.
+    if (bot && !review) throw apiError(403, "not_member", "Demo Buddy isn't in this squad");
     const host = newMember(userId, profile, minutes, now);
+    if (bot) host.bot = true;
     const room: RoomRecord = {
       sid,
       squadId,
@@ -392,9 +456,14 @@ export class Room {
       dirty: [],
       endDirty: false,
       events: [],
+      review,
     };
     try {
-      await this.db.insertRoom({ id: sid, squadId, hostId: userId, createdAt: now }, participantRow(room, host), joinEvent(room, host));
+      await this.db.insertRoom(
+        { id: sid, squadId, hostId: userId, createdAt: now },
+        bot ? null : participantRow(room, host),
+        bot ? null : joinEvent(room, host),
+      );
     } catch (error) {
       if (isUniqueViolation(error, "participants.user_id")) throw await this.alreadyInSession(userId);
       if (isUniqueViolation(error, "sessions.squad_id") || isUniqueViolation(error, "sessions.id")) {
@@ -404,6 +473,8 @@ export class Room {
     }
     // The egg shows from the start (M5): `p` is in every squad room's state.
     if (squadId !== null) await this.refreshPet(room, now);
+    if (bot) room.buddy = { step: "cheer", at: now + DEMO_BUDDY_CHEER_AFTER_SECONDS, startedAt: now, forId: null };
+    else this.inviteBuddy(room, userId, now);
     this.record = room;
     await this.commit(room, now, false);
     console.log(`room ${sid}: opened (${squadId === null ? "solo" : "squad"})`);
@@ -421,14 +492,41 @@ export class Room {
     // Already running here: the same answer again, so a retry is harmless.
     if (existing !== undefined && isRunning(existing)) return this.joined(room, userId);
 
-    let evicted: RoomMember | undefined;
-    if (existing === undefined && room.members.length >= MAX_MEMBERS) {
-      // Make room by moving out whoever left first; if nobody has, the room is full.
-      evicted = room.members.find((member) => member.s === MemberState.left);
-      if (evicted === undefined) throw apiError(409, "room_full", `A session holds ${MAX_MEMBERS} people`);
+    const seat = this.seatFor(room, userId);
+    if (seat === null) throw apiError(409, "room_full", `A session holds ${MAX_MEMBERS} people`);
+    const member = this.timerFor(room, userId, profile, minutes, now);
+    try {
+      await this.db.upsertParticipant(participantRow(room, member), joinEvent(room, member));
+    } catch (error) {
+      if (isUniqueViolation(error, "participants.user_id")) throw await this.alreadyInSession(userId);
+      throw error;
     }
+    this.seat(room, member, seat);
 
+    await this.refreshPet(room, now);
+    this.change(room, 10, now);
+    this.inviteBuddy(room, userId, now);
+    await this.commit(room, now, true);
+    return this.joined(room, userId);
+  }
+
+  /**
+   * Where a new timer for `userId` goes: in place of their last one, at the end, or in place of
+   * whoever left first when the room is full. Null when it's full and nobody has left.
+   */
+  private seatFor(room: RoomRecord, userId: string): { existing?: RoomMember; evicted?: RoomMember } | null {
+    const existing = room.members.find((member) => member.id === userId);
+    if (existing !== undefined) return { existing };
+    if (room.members.length < MAX_MEMBERS) return {};
+    // Make room by moving out whoever left first; if nobody has, the room is full.
+    const evicted = room.members.find((member) => member.s === MemberState.left && member.bot !== true);
+    return evicted === undefined ? null : { evicted };
+  }
+
+  /** A new timer for `userId`, carrying what their earlier timers in this room focused and slipped. */
+  private timerFor(room: RoomRecord, userId: string, profile: RoomProfile, minutes: number, now: number): RoomMember {
     const member = newMember(userId, profile, minutes, now);
+    const existing = room.members.find((each) => each.id === userId);
     if (existing !== undefined) {
       member.joinedAt = existing.joinedAt;
       member.focusedBefore = existing.focusedSec;
@@ -440,13 +538,12 @@ export class Room {
       member.focusedSec = former.focusedSec;
       member.slips = former.slips;
     }
-    try {
-      await this.db.upsertParticipant(participantRow(room, member), joinEvent(room, member));
-    } catch (error) {
-      if (isUniqueViolation(error, "participants.user_id")) throw await this.alreadyInSession(userId);
-      throw error;
-    }
+    return member;
+  }
 
+  /** Puts the new timer in its seat (`seatFor`). */
+  private seat(room: RoomRecord, member: RoomMember, seat: { existing?: RoomMember; evicted?: RoomMember }): void {
+    const { existing, evicted } = seat;
     if (evicted !== undefined) {
       room.former[evicted.id] = { focusedSec: evicted.focusedSec, slips: evicted.slips };
       room.members = room.members.filter((other) => other !== evicted);
@@ -454,13 +551,8 @@ export class Room {
     }
     if (existing !== undefined) room.members[room.members.indexOf(existing)] = member;
     else room.members.push(member);
-    delete room.former[userId];
-    room.dirty = room.dirty.filter((id) => id !== userId);
-
-    await this.refreshPet(room, now);
-    this.change(room, 10, now);
-    await this.commit(room, now, true);
-    return this.joined(room, userId);
+    delete room.former[member.id];
+    room.dirty = room.dirty.filter((id) => id !== member.id);
   }
 
   /** Stores the member's Live Activity push token and its APNs environment. No push: they have the state. */
@@ -487,13 +579,15 @@ export class Room {
 
     switch (action) {
       case "pause":
-        if (member.s !== MemberState.focusing) throw badState("Only a running timer can be paused");
+        // A slipped timer is running like a focusing one (decision 0009).
+        if (member.s !== MemberState.focusing && member.s !== MemberState.slipped) throw badState("Only a running timer can be paused");
         if (now >= member.e) {
           // The time already ran out: that's a finish, not a pause (as SessionEngine has it).
           this.stopMember(room, member, MemberState.done, member.e);
         } else {
           member.s = MemberState.paused;
           member.q = now;
+          delete member.slipUntil;
           room.events.push({ sessionId: room.sid, userId, type: "pause", at: now });
           markDirty(room, member);
           this.change(room, 5, now);
@@ -518,9 +612,21 @@ export class Room {
         else this.stopMember(room, member, MemberState.left, now);
         break;
       case "slip":
-        if (!isRunning(member)) throw badState("This timer has already stopped");
+        // Gentle (decision 0009): shown for SLIP_SHOW_SECONDS while the timer keeps running; a slip
+        // while slipped starts that again. Only a running, unpaused timer can slip.
+        if (member.s !== MemberState.focusing && member.s !== MemberState.slipped) throw badState("Only a running timer can slip");
+        if (now >= member.e) {
+          this.stopMember(room, member, MemberState.done, member.e);
+          break;
+        }
+        member.s = MemberState.slipped;
+        member.slipUntil = now + SLIP_SHOW_SECONDS;
         member.slips += 1;
-        this.stopMember(room, member, MemberState.slipped, now);
+        room.events.push({ sessionId: room.sid, userId, type: "slip", at: now, meta: { slips: member.slips } });
+        // The pet's sad spell, as for an early leave (M5): a squad's room only.
+        if (room.squadId !== null) room.sadAt = Math.max(room.sadAt ?? 0, now);
+        markDirty(room, member);
+        this.change(room, 10, now);
         break;
     }
     this.endIfIdle(room, now);
@@ -642,7 +748,9 @@ export class Room {
         this.record = null;
         return undefined;
       }
-      let changed = this.tick(room, now);
+      // Demo Buddy's moves first, then timers: both at the time they were due.
+      const moved = this.buddyStep(room, now);
+      let changed = this.tick(room, now) || moved;
       // The mood changes by itself when a sad spell ends and at the squad's midnight.
       if (room.status === "open" && room.pet !== null && now >= room.pet.checkAt) {
         const refreshed = await this.refreshPet(room, now);
@@ -672,15 +780,24 @@ export class Room {
     });
   }
 
-  /** Marks timers that ran out as done, enforces the 8-hour cap, clears an old cheer. Whether anything changed. */
+  /**
+   * Marks timers that ran out as done (slipped ones too), enforces the 8-hour cap, ends slips that
+   * have shown for long enough, clears an old cheer. Whether anything changed.
+   */
   private tick(room: RoomRecord, now: number): boolean {
     if (room.status === "ended") return false;
     const before = room.v;
     for (const member of room.members) {
-      if ((member.s === MemberState.focusing || member.s === MemberState.break) && member.e <= now) {
+      if (isTicking(member) && member.e <= now) {
         this.stopMember(room, member, MemberState.done, member.e);
       } else if (isRunning(member) && now >= member.b + MEMBER_MAX_SECONDS) {
         this.stopMember(room, member, MemberState.left, now, { cap: true });
+      } else if (member.s === MemberState.slipped && (member.slipUntil ?? 0) <= now) {
+        // Back to focusing, quietly: priority 5.
+        member.s = MemberState.focusing;
+        delete member.slipUntil;
+        markDirty(room, member);
+        this.change(room, 5, now);
       }
     }
     if (room.cheer !== undefined && room.cheerClearAt !== undefined && now >= room.cheerClearAt) {
@@ -705,9 +822,11 @@ export class Room {
     member.focusedSec = member.focusedBefore + round;
     member.s = state;
     delete member.q;
+    delete member.slipUntil;
     member.endedAt = at;
-    const type = state === MemberState.done ? "done" : state === MemberState.slipped ? "slip" : "leave";
-    room.events.push({ sessionId: room.sid, userId: member.id, type, at, meta: { sec: round, ...meta } });
+    if (member.bot !== true) {
+      room.events.push({ sessionId: room.sid, userId: member.id, type: state === MemberState.done ? "done" : "leave", at, meta: { sec: round, ...meta } });
+    }
     this.credit(room, member, state, at, round, meta.cap === true);
     markDirty(room, member);
     this.change(room, 10, this.now());
@@ -715,12 +834,14 @@ export class Room {
 
   /**
    * What the timer earned (M5): coins for every whole focused minute plus the bonus for finishing,
-   * XP for the squad's pet, and a sad spell for a slip or an early leave (not the 8-hour cap, which
-   * nobody chose). Two members finishing in a squad's room hatch its egg.
+   * XP for the squad's pet, and a sad spell for an early leave (not the 8-hour cap, which nobody
+   * chose). Two members finishing in a squad's room hatch its egg. Demo Buddy earns no coins, and its
+   * leaving (when nobody else is running) isn't sad; its minutes feed the Review Squad's pet.
    */
   private credit(room: RoomRecord, member: RoomMember, state: MemberState, at: number, focusedSec: number, capped: boolean): void {
     const completed = state === MemberState.done;
     const squadId = room.squadId;
+    const bot = member.bot === true;
     room.credits.push({
       sessionId: room.sid,
       userId: member.id,
@@ -729,18 +850,23 @@ export class Room {
       squadId,
       focusedSec,
       completed,
-      coins: sessionCoins(focusedSec, completed),
+      coins: bot ? 0 : sessionCoins(focusedSec, completed),
       xp: squadId === null ? 0 : wholeMinutes(focusedSec),
-      sad: squadId !== null && (state === MemberState.slipped || (state === MemberState.left && !capped)),
+      sad: !bot && squadId !== null && state === MemberState.left && !capped,
     });
     if (!completed) return;
     if (!room.finishers.includes(member.id)) room.finishers.push(member.id);
     if (squadId !== null && room.finishers.length >= 2 && room.hatchAt === undefined && room.pet?.hatched !== true) room.hatchAt = at;
   }
 
-  /** Nobody's timer is running: the room ends, and its final state goes out as an `end` push now. */
+  /**
+   * Nobody's timer is running: the room ends, and its final state goes out as an `end` push now.
+   * Demo Buddy doesn't keep a room open by itself: once the people in it have all stopped, it leaves.
+   */
   private endIfIdle(room: RoomRecord, now: number): void {
-    if (room.status !== "open" || room.members.some(isRunning)) return;
+    if (room.status !== "open") return;
+    this.buddyLeavesIfAlone(room, now);
+    if (room.members.some(isRunning)) return;
     room.status = "ended";
     room.endedAt = now;
     room.endDirty = true;
@@ -754,6 +880,129 @@ export class Room {
     }
     // Replaces any update still waiting: only the latest state goes out.
     room.pending = { event: "end", priority: 10, flushAt: now };
+  }
+
+  // Demo Buddy (src/demoBuddy.ts)
+
+  /**
+   * A person opened or joined a Review Squad's room: Demo Buddy joins a few seconds later, unless
+   * it's running here already or on its way, or it's switched off.
+   */
+  private inviteBuddy(room: RoomRecord, forId: string, now: number): void {
+    if (room.review !== true || room.status !== "open" || !demoBuddyEnabled(this.env)) return;
+    const bot = room.members.find((member) => member.bot === true);
+    if ((bot !== undefined && isRunning(bot)) || room.buddy?.step === "join") return;
+    room.buddy = { step: "join", at: now + DEMO_BUDDY_JOIN_DELAY_SECONDS, forId };
+  }
+
+  /** POST /squads/:id/demo-buddy/lock-in with the squad's room open: Demo Buddy joins now, unless it's running. */
+  private async buddyNow(room: RoomRecord): Promise<void> {
+    if (room.status === "ended") throw sessionEnded();
+    if (room.review !== true) throw new HttpError(404, "Not found");
+    const now = this.now();
+    const changed = this.buddyJoins(room, now, null);
+    await this.commit(room, now, changed);
+  }
+
+  /**
+   * Demo Buddy starts a 3-minute timer here, through the same seat as a person (a new timer after
+   * finishing, or the end of the row), and its script starts. Whether it joined: not when it's
+   * running already, or the room is full.
+   */
+  private buddyJoins(room: RoomRecord, now: number, forId: string | null): boolean {
+    const existing = room.members.find((member) => member.bot === true);
+    if (existing !== undefined && isRunning(existing)) return false;
+    const seat = this.seatFor(room, DEMO_BUDDY_ID);
+    if (seat === null) {
+      delete room.buddy;
+      console.log(`room ${room.sid}: full, so Demo Buddy didn't join`);
+      return false;
+    }
+    const member = this.timerFor(room, DEMO_BUDDY_ID, DEMO_BUDDY_PROFILE, DEMO_BUDDY_MINUTES, now);
+    member.bot = true;
+    this.seat(room, member, seat);
+    room.buddy = { step: "cheer", at: now + DEMO_BUDDY_CHEER_AFTER_SECONDS, startedAt: now, forId };
+    // A join, like anyone's: priority 10.
+    this.change(room, 10, now);
+    return true;
+  }
+
+  /** Demo Buddy's moves that are due: join, cheer, pause, resume (its timer ends by itself). Whether anything changed. */
+  private buddyStep(room: RoomRecord, now: number): boolean {
+    let changed = false;
+    // At most the four moves; a late alarm makes the overdue ones one after the other.
+    for (let move = 0; move < 4; move++) {
+      const plan = room.buddy;
+      if (plan === undefined || room.status !== "open" || now < plan.at) break;
+      if (plan.step === "join") {
+        if (!demoBuddyEnabled(this.env)) {
+          delete room.buddy;
+          break;
+        }
+        if (this.buddyJoins(room, now, plan.forId)) changed = true;
+        else if (room.buddy === plan) delete room.buddy;
+        continue;
+      }
+      const bot = room.members.find((member) => member.bot === true);
+      if (bot === undefined || !isRunning(bot)) {
+        delete room.buddy;
+        break;
+      }
+      const startedAt = plan.startedAt ?? bot.b;
+      switch (plan.step) {
+        case "cheer": {
+          const to = buddyCheerTarget(room, plan.forId);
+          if (to !== undefined) {
+            room.cheer = { f: bot.id, t: to, k: DEMO_BUDDY_CHEER_KIND, at: now };
+            room.cheerClearAt = now + CHEER_SHOWN_SECONDS;
+            room.lastCheer[bot.id] = now;
+            this.change(room, 5, now);
+            changed = true;
+          }
+          room.buddy = { ...plan, step: "pause", at: startedAt + DEMO_BUDDY_PAUSE_AFTER_SECONDS };
+          break;
+        }
+        case "pause":
+          if (isTicking(bot) && now < bot.e) {
+            bot.s = MemberState.paused;
+            bot.q = now;
+            delete bot.slipUntil;
+            this.change(room, 5, now);
+            changed = true;
+          }
+          room.buddy = { ...plan, step: "resume", at: startedAt + DEMO_BUDDY_RESUME_AFTER_SECONDS };
+          break;
+        case "resume":
+          if (bot.s === MemberState.paused && bot.q !== undefined) {
+            const paused = Math.max(0, now - bot.q);
+            bot.e += paused;
+            bot.pausedSec += paused;
+            delete bot.q;
+            bot.s = MemberState.focusing;
+            this.change(room, 5, now);
+            changed = true;
+          }
+          // The rest is its timer running out, which the room does for everyone.
+          delete room.buddy;
+          break;
+      }
+    }
+    return changed;
+  }
+
+  /**
+   * Once the people in the room have all stopped, Demo Buddy stops too (left, without the sad
+   * spell), and a join on its way is called off; so the room ends as it would without it. Not in a
+   * room it opened itself that nobody has joined yet.
+   */
+  private buddyLeavesIfAlone(room: RoomRecord, now: number): void {
+    if (room.buddy === undefined && !room.members.some((member) => member.bot === true && isRunning(member))) return;
+    const people = room.members.filter((member) => member.bot !== true);
+    if (people.some(isRunning)) return;
+    if (people.length === 0 && isDemoBuddy(room.hostId)) return;
+    delete room.buddy;
+    const bot = room.members.find((member) => member.bot === true);
+    if (bot !== undefined && isRunning(bot)) this.stopMember(room, bot, MemberState.left, now);
   }
 
   /** A change to the state: a new version, and a push within COALESCE_SECONDS at the highest priority asked for. */
@@ -855,11 +1104,20 @@ export class Room {
     }
     const { batches, p10, p5, refused, failed, cleared } = room.pushes;
     const minutes = Math.round(((room.endedAt ?? now) - room.createdAt) / 60);
+    // People only: Demo Buddy is counted apart, so stats see real squads as they are.
+    const people = room.members.filter((member) => member.bot !== true).length;
+    const bots = room.members.length - people;
     console.log(
-      `room ${room.sid}: ended after ${minutes} min with ${room.members.length} member${room.members.length === 1 ? "" : "s"}; ` +
+      `room ${room.sid}: ended after ${minutes} min with ${people} member${people === 1 ? "" : "s"}${bots > 0 ? " and Demo Buddy" : ""}; ` +
         `${p10 + p5} pushes accepted (${p10} at priority 10, ${p5} at 5) in ${batches} batches, ${refused} refused, ${failed} failed, ${cleared} tokens cleared`,
     );
-    room.events.push({ sessionId: room.sid, userId: null, type: "room_end", at: now, meta: { members: room.members.length, batches, p10, p5, refused, failed, cleared } });
+    room.events.push({
+      sessionId: room.sid,
+      userId: null,
+      type: "room_end",
+      at: now,
+      meta: { members: people, ...(bots > 0 ? { bots } : {}), batches, p10, p5, refused, failed, cleared },
+    });
     room.cleanupAt = now + ENDED_ROOM_KEPT_SECONDS;
   }
 
@@ -885,7 +1143,7 @@ export class Room {
    */
   private async settle(room: RoomRecord, now: number): Promise<boolean> {
     const synced = await this.syncD1(room, now);
-    if (synced === null || room.squadId === null || (synced.credits.length === 0 && !synced.hatched)) return false;
+    if (synced === null || room.squadId === null || (synced.credits.length === 0 && !synced.hatched && !synced.sad)) return false;
     const refreshed = await this.refreshPet(room, now);
     if (refreshed?.changed !== true) return false;
     this.change(room, refreshed.hatched ? 10 : 5, now);
@@ -901,7 +1159,9 @@ export class Room {
 
   /** What was written, or null when nothing was (nothing to write, or D1 failed and it's tried again later). */
   private async syncD1(room: RoomRecord, now: number): Promise<Synced | null> {
-    if (room.dirty.length === 0 && !room.endDirty && room.events.length === 0 && room.credits.length === 0 && room.hatchAt === undefined) return null;
+    if (room.dirty.length === 0 && !room.endDirty && room.events.length === 0 && room.credits.length === 0 && room.hatchAt === undefined && room.sadAt === undefined) {
+      return null;
+    }
     if (room.syncRetryAt !== undefined && now < room.syncRetryAt && !room.endDirty) return null;
     const participants = room.dirty
       .map((id) => room.members.find((member) => member.id === id))
@@ -909,8 +1169,9 @@ export class Room {
       .map((member) => participantRow(room, member));
     const credits = room.credits;
     const hatch = room.squadId !== null && room.hatchAt !== undefined ? { squadId: room.squadId, at: room.hatchAt } : undefined;
+    const sad = room.squadId !== null && room.sadAt !== undefined ? { squadId: room.squadId, at: room.sadAt } : undefined;
     try {
-      const streakDays = await this.streakDays(room, credits);
+      const streakDays = (await this.streakDays(room, credits)).map((day) => ({ ...day, freezeAt: now }));
       await this.db.syncRoom({
         participants,
         ...(room.endDirty ? { ended: { sessionId: room.sid, endedAt: room.endedAt ?? now } } : {}),
@@ -919,14 +1180,16 @@ export class Room {
         ...(hatch === undefined ? {} : { hatch }),
         ...(room.squadId !== null && (hatch !== undefined || credits.some((credit) => credit.xp > 0)) ? { stageOf: room.squadId } : {}),
         streakDays,
+        ...(sad === undefined ? {} : { sad }),
       });
       room.dirty = [];
       room.endDirty = false;
       room.events = [];
       room.credits = [];
       delete room.hatchAt;
+      delete room.sadAt;
       delete room.syncRetryAt;
-      return { credits, hatched: hatch !== undefined };
+      return { credits, hatched: hatch !== undefined, sad: sad !== undefined };
     } catch (error) {
       console.error(`room ${room.sid}: D1 write failed (${error instanceof Error ? error.name : typeof error}), trying again in ${D1_RETRY_SECONDS} s`);
       room.syncRetryAt = now + D1_RETRY_SECONDS;
@@ -943,7 +1206,8 @@ export class Room {
     const days = new Map<string, StreakDayWrite>();
     const zones = new Map<string, Awaited<ReturnType<Database["squadZonesOf"]>>>();
     for (const credit of credits) {
-      if (!credit.completed) continue;
+      // Demo Buddy's finishes count for no streak, and touch no other squad.
+      if (!credit.completed || isDemoBuddy(credit.userId)) continue;
       let mine = zones.get(credit.userId);
       if (mine === undefined) {
         mine = await this.db.squadZonesOf(credit.userId);
@@ -987,11 +1251,13 @@ export class Room {
     if (room.syncRetryAt !== undefined) times.push(room.syncRetryAt);
     if (room.status === "open") {
       for (const member of room.members) {
-        if (member.s === MemberState.focusing || member.s === MemberState.break) times.push(member.e);
+        if (isTicking(member)) times.push(member.e);
         if (isRunning(member)) times.push(member.b + MEMBER_MAX_SECONDS);
+        if (member.s === MemberState.slipped && member.slipUntil !== undefined) times.push(member.slipUntil);
       }
       if (room.cheer !== undefined && room.cheerClearAt !== undefined) times.push(room.cheerClearAt);
       if (room.pet !== null) times.push(room.pet.checkAt);
+      if (room.buddy !== undefined) times.push(room.buddy.at);
     } else if (room.cleanupAt !== undefined) {
       times.push(room.cleanupAt);
     }
@@ -1035,6 +1301,7 @@ export class Room {
         return null;
       }
       room.squadName = squad.name;
+      room.review = squad.review === 1;
       const before = room.pet;
       const pet = petSnapshot(await squadProgress(this.db, squad, now, (length) => this.random(length)));
       // Never a check in the past, which would fire the alarm again at once.
@@ -1123,7 +1390,15 @@ function newMember(id: string, profile: RoomProfile, minutes: number, now: numbe
 }
 
 function markDirty(room: RoomRecord, member: RoomMember): void {
+  // Demo Buddy has no participants row to keep up to date.
+  if (member.bot === true) return;
   if (!room.dirty.includes(member.id)) room.dirty.push(member.id);
+}
+
+/** Whom Demo Buddy cheers: whoever brought it, if they're still here, else someone running, else anyone here. */
+function buddyCheerTarget(room: RoomRecord, forId: string | null): string | undefined {
+  const people = room.members.filter((member) => member.bot !== true && member.s !== MemberState.left);
+  return (people.find((member) => member.id === forId && isRunning(member)) ?? people.find(isRunning) ?? people[0])?.id;
 }
 
 function participantRow(room: RoomRecord, member: RoomMember): ParticipantWrite {
@@ -1151,7 +1426,8 @@ function joinEvent(room: RoomRecord, member: RoomMember): EventWrite {
 function petSnapshot(progress: SquadProgress): PetSnapshot {
   const scale = 10 ** PET_PROGRESS_DECIMALS;
   return {
-    k: `${progress.species}.${progress.stage}`,
+    // M7: a boosted squad's pet wears its accessory, "sprout.2.a3" (PetCode ignores what follows the stage).
+    k: `${progress.species}.${progress.stage}${progress.accessory === null ? "" : `.a${progress.accessory}`}`,
     md: progress.mood,
     x: Math.round(progress.progress * scale) / scale,
     hatched: progress.hatched,
@@ -1159,10 +1435,14 @@ function petSnapshot(progress: SquadProgress): PetSnapshot {
   };
 }
 
-/** A room saved by an earlier version, given what's new since (M5). */
+/** A room saved by an earlier version, given what's new since (M5, decision 0009). */
 function upgraded(room: RoomRecord): RoomRecord {
   room.credits ??= [];
   room.finishers ??= [];
+  // Before gentle slips, a slip stopped the timer: such a member has left, and isn't running.
+  for (const member of room.members) {
+    if (member.s === MemberState.slipped && member.slipUntil === undefined && member.endedAt !== undefined) member.s = MemberState.left;
+  }
   // M3 kept the pet as species, stage, XP and mood; it's read again at the room's next change.
   if (room.pet !== null && typeof (room.pet as Partial<PetSnapshot>).k !== "string") room.pet = null;
   return room;
