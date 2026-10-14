@@ -1,6 +1,6 @@
 # 0004: One APNs provider token for every isolate
 
-Status: **proposed**, awaiting the owner.
+Status: **implemented in M3** (the singleton Durable Object option), awaiting the owner's sign-off.
 
 Affects: M0 (how to read one possible spike result) and M3 (the push fan-out from `Room` Durable
 Objects).

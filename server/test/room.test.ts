@@ -100,6 +100,41 @@ test("a D1 write that fails is tried again, and the room keeps going meanwhile",
   expect(app.count("SELECT count(*) FROM events WHERE session_id = ? AND type = 'pause'", sid)).toBe(1);
 });
 
+describe("opening", () => {
+  const profile = { name: "Ava", avatar: "b0.c0.e0.h0" };
+
+  test("D1 refuses a second running timer for one user, whoever checked first", async () => {
+    const sid = (await call(ava, "POST", "/sessions", { minutes: 25 })).body.session.id;
+    // Past the Worker's own check, as a request racing it would be.
+    expect(await direct("Ra00000001", ava.user.id, "open", { squadId: null, minutes: 25, profile })).toEqual({
+      status: 409,
+      body: { error: expect.any(String), code: "already_in_session", sessionId: sid },
+    });
+    // Nothing was left behind: no second session, and the room stays empty.
+    expect(app.count("SELECT count(*) FROM sessions")).toBe(1);
+    expect((await direct("Ra00000001", ava.user.id, "state")).body.code).toBe("session_not_found");
+  });
+
+  test("D1 refuses a second open room for a squad: room_exists, which the Worker answers by joining", async () => {
+    const squadId = (await call(ava, "POST", "/squads", { name: "Goblins" })).body.squad.id;
+    const code = (await call(ava, "POST", `/squads/${squadId}/invite`)).body.code;
+    await call(noor, "POST", `/squads/join/${code}`);
+    const sid = (await call(ava, "POST", "/sessions", { squadId, minutes: 25 })).body.session.id;
+    expect((await direct("Ra00000002", noor.user.id, "open", { squadId, minutes: 25, profile })).body.code).toBe("room_exists");
+    expect((await direct(sid, noor.user.id, "open", { squadId, minutes: 25, profile })).body.code).toBe("room_exists");
+    expect(app.count("SELECT count(*) FROM sessions")).toBe(1);
+    expect(app.count("SELECT count(*) FROM participants WHERE user_id = ?", noor.user.id)).toBe(0);
+  });
+
+  test("refuses bodies the Worker would never send", async () => {
+    expect((await direct("Ra00000003", ava.user.id, "open", { squadId: null, minutes: 0, profile })).body.code).toBe("minutes_invalid");
+    expect((await direct("Ra00000003", ava.user.id, "open", { squadId: null, minutes: 25 })).status).toBe(400);
+    expect((await direct("Ra00000003", ava.user.id, "open", { squadId: "nope", minutes: 25, profile })).status).toBe(400);
+    expect((await direct("Ra00000003", ava.user.id, "open", { squadId: "Zz00000000", minutes: 25, profile })).body.code).toBe("not_member");
+    expect(app.count("SELECT count(*) FROM sessions")).toBe(0);
+  });
+});
+
 describe("six members at most", () => {
   test("a seventh takes the place of someone who left, or finds the room full", async () => {
     const owner = await app.user("owner");

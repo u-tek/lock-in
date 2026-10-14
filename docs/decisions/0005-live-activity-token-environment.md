@@ -1,6 +1,6 @@
 # 0005: Store the APNs environment with each Live Activity token
 
-Status: **proposed**, awaiting the owner.
+Status: **implemented in M3** (migration `0003_squads.sql`, `POST /sessions/:id/la-token { token, env }`), awaiting the owner's sign-off.
 
 Affects: M3 (squad sessions). Nothing in M0 uses `participants.la_token` yet.
 

@@ -39,7 +39,7 @@ let package = Package(
         // that mirrors it. App only. Swift 5 mode for the same ActivityKit reason as above.
         .target(
             name: "SessionEngine",
-            dependencies: ["Core", "Model", "LiveActivity"],
+            dependencies: ["Core", "Model", "LiveActivity", "API"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         // Lockin Plus: plans, entitlements and the purchase flow, on StoreKit 2. App only.
@@ -55,7 +55,7 @@ let package = Package(
         .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"]),
         .testTarget(name: "CreatureTests", dependencies: ["Creature", "Model"]),
         .testTarget(name: "LiveActivityTests", dependencies: ["LiveActivity", "Model"]),
-        .testTarget(name: "SessionEngineTests", dependencies: ["SessionEngine", "Core", "Model", "LiveActivity"]),
+        .testTarget(name: "SessionEngineTests", dependencies: ["SessionEngine", "Core", "Model", "LiveActivity", "API"]),
         .testTarget(name: "PaywallTests", dependencies: ["Paywall", "Creature", "Model"]),
         .testTarget(name: "APITests", dependencies: ["API", "Core", "Model"]),
         .testTarget(name: "SocialTests", dependencies: ["Social", "API", "Core", "Model"]),

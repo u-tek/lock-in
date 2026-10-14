@@ -12,6 +12,7 @@ test("the entry module exports only handlers and classes", () => {
     else expect(typeof value, name).toBe("function");
   }
   expect(entry.Room).toBeTypeOf("function");
+  expect(entry.ApnsAuth).toBeTypeOf("function");
 });
 
 test("src/ uses Web APIs only", () => {

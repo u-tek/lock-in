@@ -3,8 +3,11 @@
 The Cloudflare Worker behind Lockin (SPEC.md §4). M0 gave it the **APNs spike**, proving that a
 deployed Worker can push a Live Activity update to a TestFlight build on a real iPhone (SPEC.md
 §4.2, `docs/spikes/apns-worker.md`). M2 adds **accounts and friends** on D1: Sign in with Apple,
-handles and names, friend codes and invite links, blocks, reports and account deletion. The
-contract the app is written against is `docs/milestones/M2.md`.
+handles and names, friend codes and invite links, blocks, reports and account deletion. M3 adds
+**squads and sessions**: each session is a `Room` Durable Object that runs everyone's timers,
+pushes the squad's Live Activity to every member and serves a WebSocket live view, with one APNs
+provider token for all of them from the `ApnsAuth` Durable Object. The contracts the app is written
+against are `docs/milestones/M2.md` and `docs/milestones/M3.md`.
 
 | Route | Auth | What it does |
 |---|---|---|
@@ -22,14 +25,31 @@ contract the app is written against is `docs/milestones/M2.md`.
 | `DELETE /friends/:id` | bearer | Ends a friendship (both ways) → 204 |
 | `GET /blocks`, `POST /blocks`, `DELETE /blocks/:userId` | bearer | Who you've blocked; blocking also ends the friendship |
 | `POST /reports` | bearer | `{ userId, reason, note? }` → 204, for moderation |
-| `GET /j/:code` | | The invite landing page (HTML): open in Lockin, or get it and type the code |
+| `GET /j/:code` | | The invite landing page (HTML) for a friend or squad code: open in Lockin, or get it and type the code |
 | `GET /.well-known/apple-app-site-association` | | Universal links for `/j/*` (used once the invite domain exists, M9) |
+| `DELETE /auth/session` | bearer | Signs this token out (other devices stay signed in) → 204 |
+| `GET /squads` | bearer | `{ squads: [Squad] }`, the one you joined first first |
+| `POST /squads` | bearer | `{ name }` → `{ squad }`. Free: 1 squad; Plus: 3 |
+| `PATCH /squads/:id` | bearer | `{ name }` → `{ squad }`, the owner only |
+| `POST /squads/:id/invite` | bearer | Your code for the squad (`{ code, url, expiresAt }`), like a friend code |
+| `POST /squads/join/:code` | bearer | → `{ squad }`. Free squads hold 4, a Plus owner's (or Plus joiner's) 6 |
+| `PATCH /squads/:id/members/me` | bearer | `{ muted }` → `{ squad }` |
+| `DELETE /squads/:id/members/me` | bearer | Leaves → 204. An owner hands the squad to the longest-standing member; the last one out deletes it |
+| `POST /sessions` | bearer | `{ squadId?, minutes }` → `Joined`: solo, or the squad's room (joined, or opened) |
+| `POST /sessions/:id/join` | bearer | `{ minutes }` → `Joined` |
+| `POST /sessions/:id/la-token` | bearer | `{ token, env }` → 204: the Live Activity's push token and its APNs environment |
+| `POST /sessions/:id/pause`, `resume`, `end`, `slip` | bearer | → `{ contentState }` |
+| `POST /sessions/:id/cheer` | bearer | `{ to, kind }` (0–7) → 204, one per 10 s |
+| `GET /sessions/:id` | bearer | `{ session, contentState }`, for reconciling on foreground |
+| `GET /sessions/:id/live` | bearer | WebSocket: `{"type": "state", "status", "contentState"}` on connect and after every change |
 
 Everything else answers `404`. Errors are `{"error": "<a sentence>", "code": "<machine code>"}`;
-the app switches on `code`. The codes per route are in `docs/milestones/M2.md`; on top of those,
-any route can answer `400 bad_request` (a body that isn't a JSON object), `413 too_large` (a body
-over 16 KB) and `500 internal`, and `POST /auth/apple` answers `502 apple_unavailable` when Apple's
-keys can't be fetched.
+the app switches on `code`. A few carry one more field: `limit` on 402 `plus_required`, `sessionId`
+on 409 `already_in_session`, `retryAfter` (seconds) on 429 `cheer_too_soon`. The codes per route are
+in `docs/milestones/M2.md` and `docs/milestones/M3.md`; on top of those, any route can answer
+`400 bad_request` (a body that isn't a JSON object), `413 too_large` (a body over 16 KB) and
+`500 internal`, and `POST /auth/apple` answers `502 apple_unavailable` when Apple's keys can't be
+fetched.
 
 | Path | What's there |
 |---|---|
@@ -37,25 +57,29 @@ keys can't be fetched.
 | `src/accounts.ts` | `/auth/apple`, `/me`, `/handles/:handle`, `/devices` |
 | `src/friends.ts` | `/friends…`, `/blocks…`, `/reports` |
 | `src/invite.ts` | `/j/:code` and the apple-app-site-association file |
+| `src/squads.ts` | `/squads…`: limits, codes, joining, leaving and handing on |
+| `src/sessions.ts` | `/sessions…`: checks what only D1 knows (squad membership, your other session), then forwards to the room |
+| `src/room.ts` | The `Room` Durable Object: one per session ("The rooms" below) |
+| `src/apnsAuth.ts` | The `ApnsAuth` Durable Object: the one APNs provider token every room presents, and the rooms' client for it |
 | `src/appleAuth.ts` | Sign in with Apple: identity-token verification (RS256 against Apple's cached keys), the code-for-refresh-token exchange and revocation (ES256 client secret) |
 | `src/auth.ts` | Session tokens (32 random bytes; only the SHA-256 is stored) and the bearer check |
 | `src/moderation.ts` | The handle and name check in `fixtures/moderation/README.md`, with the shared word list |
 | `src/db.ts` | Every D1 query, typed |
 | `src/admin.ts` | `POST /admin/push-test` |
 | `src/liveActivity.ts` | The Live Activity wire format (SPEC.md §4.3): strict parsing, canonical encoding, the 3.5 KB budget, `stale-date`, APNs payloads for `update`, `end` and push-to-start, within APNs' 4 KB body limit |
-| `src/apns.ts` | The APNs sender: token auth with a cached ES256 JWT, one retry on `ExpiredProviderToken` (never on a 429), bodies over 4 KB refused before sending |
+| `src/apns.ts` | The APNs sender: token auth with an ES256 JWT (signed itself, or from `ApnsAuth`), one retry on `ExpiredProviderToken` (never on a 429), bodies over 4 KB refused before sending |
 | `src/jwt.ts` | ES256 signing with Web Crypto, from a `.p8` file |
 | `src/demo.ts` | The spike's scenarios: `squad`, `join`, `cheer`, `end` |
-| `src/room.ts` | The `Room` Durable Object, a stub until M3 |
-| `migrations/` | The D1 schema (SPEC.md §4.6); `0002_accounts.sql` adds sessions, Apple's refresh token and report notes |
-| `test/` | vitest. Route tests run real SQL on an in-memory SQLite behind a D1 stand-in (`test/d1.ts`), against a fake Apple with generated keys (`test/app.ts`). The shared fixtures in `fixtures/live-activity/` and `fixtures/moderation/` are tested here and by the Swift tests |
+| `migrations/` | The D1 schema (SPEC.md §4.6); `0002_accounts.sql` adds sessions, Apple's refresh token and report notes; `0003_squads.sql` adds `participants.la_env` and the indexes that keep one running timer per user and one open room per squad |
+| `test/` | vitest. Route tests run real SQL on an in-memory SQLite behind a D1 stand-in (`test/d1.ts`), against a fake Apple with generated keys (`test/app.ts`). Rooms run on a fake Durable Objects runtime (`test/rooms.ts`: storage, alarms the test fires as its clock moves, WebSockets, eviction) and push to a fake APNs. The shared fixtures in `fixtures/live-activity/` and `fixtures/moderation/` are tested here and by the Swift tests |
 
 The moderation word list is imported straight from `fixtures/moderation/words.json`: wrangler
 bundles it into the Worker like any other import, so there is one copy, and a word added there
 reaches the server and the app's tests together. Deploy from a full checkout of the repository
 (it is outside `server/`).
 
-Logs say what happened, never who: no tokens, ids, handles or names, only counts and outcomes.
+Logs say what happened, never who: no tokens, ids, handles or names, only counts and outcomes. The
+one id that appears is a room's (a session id), so a room's lines can be followed.
 
 ## Test
 
@@ -189,6 +213,92 @@ The same host serves `/.well-known/apple-app-site-association` (`applinks` for
 `applinks:<INVITE_HOST>` in the app, links open Lockin directly. The landing page's App Store link
 is a placeholder (`APP_STORE_URL` in `src/invite.ts`) until the app has its App Store page.
 
+## The rooms (M3)
+
+Every session, solo or squad, is a `Room` Durable Object named by its session id. The Worker
+authenticates the caller, checks what only D1 knows (squad membership, the caller's other
+session), and forwards to the room with the user's id in the `x-lockin-user` header. Only the
+Worker's own code can reach a Durable Object, and it never forwards a client's request as it came,
+so the room trusts that header.
+
+The room holds each member's timer (`b`, `e`, `q`) and state (0 focusing, 2 paused, 3 done, 4 left,
+5 slipped; 1, a break, isn't used yet) and builds the one content-state every member's Live
+Activity shows: host first, then in the order people joined, at most 6, the squad pet and the
+latest cheer, `v` one higher on every change. Then:
+
+- **Pushes, coalesced.** The first change opens a 2-second window; when it closes, the latest
+  state goes to every member's Live Activity token, at priority 10 if anything in the window was a
+  join, finish, early leave or slip, and 5 if it was only pauses, resumes and cheers (SPEC.md §4.4).
+  `stale-date` is five minutes after the last running timer should end. Each token goes to its own
+  APNs host (`la_env`). APNs saying 410 or `BadDeviceToken` drops that token; the app's next
+  upload brings it back. Timers never cause pushes: they tick on the phone.
+- **Timers finish themselves.** An alarm at the next `e` marks that member done. A member still
+  running 8 hours after joining (an abandoned pause, say) counts as having left: their activity
+  has left the island by then anyway.
+- **Cheers** show for 10 seconds, then a priority-5 push clears them. One per sender per 10 s.
+- **The end.** When nobody's timer is running, the room ends: an `end` push with the final state
+  and `dismissal-date` 30 minutes on, the session marked ended in D1, every member's focused time
+  written, the tokens cleared, and one log line with the room's push counts:
+
+  ```
+  room r7Kq2xP9aL: ended after 51 min with 2 members; 6 pushes accepted (6 at priority 10, 0 at 5) in 3 batches, 0 refused, 0 failed, 0 tokens cleared
+  ```
+
+  The same counts go into `events` (`type = 'room_end'`). The final state is kept for a day for
+  `GET /sessions/:id`, then the room deletes itself.
+- **The live view.** `GET /sessions/:id/live` is a WebSocket (the hibernation API, so an idle room
+  costs nothing). It gets `{"type": "state", "status": "open", "contentState": …}` on connect and
+  after every change, straight away rather than after the push window, and a last one with
+  `"status": "ended"` before the room closes it. Send `{"type": "ping"}` and it answers
+  `{"type": "pong"}`. The app connects with the same `Authorization: Bearer` header as any route.
+
+Everything the room knows is in its storage, so the runtime can evict it at any time. D1 is written
+as things happen (participants, the session, `events` rows for stats); a write that fails is tried
+again 30 seconds later, and the room carries on meanwhile. Two limits live in D1 indexes rather
+than in code, so racing requests can't get past them: one running timer per user (409
+`already_in_session`, naming the session so the app can end it) and one open room per squad (two
+members locking in together end up in the same room).
+
+Placeholders until M5: the pet is left out of the content-state until its egg hatches
+(`squads.pet_species` set); its mood is 3 if at least half the squad has a running or finished
+session in the last 24 hours, otherwise 1; its progress `x` is XP within a 600-XP stage.
+
+## The APNs provider token (M3)
+
+APNs refuses a *new* provider token more than once every 20 minutes on one connection (429
+`TooManyProviderTokenUpdates`), and Cloudflare, not our code, owns the connections, which several
+rooms may share (`docs/decisions/0004-shared-apns-provider-token.md`). So nobody signs for
+themselves: the `ApnsAuth` Durable Object (one, named `global`) signs the token, keeps it in its
+storage, and hands the same one to every room for 40 minutes. Each room keeps its copy until
+5 minutes before that, then asks again. A token is signed again only when it's 40 minutes old, or
+when APNs answers 403 `ExpiredProviderToken` to the current one, never because of a 429. Deployed,
+`/admin/push-test` presents the same token.
+
+`ApnsAuth` uses the same `APNS_TEAM_ID`, `APNS_KEY_ID` and `APNS_PRIVATE_KEY` secrets as before;
+there's nothing new to set. If they're missing, rooms still work and log `push failed
+(ApnsConfigError)` instead of pushing.
+
+## Upgrading to M3
+
+A Worker deployed for M2 needs the new migration and a deploy, which also creates the `ApnsAuth`
+class (`[[migrations]]` tag `v2` in `wrangler.toml`). No new secrets.
+
+```powershell
+cd server
+npx wrangler d1 migrations apply lockin --remote   # applies migrations/0003_squads.sql only
+npx wrangler deploy
+```
+
+`0003_squads.sql` adds a unique index on running participations; it would fail if two were already
+open for one user, which can't be the case before M3 (nothing wrote to `participants`).
+
+To see rooms working, `npx wrangler tail` shows `room <id>: opened`, refusals from APNs, and the
+push counts when each room ends. Or ask D1 for the latest rooms' counts:
+
+```powershell
+npx wrangler d1 execute lockin --remote --command "SELECT session_id, meta_json FROM events WHERE type = 'room_end' ORDER BY at DESC LIMIT 20"
+```
+
 ## Upgrading to M2
 
 A Worker deployed for M0 needs the new tables and, for revocation, the Sign in with Apple key:
@@ -285,7 +395,8 @@ SIWA_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----"
 
 `npm run dev` can't reach APNs: its local runtime (`workerd`) has no HTTP/2
 ([cloudflare/workerd#4841](https://github.com/cloudflare/workerd/issues/4841)), so
-`/admin/push-test` only works against the deployed Worker.
+`/admin/push-test` only works against the deployed Worker. Rooms run locally too (squads, sessions
+and the WebSocket all work), but their pushes fail and are logged as such.
 
 ## Turning the admin route off
 

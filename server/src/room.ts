@@ -44,6 +44,7 @@ import {
   type Pet,
   assertPayloadBudget,
   buildLiveActivityPayload,
+  canonicalContentState,
   isPetCode,
   isShortID,
   staleDateFor,
@@ -658,6 +659,9 @@ export class Room {
     room.status = "ended";
     room.endedAt = now;
     room.endDirty = true;
+    // Set again once the end push is out; set now too, so a room is cleared away even if that
+    // never completes.
+    room.cleanupAt = now + ENDED_ROOM_KEPT_SECONDS;
     if (room.cheer !== undefined) {
       delete room.cheer;
       delete room.cheerClearAt;
@@ -888,8 +892,9 @@ export class Room {
     const state: ContentState = { v: room.v, m };
     const pet = petView(room.pet);
     if (pet !== undefined) state.p = pet;
-    if (room.cheer !== undefined) state.c = { ...room.cheer };
-    return state;
+    if (room.cheer !== undefined) state.c = room.cheer;
+    // The shared encoder's key order, optional keys left out: what Swift's default decoder takes.
+    return canonicalContentState(state);
   }
 
   private attributes(room: RoomRecord, me: string): Attributes {

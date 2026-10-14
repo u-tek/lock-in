@@ -12,6 +12,7 @@
 // other sessions), and forwards to the session's `Room` (src/room.ts) with the user's id in a header
 // the room trusts. It never forwards the client's own request, so a client can't set that header.
 
+import { isDeviceToken } from "./apns.ts";
 import type { AuthedContext } from "./context.ts";
 import { newShortID } from "./context.ts";
 import type { UserRow } from "./db.ts";
@@ -136,7 +137,7 @@ export async function uploadLiveActivityToken(context: AuthedContext, sessionId:
   if (!isShortID(sessionId)) throw sessionNotFound();
   const body = await readObject(context.request);
   const { token, env } = body;
-  if (typeof token !== "string" || !/^(?:[0-9a-fA-F]{2}){8,256}$/.test(token) || (env !== "sandbox" && env !== "production")) {
+  if (!isDeviceToken(token) || (env !== "sandbox" && env !== "production")) {
     throw apiError(422, "token_invalid", 'Expected { token: "<the activity\'s push token, hex>", env: "sandbox" | "production" }');
   }
   return callRoom(context.env, sessionId, context.user.id, "la-token", { token: token.toLowerCase(), env });
