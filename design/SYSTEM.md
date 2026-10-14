@@ -85,7 +85,7 @@ large `.system(size:weight: .semibold)` hero in StandBy, `.body.weight(.semibold
   system colour (`LKColor.cheer(_:)`: orange applause, red fire, yellow star, pink heart, cyan
   lightning, indigo thumbs up, purple party, mint sparkles) in the compact island, and with "Noor
   cheered you on" in place of the squad name (expanded island) or the status line (Lock Screen,
-  StandBy). In Always-On the symbol is its outline in the secondary style.
+  StandBy, the Watch). In Always-On the symbol is its outline in the secondary style.
 - Keyline tint is the tint colour. No custom animation (the system ignores it); content
   transitions only.
 

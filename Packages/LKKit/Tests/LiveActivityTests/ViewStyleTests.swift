@@ -225,6 +225,27 @@ import UIKit
         }
     }
 
+    /// `squad-6` and `largest` carry cheers, which the compact island shows ahead of your time.
+    /// Once the room clears them it's your time again, held to its reserved width: `largest`'s
+    /// paused timers are the widest reading, with the hours digit.
+    @Test @MainActor func compactTrailingAfterACheerIsYourTimeAtItsReservedWidth() throws {
+        let now = LiveActivitySamples.fixtureDate
+        for sample in [LiveActivitySamples.squadOfSix(now: now), LiveActivitySamples.largest(now: now)] {
+            #expect(sample.presentation.cheerForMe != nil, "\(sample.id)")
+            var state = sample.state
+            state.c = nil
+            let presentation = LiveActivityPresentation(attributes: sample.attributes, state: state)
+            guard case .countdown(let countdown, _) = presentation.compactTrailing else {
+                Issue.record("\(sample.id): expected your time, got \(presentation.compactTrailing)")
+                continue
+            }
+            let reserved = try #require(countdown.reservedWidth(fontSize: ActivityTimer.island.pointSize))
+            let size = Self.size(of: CompactTrailingView(attributes: sample.attributes, state: state))
+            #expect(size.width == reserved, "\(sample.id): \(size.width) for \(reserved)")
+            #expect(size.height <= Self.islandHeight, "\(sample.id): \(size)")
+        }
+    }
+
     @Test(arguments: LiveActivitySamples.catalogue(now: LiveActivitySamples.fixtureDate))
     @MainActor func expandedFitsInsideTheIsland(sample: LiveActivitySample) {
         let width: CGFloat = 371
