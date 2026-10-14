@@ -65,8 +65,8 @@ extension LockinAttributes.ContentState {
     /// the last running timer should end (SPEC.md §4.4).
     ///
     /// A paused timer has no end yet, so it counts as resuming now (`now` + its remaining time).
-    /// Members who are done, left or slipped don't hold the activity open unless nobody is active,
-    /// in which case the latest end of anyone is used.
+    /// Members who are done or left don't hold the activity open unless nobody is active, in which
+    /// case the latest end of anyone is used. A slipped member's timer keeps running, so it counts.
     public func staleDate(now: Date) -> Date {
         let running = m.filter { $0.state.isActive }
         let considered = running.isEmpty ? m : running

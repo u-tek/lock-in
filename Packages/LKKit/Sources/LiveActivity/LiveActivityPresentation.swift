@@ -165,18 +165,19 @@ extension LiveActivityPresentation {
     /// How a member's time is shown.
     public enum Countdown: Hashable, Sendable {
         /// Counting down on the device over `start...end`: `Text(timerInterval:)` ticks with no
-        /// pushes. Focusing and on a break.
+        /// pushes. Focusing, on a break, and slipped: a slip doesn't stop the timer, it shows in
+        /// the slipped tone for 5 minutes (docs/decisions/0009).
         case running(ClosedRange<Date>)
         /// Frozen at `pausedAt`, which lies inside the range: `Text(timerInterval:pauseTime:)`
         /// shows `end - pausedAt` and stays there.
         case paused(ClosedRange<Date>, pausedAt: Date)
-        /// No timer, a word: done, left and slipped, and a pause the server sent no time for.
+        /// No timer, a word: done and left, and a pause the server sent no time for.
         case text(String)
 
         init(_ member: LockinAttributes.ContentState.Member, tone: LKMemberTone) {
             let range = member.timerRange
             switch member.state {
-            case .focusing, .onBreak:
+            case .focusing, .onBreak, .slipped:
                 self = .running(range)
             case .paused:
                 if let pausedAt = member.q, pausedAt.isFinite {
@@ -185,8 +186,7 @@ extension LiveActivityPresentation {
                 } else {
                     self = .text(tone.title)
                 }
-            case .done, .left, .slipped:
-                // Slipped ends the member's timer, as `MemberState.isActive` has it (M8 may revisit).
+            case .done, .left:
                 self = .text(tone.title)
             }
         }
@@ -261,7 +261,7 @@ extension LiveActivityPresentation {
     public enum SessionControls: Hashable, Sendable {
         /// None: a squad, or a session that's over.
         case hidden
-        /// Running, or on a break: Pause and End.
+        /// Running, on a break, or slipped (the timer keeps going): Pause and End.
         case pauseAndEnd
         /// Paused: Resume and End.
         case resumeAndEnd
@@ -273,7 +273,7 @@ extension LiveActivityPresentation {
         case live(ClosedRange<Date>)
         /// A fixed fraction, 0...1: paused, or done (1).
         case fixed(Double)
-        /// Nothing to show: left or slipped, or no member.
+        /// Nothing to show: left, or no member.
         case hidden
     }
 
@@ -357,9 +357,9 @@ extension LiveActivityPresentation {
     static func soloControls(for member: Member?) -> SessionControls {
         guard let member, member.isMe else { return .hidden }
         switch member.state {
-        case .focusing, .onBreak: return .pauseAndEnd
+        case .focusing, .onBreak, .slipped: return .pauseAndEnd
         case .paused: return .resumeAndEnd
-        case .done, .left, .slipped: return .hidden
+        case .done, .left: return .hidden
         }
     }
 

@@ -9,15 +9,16 @@ public enum MemberState: Int, Codable, CaseIterable, Sendable {
     case done = 3
     /// Ended early.
     case left = 4
-    /// Opened a shielded app during Deep Focus (M8).
+    /// Opened a shielded app during Deep Focus (M8): shown for 5 minutes while the timer keeps
+    /// running, then back to focusing (docs/decisions/0009).
     case slipped = 5
 
-    /// Still in the session, with a timer that will run again: counts towards keeping the
-    /// activity fresh.
+    /// Still in the session, with a timer that is running or will run again: counts towards
+    /// keeping the activity fresh. A slip doesn't stop the timer, so slipped is active.
     public var isActive: Bool {
         switch self {
-        case .focusing, .onBreak, .paused: true
-        case .done, .left, .slipped: false
+        case .focusing, .onBreak, .paused, .slipped: true
+        case .done, .left: false
         }
     }
 }
