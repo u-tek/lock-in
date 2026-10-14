@@ -55,10 +55,19 @@ enum SharedFile {
     ///
     /// `flock` locks belong to the open file, so two openings contend even within one process,
     /// which is what lets the tests stand in for two processes with two threads.
-    static func withLock<T>(_ url: URL, timeout: TimeInterval = lockTimeout, _ body: (FileHandle) throws -> T) throws -> T {
+    ///
+    /// - Parameter appending: Open with `O_APPEND`, so every write lands at the end even if the
+    ///   lock had to be given up on.
+    static func withLock<T>(
+        _ url: URL,
+        appending: Bool = false,
+        timeout: TimeInterval = lockTimeout,
+        _ body: (FileHandle) throws -> T
+    ) throws -> T {
+        let flags = O_RDWR | O_CREAT | O_CLOEXEC | (appending ? O_APPEND : 0)
         let descriptor = url.withUnsafeFileSystemRepresentation { path -> Int32 in
             guard let path else { return -1 }
-            return open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
+            return open(path, flags, 0o644)
         }
         guard descriptor >= 0 else {
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)

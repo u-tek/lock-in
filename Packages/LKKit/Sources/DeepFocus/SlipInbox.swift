@@ -66,7 +66,7 @@ public struct SlipInbox: Sendable {
             lines.append(try encoder.encode(slip))
             lines.append(0x0A)
         }
-        try SharedFile.withLock(url) { file in
+        try SharedFile.withLock(url, appending: true) { file in
             var write = lines
             // A write cut short (a crash mid-append) leaves a line with no end; start a new one so
             // only that line is lost, not this one too.

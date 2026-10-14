@@ -105,9 +105,9 @@ struct DeviceActivityMonitoring: DeepFocusMonitoring {
     }
 }
 
-/// Nothing at all, for snapshots and SwiftUI previews.
+/// Nothing at all: snapshots and previews, and builds without the Family Controls entitlement.
 struct InertShields: DeepFocusShielding {
-    var hasSelection: Bool { true }
+    let hasSelection: Bool
     func shield(except graces: [DeepFocusState.Grace]) {}
     func clear() {}
 }

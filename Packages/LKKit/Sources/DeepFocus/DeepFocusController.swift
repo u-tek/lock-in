@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 /// Deep Focus from the app's side: shields that follow the session, and the slips to send.
@@ -23,8 +24,14 @@ public final class DeepFocusController: ObservableObject {
     private let now: () -> Date
 
     /// The real thing: ManagedSettings and DeviceActivity, on the App Group's files.
+    ///
+    /// In a build without the Family Controls entitlement (until Apple approves it) it never calls
+    /// either, whatever the app asks: `start` answers `.nothingSelected` and nothing is shielded.
     public convenience init(storage: DeepFocusStorage = .appGroup()) {
-        self.init(engine: .live(storage: storage), now: Date.init)
+        let engine = SignedEntitlements.grantsFamilyControls
+            ? DeepFocusEngine.live(storage: storage)
+            : DeepFocusEngine(storage: storage, shields: InertShields(hasSelection: false), monitor: InertMonitoring())
+        self.init(engine: engine, now: Date.init)
     }
 
     init(engine: DeepFocusEngine, now: @escaping () -> Date) {
@@ -40,7 +47,7 @@ public final class DeepFocusController: ObservableObject {
             .appendingPathComponent("DeepFocusPreview-\(UUID().uuidString)", isDirectory: true)
         let engine = DeepFocusEngine(
             storage: DeepFocusStorage(directory: directory),
-            shields: InertShields(),
+            shields: InertShields(hasSelection: true),
             monitor: InertMonitoring()
         )
         return DeepFocusController(engine: engine, now: Date.init)
