@@ -1,4 +1,6 @@
-// Live Activity pushes to APNs, with token-based auth: an ES256 JWT signed with the .p8 key.
+// Pushes to APNs, with token-based auth: an ES256 JWT signed with the .p8 key. Live Activity
+// updates (M0, M3) and, from M4, push-to-start (the same call) and ordinary alerts ("X is locking
+// in", `sendAlert`).
 //
 // APNs only speaks HTTP/2. Whether a Worker's outbound fetch gets through to it is exactly what
 // the M0 spike proves (SPEC.md §4.2, docs/spikes/apns-worker.md). If it doesn't, the fallback is a
@@ -86,6 +88,22 @@ export interface LiveActivityPush {
   expiration?: number;
 }
 
+/** An ordinary notification (`apns-push-type: alert`), always at priority 10. */
+export interface AlertPush {
+  /** The app's device token (from `registerForRemoteNotifications`), as hex. */
+  deviceToken: string;
+  environment: ApnsEnvironment;
+  /** The whole APNs body, `{ aps: { alert, … }, … }`. */
+  payload: unknown;
+  /** `apns-collapse-id`: a newer alert with the same id replaces this one. At most 64 bytes. */
+  collapseId?: string;
+  /** Unix seconds after which APNs stops trying to deliver; 0 means one attempt. */
+  expiration?: number;
+}
+
+/** Apple's limit on `apns-collapse-id`, in bytes. */
+export const COLLAPSE_ID_LIMIT_BYTES = 64;
+
 export interface ApnsResult {
   ok: boolean;
   status: number;
@@ -171,8 +189,10 @@ export class ProviderTokenSigner implements ProviderTokenSource {
 }
 
 export class ApnsClient {
-  /** `<bundle id>.push-type.liveactivity`. */
+  /** `<bundle id>.push-type.liveactivity`: Live Activity pushes. */
   readonly topic: string;
+  /** The bundle ID itself: alerts. */
+  readonly alertTopic: string;
 
   private readonly tokens: ProviderTokenSource;
   private readonly fetcher: typeof fetch;
@@ -184,6 +204,7 @@ export class ApnsClient {
   constructor(config: ApnsCredentials | ApnsTokenConfig, dependencies: ApnsDependencies = {}) {
     if (config.bundleId.trim().length === 0) throw new ApnsConfigError("APNs bundleId is empty");
     this.topic = `${config.bundleId}.push-type.liveactivity`;
+    this.alertTopic = config.bundleId;
     this.tokens = "tokens" in config ? config.tokens : new ProviderTokenSigner(config, dependencies.now);
     // Wrapped: stored bare and called as `this.fetcher(…)`, the global fetch would get the client as
     // `this`, which Workers refuse ("Illegal invocation").
@@ -197,21 +218,52 @@ export class ApnsClient {
   }
 
   /**
-   * Sends one Live Activity push. Resolves with APNs' answer, refusals included; rejects when the
-   * push itself is malformed (`TypeError`, or `RangeError` for a body over `APNS_BODY_LIMIT_BYTES`),
-   * when the key is unusable (`ApnsConfigError`) or when APNs can't be reached at all.
+   * Sends one Live Activity push: an update, an end or a push-to-start. Resolves with APNs' answer,
+   * refusals included; rejects when the push itself is malformed (`TypeError`, or `RangeError` for a
+   * body over `APNS_BODY_LIMIT_BYTES`), when the key is unusable (`ApnsConfigError`) or when APNs
+   * can't be reached at all.
    */
   async sendLiveActivity(push: LiveActivityPush): Promise<ApnsResult> {
-    if (!isDeviceToken(push.deviceToken)) throw new TypeError("deviceToken must be the push token as hex");
-    if (!Object.hasOwn(APNS_HOSTS, push.environment)) throw new TypeError("environment must be sandbox or production");
     if (push.priority !== 5 && push.priority !== 10) throw new TypeError("priority must be 5 or 10");
+    const headers: Record<string, string> = {
+      "apns-push-type": "liveactivity",
+      "apns-topic": this.topic,
+      "apns-priority": String(push.priority),
+    };
+    if (push.expiration !== undefined) headers["apns-expiration"] = String(Math.floor(push.expiration));
+    return this.send(push.deviceToken, push.environment, push.payload, headers);
+  }
 
-    const url = `${APNS_HOSTS[push.environment]}/3/device/${push.deviceToken.toLowerCase()}`;
-    const body = JSON.stringify(push.payload);
+  /**
+   * Sends one alert to the app (M4's "X is locking in"), at priority 10 to the bundle ID's topic.
+   * Resolves and rejects as `sendLiveActivity` does; a collapse id over 64 bytes is a `TypeError`.
+   */
+  async sendAlert(push: AlertPush): Promise<ApnsResult> {
+    const headers: Record<string, string> = {
+      "apns-push-type": "alert",
+      "apns-topic": this.alertTopic,
+      "apns-priority": "10",
+    };
+    if (push.collapseId !== undefined) {
+      const bytes = new TextEncoder().encode(push.collapseId).length;
+      if (bytes === 0 || bytes > COLLAPSE_ID_LIMIT_BYTES) throw new TypeError(`collapseId must be 1–${COLLAPSE_ID_LIMIT_BYTES} bytes`);
+      headers["apns-collapse-id"] = push.collapseId;
+    }
+    if (push.expiration !== undefined) headers["apns-expiration"] = String(Math.floor(push.expiration));
+    return this.send(push.deviceToken, push.environment, push.payload, headers);
+  }
+
+  /** Checks the token, environment and size, then posts with the provider token, retrying once if it expired. */
+  private async send(deviceToken: string, environment: ApnsEnvironment, payload: unknown, headers: Record<string, string>): Promise<ApnsResult> {
+    if (!isDeviceToken(deviceToken)) throw new TypeError("deviceToken must be the push token as hex");
+    if (!Object.hasOwn(APNS_HOSTS, environment)) throw new TypeError("environment must be sandbox or production");
+
+    const url = `${APNS_HOSTS[environment]}/3/device/${deviceToken.toLowerCase()}`;
+    const body = JSON.stringify(payload);
     const bytes = new TextEncoder().encode(body).length;
     if (bytes > APNS_BODY_LIMIT_BYTES) throw new RangeError(`The payload is ${bytes} bytes; APNs takes at most ${APNS_BODY_LIMIT_BYTES}`);
     const token = await this.providerToken();
-    const result = await this.post(url, token, push, body);
+    const result = await this.post(url, token, headers, body);
     // Only an expired token is worth signing again. A 429 TooManyProviderTokenUpdates means a
     // connection saw new tokens too often: another one would make it worse, so it's returned as is.
     if (result.status !== 403 || result.reason !== "ExpiredProviderToken") return result;
@@ -219,18 +271,15 @@ export class ApnsClient {
     // Our clock and Apple's disagree about the token's age. Sign a new one (unless a concurrent
     // request already has) and try once more.
     await this.tokens.expired(token);
-    return this.post(url, await this.providerToken(), push, body);
+    return this.post(url, await this.providerToken(), headers, body);
   }
 
-  private async post(url: string, token: string, push: LiveActivityPush, body: string): Promise<ApnsResult> {
+  private async post(url: string, token: string, pushHeaders: Record<string, string>, body: string): Promise<ApnsResult> {
     const headers: Record<string, string> = {
       authorization: `bearer ${token}`,
-      "apns-push-type": "liveactivity",
-      "apns-topic": this.topic,
-      "apns-priority": String(push.priority),
+      ...pushHeaders,
       "content-type": "application/json",
     };
-    if (push.expiration !== undefined) headers["apns-expiration"] = String(Math.floor(push.expiration));
 
     const response = await this.fetcher(url, { method: "POST", headers, body });
     const apnsId = response.headers.get("apns-id");
@@ -248,4 +297,9 @@ export class ApnsClient {
     }
     return result;
   }
+}
+
+/** APNs says the token is gone for good: 410 Unregistered, or 400 BadDeviceToken (M3, M4). Stop using it. */
+export function isGoneToken(result: ApnsResult): boolean {
+  return result.status === 410 || result.reason === "BadDeviceToken";
 }

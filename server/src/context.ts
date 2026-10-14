@@ -1,5 +1,6 @@
-// What every route gets: the request, the bindings, D1 and the injectable world (fetch, clock and
-// randomness), so tests can drive the Worker with a fake Apple, a fixed clock and known ids.
+// What every route gets: the request, the bindings, D1 and the injectable world (fetch, clock,
+// randomness and work after the response), so tests can drive the Worker with a fake Apple, a fixed
+// clock and known ids, and wait for what it does once it has answered.
 
 import type { Database, UserRow } from "./db.ts";
 import type { Env } from "./env.ts";
@@ -12,6 +13,11 @@ export interface Dependencies {
   now?: () => number;
   /** `length` random bytes. */
   random?: (length: number) => Uint8Array;
+  /**
+   * Keeps the Worker running for `promise` after the response has gone: the runtime's
+   * `ExecutionContext.waitUntil`. Tests collect the promises to await them.
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 export interface Context {
@@ -24,6 +30,8 @@ export interface Context {
   now: number;
   fetch: typeof fetch;
   random: (length: number) => Uint8Array;
+  /** Work to finish after the response (M4's alerts). It must catch its own errors. */
+  waitUntil: (promise: Promise<unknown>) => void;
 }
 
 /** A route behind the bearer token: `user` is whoever it belongs to. */
@@ -44,6 +52,8 @@ export function makeContext(request: Request, env: Env, deps: Dependencies, db: 
     // refuse ("Illegal invocation").
     fetch: (input, init) => fetcher(input, init),
     random: deps.random ?? ((length) => crypto.getRandomValues(new Uint8Array(length))),
+    // Without the runtime's (a test calling `handle` bare), the work still runs; nothing waits for it.
+    waitUntil: deps.waitUntil ?? ((promise) => void promise.catch(() => undefined)),
   };
 }
 
