@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Model
 import SwiftUI
 import Testing

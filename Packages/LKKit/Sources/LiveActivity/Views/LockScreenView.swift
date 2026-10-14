@@ -10,23 +10,24 @@ import WidgetKit
 /// It draws no background and the widget extension sets none (no `activityBackgroundTint`), so it
 /// sits on the system's default Live Activity background like Apple's own activities, and follows
 /// the system's appearance (design/SYSTEM.md). Text uses the hierarchical styles, which stay
-/// vibrant there; colour comes from the member states, on the monograms and the bar, and on your
-/// own countdown only in the dark appearance, since the state colours are made for black and too
-/// faint as text on the light background (`CountdownText.resolve(_:for:in:)`). Two places are
-/// always dark: StandBy, which is full-bleed black, and Always-On, which the system draws "as if
-/// in Dark Mode". The view says so itself, so the Live Activity Lab's stand-ins match.
+/// vibrant there; colour comes from the Locklings, the bar, and your own countdown only in the
+/// dark appearance, since the state colours are made for black and too faint as text on the light
+/// background (`CountdownText.resolve(_:for:in:)`). Two places are always dark: StandBy, which is
+/// full-bleed black, and Always-On, which the system draws "as if in Dark Mode". The view says so
+/// itself, so the Live Activity Lab's stand-ins match.
 ///
-/// Squad: the squad name and how many are locked in, a row of up to six members with their own
-/// countdowns, and the pet. Solo: your monogram, what you're doing, your countdown and a bar that
-/// fills as the session runs. Both stay under 160 points tall, StandBy included, where the system
-/// starts cutting content off (SPEC.md §3). Text grows with Dynamic Type only as far as that
-/// allows (`ActivityTextSize`); LockScreenHeightTests checks every sample at the default and the
-/// largest text sizes.
+/// Squad: the squad name and how many are locked in, a row of up to six Locklings with names and
+/// their own countdowns, and the pet. Solo: your Lockling, what you're doing, your countdown, a bar
+/// that fills as the session runs, and Pause or Resume and End. StandBy swaps in a big Lockling and
+/// a huge countdown, and leaves the buttons for the phone in your hand. Every layout stays under
+/// 160 points tall, StandBy included, where the system starts cutting content off (SPEC.md §3).
+/// Text grows with Dynamic Type only as far as that allows (`ActivityTextSize`);
+/// LockScreenHeightTests checks every sample at the default and the largest text sizes.
 ///
 /// The height estimates in the layouts below use SF Pro's line height, about 1.19 times the point
 /// size, rounded to the pixel: Headline 20.3, Subheadline 18, Footnote 15.7, Caption 14.3,
 /// Title 2 26.3, and one step up (xLarge) Headline 22.7, Subheadline 20.3, Footnote 17.9,
-/// Caption 16.7. Monograms are fixed sizes.
+/// Caption 16.7, Title 2 28.6. Locklings are fixed sizes.
 public struct LockScreenView: View {
     /// Which layout to draw.
     public enum Layout: Hashable, Sendable {
@@ -108,6 +109,9 @@ public struct LockScreenView: View {
 /// That keeps it about 153 points: 12 + header 52.3 + 8 + row 68.3 + 12. StandBy holds text at
 /// the default size, because the system scales the view up from there, and it truncates past
 /// 160 points just as on the Lock Screen (LockScreenHeightTests measures both).
+///
+/// The row's Locklings are 34 points: large enough for their hats and props, small enough that
+/// six fit across an iPhone SE.
 private struct SquadLayout: View {
     let presentation: LiveActivityPresentation
     let isStandBy: Bool
@@ -121,7 +125,7 @@ private struct SquadLayout: View {
             }
             HStack(alignment: .top, spacing: LKSpacing.xs) {
                 ForEach(presentation.lockScreenMembers) { member in
-                    MemberColumn(member: member, badgeSize: ActivityMetrics.lockScreenRowBadge)
+                    MemberColumn(member: member, creatureSize: ActivityMetrics.lockScreenRowCreature)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -182,59 +186,93 @@ private struct SquadLayout: View {
 
 // MARK: - Solo
 
-/// About 84 points tall: 12 + monogram 44 + 12 + bar 4 + 12. The headline and status line beside
-/// the monogram are 40.3 (20.3 + 2 + 18), 45 at xLarge.
+/// Your Lockling beside what you're doing and your countdown, the bar under them, and the buttons
+/// under that:
 ///
-/// StandBy swaps in the hero timer, which leaves no room for words beside it, so the headline
-/// moves under it, beside the bar: about 142 points, 12 + timer 85.9 + 12 + headline 20.3 + 12.
-/// The status line is left out there; the headline carries it.
+///     [Lockling]  Locked in             14:59
+///     [        ]  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+///     [        ]  (⏸ Pause)  (✕ End)
+///
+/// About 100 points tall at the default text size: 12 + the column (title 26.3 + 8 + bar 4 + 8 +
+/// small buttons about 28 = 74.3) + 12, the Lockling's 52 centred beside it. About 106 at xLarge.
+/// Once the session is over there are no buttons and it's about 76, the Lockling's height.
+///
+/// StandBy is the "desk mode" shot (SPEC.md §1.7): a big Lockling and the time as the hero, with
+/// what you're doing and the bar under them. About 142 points: 12 + timer 85.9 + 12 + headline
+/// 20.3 + 12. No buttons there: the phone is on a stand across the desk.
 private struct SoloLayout: View {
     let presentation: LiveActivityPresentation
     let isStandBy: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: LKSpacing.m) {
-            HStack(spacing: LKSpacing.m) {
-                if let me = presentation.primary {
-                    MemberBadge(me, size: isStandBy ? ActivityMetrics.soloStandByBadge : ActivityMetrics.soloBadge)
-                }
-                if !isStandBy {
-                    VStack(alignment: .leading, spacing: LKSpacing.xxs) {
-                        Text(presentation.headline)
-                            .font(ActivityFont.headline)
-                            .foregroundStyle(LKColor.textPrimary)
-                            .lineLimit(1)
-                        Text(presentation.statusLine)
-                            .font(ActivityFont.subheadline)
-                            .foregroundStyle(LKColor.textSecondary)
-                            .lineLimit(1)
-                    }
-                    .layoutPriority(1)
-                    .accessibilityElement(children: .combine)
-                }
-                Spacer(minLength: LKSpacing.s)
-                if let me = presentation.primary {
-                    CountdownText(countdown: me.countdown, tone: me.tone, style: timerStyle(for: me.countdown))
-                        .accessibilityLabel(me.accessibilityLabel)
-                        .accessibilityCountdownValue(me.countdown)
-                }
-            }
+        Group {
             if isStandBy {
-                HStack(spacing: LKSpacing.m) {
-                    Text(presentation.headline)
-                        .font(ActivityFont.headline)
-                        .foregroundStyle(LKColor.textPrimary)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .accessibilityLabel(Text(verbatim: "\(presentation.headline), \(presentation.statusLine)"))
-                    progressBar
-                }
+                standBy
             } else {
-                progressBar
+                lockScreen
             }
         }
         .padding(.horizontal, ActivityMetrics.lockScreenMargin)
         .padding(.vertical, LKSpacing.m)
+    }
+
+    private var lockScreen: some View {
+        HStack(alignment: .center, spacing: LKSpacing.m) {
+            creature(size: ActivityMetrics.soloCreature)
+            VStack(alignment: .leading, spacing: LKSpacing.s) {
+                HStack(alignment: .firstTextBaseline, spacing: LKSpacing.s) {
+                    headline
+                        .layoutPriority(1)
+                    Spacer(minLength: LKSpacing.s)
+                    countdown(style: ActivityTimer.lockScreen)
+                }
+                progressBar
+                if presentation.sessionControls != .hidden {
+                    SessionButtons(controls: presentation.sessionControls, fillsWidth: false)
+                        .controlSize(.small)
+                }
+            }
+        }
+    }
+
+    private var standBy: some View {
+        VStack(alignment: .leading, spacing: LKSpacing.m) {
+            HStack(spacing: LKSpacing.m) {
+                creature(size: ActivityMetrics.soloStandByCreature)
+                Spacer(minLength: LKSpacing.s)
+                if let me = presentation.primary {
+                    countdown(style: ActivityTimer.standBySolo(for: me.countdown))
+                }
+            }
+            HStack(spacing: LKSpacing.m) {
+                headline
+                    .fixedSize()
+                progressBar
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func creature(size: CGFloat) -> some View {
+        if let me = presentation.primary {
+            MemberBadge(me, size: size)
+        }
+    }
+
+    private var headline: some View {
+        Text(presentation.headline)
+            .font(ActivityFont.headline)
+            .foregroundStyle(LKColor.textPrimary)
+            .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private func countdown(style: LKTypeStyle) -> some View {
+        if let me = presentation.primary {
+            CountdownText(countdown: me.countdown, tone: me.tone, style: style)
+                .accessibilityLabel(me.accessibilityLabel)
+                .accessibilityCountdownValue(me.countdown)
+        }
     }
 
     private var progressBar: some View {
@@ -243,17 +281,13 @@ private struct SoloLayout: View {
             tint: presentation.primary?.tone.color ?? LKColor.tint
         )
     }
-
-    private func timerStyle(for countdown: LiveActivityPresentation.Countdown) -> LKTypeStyle {
-        isStandBy ? ActivityTimer.standBySolo(for: countdown) : ActivityTimer.lockScreen
-    }
 }
 
 // MARK: - Smart Stack
 
 /// The small activity family: about 160 × 70 points on Apple Watch, with the system's margins
-/// around it. You, your time, and how many are locked in: about 66 points, monogram 24 + timer
-/// 26.3 + status 15.7.
+/// around it. You, your time, and how many are locked in: about 66 points, Lockling 24 + timer
+/// 26.3 + status 15.7. No buttons: the HIG keeps them out of the Smart Stack, which CarPlay shares.
 private struct SmartStackLayout: View {
     let presentation: LiveActivityPresentation
 
@@ -261,7 +295,7 @@ private struct SmartStackLayout: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: LKSpacing.s) {
                 if let me = presentation.primary {
-                    MemberBadge(me, size: ActivityMetrics.smartStackBadge)
+                    MemberBadge(me, size: ActivityMetrics.smartStackCreature)
                 }
                 Text(presentation.headline)
                     .font(ActivityFont.status)

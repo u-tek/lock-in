@@ -8,14 +8,17 @@ import UIKit
 
 // The Live Activity's look (design/SYSTEM.md, "Live Activity"). The snapshots show how it looks;
 // these pin the rules a picture can't be trusted to keep: which type each countdown uses, when a
-// countdown takes its state's colour, and how the monogram's status badge sits and is cut out, at
-// every size the presentations draw.
+// countdown takes its state's colour, that members are drawn as Locklings at every size the
+// presentations use, and that the island's views add no padding of their own (Apple's templates
+// leave the margins to the system).
 
 @Suite struct CountdownStyleTests {
     @Test func countdownsUseTheSystemTextStyles() {
-        // Lock Screen: Title 2 semibold. Island: Body semibold. Squadmates a step under yours.
+        // Lock Screen and the expanded island: Title 2 semibold. Compact island: Body semibold.
+        // Squadmates a step under yours.
         #expect(ActivityTimer.lockScreen.textStyle == .title2)
         #expect(ActivityTimer.lockScreen.weight == .semibold)
+        #expect(ActivityTimer.expanded == ActivityTimer.lockScreen)
         #expect(ActivityTimer.island.textStyle == .body)
         #expect(ActivityTimer.island.weight == .semibold)
         #expect(ActivityTimer.squadmate.textStyle == .subheadline)
@@ -38,8 +41,8 @@ import UIKit
         let start = LiveActivitySamples.fixtureDate
         let long = LiveActivityPresentation.Countdown.running(start...start.addingTimeInterval(90 * 60))
         let styles = [
-            ActivityTimer.lockScreen, ActivityTimer.island, ActivityTimer.squadmate, ActivityTimer.smartStack,
-            ActivityTimer.standBySquad, ActivityTimer.standBySolo(for: long),
+            ActivityTimer.lockScreen, ActivityTimer.island, ActivityTimer.expanded, ActivityTimer.squadmate,
+            ActivityTimer.smartStack, ActivityTimer.standBySquad, ActivityTimer.standBySolo(for: long),
         ]
         for style in styles {
             #expect(style.hasMonospacedDigits, "\(style)")
@@ -69,8 +72,8 @@ import UIKit
 
     @Test @MainActor func wordsStepBackWhateverTheInk() {
         // A finished member's word is secondary in either appearance; a timer takes the ink asked
-        // for: the state's colour for your own, primary for squadmates' (their monograms carry the
-        // colour). The one exception is the state's colour on the light Lock Screen, below.
+        // for: the state's colour for your own, primary for squadmates' (their Locklings show the
+        // state). The one exception is the state's colour on the light Lock Screen, below.
         let start = LiveActivitySamples.fixtureDate
         let running = LiveActivityPresentation.Countdown.running(start...start.addingTimeInterval(25 * 60))
         let paused = LiveActivityPresentation.Countdown.paused(
@@ -98,13 +101,15 @@ import UIKit
         #expect(timer.ink == .tone)
         // In the dark (the island, StandBy, Always-On, the Smart Stack, the dark Lock Screen) your
         // time is in your state's colour. On the light Lock Screen teal, orange and green are under
-        // 3:1 as text, so it takes the primary style and the monogram and bar carry the colour.
+        // 3:1 as text, so it takes the primary style and the Lockling and bar carry the state.
         #expect(CountdownText.resolve(.tone, for: running, in: .dark) == .tone)
         #expect(CountdownText.resolve(.tone, for: running, in: .light) == .primary)
     }
 }
 
-@Suite struct MemberBadgeTests {
+/// Members are Locklings, drawn by the Creature module. These check the sizes the presentations
+/// ask for and that every member draws, in and out of Always-On.
+@Suite struct LocklingTests {
     /// One member in every state.
     private static let members = LiveActivitySamples.squadOfSix(now: LiveActivitySamples.fixtureDate)
         .presentation.members
@@ -113,97 +118,51 @@ import UIKit
         #expect(Set(Self.members.map(\.state)) == Set(MemberState.allCases))
     }
 
-    @Test func smallMonogramsShowTheStateSymbolInsteadOfABadge() {
-        let small = [ActivityMetrics.islandBadge, ActivityMetrics.expandedChipBadge, ActivityMetrics.smartStackBadge]
-        for size in small {
-            #expect(!MemberBadgeGeometry(size: size).showsStatusBadge, "\(size)")
+    @Test func sizesSuitTheirPresentations() {
+        // The compact island is 36.67 tall and its limited-width form a 28-point circle (HIG).
+        #expect(ActivityMetrics.islandCreature >= 20 && ActivityMetrics.islandCreature <= 28)
+        #expect(ActivityMetrics.smartStackCreature <= 28)
+        // Rows and the solo layouts are at or over the 28 points where a Lockling shows its hat
+        // and what it's holding; under that it's only the lock and face.
+        for size in [
+            ActivityMetrics.expandedRowCreature, ActivityMetrics.lockScreenRowCreature, ActivityMetrics.expandedCreature,
+            ActivityMetrics.soloCreature, ActivityMetrics.soloStandByCreature,
+        ] {
+            #expect(size >= 28, "\(size)")
         }
-        let badged = [
-            ActivityMetrics.lockScreenRowBadge, ActivityMetrics.soloBadge, ActivityMetrics.soloStandByBadge,
-            ActivityMetrics.expandedBadge,
-        ]
-        for size in badged {
-            #expect(MemberBadgeGeometry(size: size).showsStatusBadge, "\(size)")
-        }
-        #expect(Set(small + badged) == Set(ActivityMetrics.badgeSizes))
-        #expect(MemberBadge.symbolOnlyBelow == MemberBadgeGeometry.symbolOnlyBelow)
+        // Six columns, 4 points apart, across an iPhone SE's Lock Screen card (343 points less
+        // the margins).
+        let row = 6 * ActivityMetrics.lockScreenRowCreature + 5 * 4
+        #expect(row <= 343 - 2 * ActivityMetrics.lockScreenMargin)
     }
 
-    @Test(arguments: ActivityMetrics.badgeSizes)
-    func statusBadgeSitsInTheCornerInsideTheFrame(size: CGFloat) {
-        let geometry = MemberBadgeGeometry(size: size)
-        guard geometry.showsStatusBadge else { return }
-        // Inside the frame, in its bottom-trailing corner: the size the layout measures is the
-        // size drawn, and a neighbour in the row never runs into it.
-        let frame = CGRect(x: 0, y: 0, width: size, height: size)
-        #expect(frame.contains(geometry.statusFrame), "\(size)")
-        #expect(geometry.statusFrame.maxX == size && geometry.statusFrame.maxY == size, "\(size)")
-        // Attached to the circle: its centre inside it and its edge past it, like Contacts'.
-        let centre = CGPoint(x: geometry.statusFrame.midX, y: geometry.statusFrame.midY)
-        let distance = hypot(centre.x - size / 2, centre.y - size / 2)
-        #expect(distance < size / 2, "\(size)")
-        #expect(distance + geometry.statusDiameter / 2 > size / 2, "\(size)")
-    }
-
-    @Test(arguments: ActivityMetrics.badgeSizes)
-    func statusBadgeIsBigEnoughToRead(size: CGFloat) {
-        let geometry = MemberBadgeGeometry(size: size)
-        guard geometry.showsStatusBadge else { return }
-        #expect(geometry.statusDiameter >= 12, "\(size)")
-        #expect(geometry.symbolSize >= 6.5, "\(size)")
-    }
-
-    @Test(arguments: ActivityMetrics.badgeSizes)
-    func notchIsTheBadgeWithAGapAllRound(size: CGFloat) {
-        let geometry = MemberBadgeGeometry(size: size)
-        #expect(geometry.gap >= 1.5, "\(size)")
-        // On the half point, so it lands on whole pixels at 2x and 3x alike.
-        #expect((geometry.gap * 2).rounded() == geometry.gap * 2, "\(size)")
-        #expect(geometry.notch.insetBy(dx: geometry.gap, dy: geometry.gap) == geometry.statusFrame, "\(size)")
-    }
-
-    /// Drawn, with every member and in and out of Always-On: the gap round the status badge is
-    /// clear, whatever the initial, so the badge reads on any background; outside Always-On the
-    /// circle and the badge are solid, and in it the circle is only an outline.
-    @Test(arguments: ActivityMetrics.badgeSizes)
-    @MainActor func gapIsClearAndAlwaysOnFillsNothing(size: CGFloat) throws {
-        let geometry = MemberBadgeGeometry(size: size)
-        guard geometry.showsStatusBadge else { return }
-        let badgeCentre = CGPoint(x: geometry.statusFrame.midX, y: geometry.statusFrame.midY)
-        // Halfway across the gap, on the diagonal towards the monogram's centre: inside the
-        // circle, so only the notch can make it clear.
-        let reach = (geometry.statusDiameter / 2 + geometry.gap / 2) / CGFloat(2).squareRoot()
-        let gap = CGPoint(x: badgeCentre.x - reach, y: badgeCentre.y - reach)
-        // On the circle, between its edge and the initial.
-        let body = CGPoint(x: size * 0.2, y: size / 2)
-
+    /// Drawn, every member at every size, in and out of Always-On: a square of the asked size with
+    /// a Lockling in it, and in Always-On an outline that lights far fewer pixels.
+    @Test(arguments: ActivityMetrics.creatureSizes)
+    @MainActor func everyMemberDrawsAsALockling(size: CGFloat) throws {
         for member in Self.members {
-            for isLuminanceReduced in [false, true] {
-                let badge = MemberBadge(member, size: size)
-                    .environment(\.isLuminanceReduced, isLuminanceReduced)
-                let alpha = try Self.alphas(at: [gap, body, badgeCentre], of: badge)
-                let label = "\(member.name) at \(size), Always-On \(isLuminanceReduced)"
-                #expect(alpha[0] < 32, "\(label): gap \(alpha[0])")
-                if isLuminanceReduced {
-                    #expect(alpha[1] < 32, "\(label): circle filled \(alpha[1])")
-                } else {
-                    #expect(alpha[1] > 223, "\(label): circle \(alpha[1])")
-                    #expect(alpha[2] > 223, "\(label): badge \(alpha[2])")
-                }
-            }
+            let normal = try Self.inked(MemberBadge(member, size: size), size: size)
+            let alwaysOn = try Self.inked(
+                MemberBadge(member, size: size).environment(\.isLuminanceReduced, true),
+                size: size
+            )
+            #expect(normal > 0.1, "\(member.name) at \(size)")
+            #expect(alwaysOn > 0.02, "\(member.name) at \(size), Always-On")
+            #expect(alwaysOn < normal * 0.8, "\(member.name) at \(size): Always-On should be an outline")
         }
     }
 
-    /// Opacity, 0 to 255, at each point (in points) of the view drawn at 3x on a clear background.
+    /// The share of pixels with any opacity, drawn at 3x on a clear background. Checks the image is
+    /// the square asked for.
     @MainActor
-    private static func alphas(at points: [CGPoint], of view: some View) throws -> [UInt8] {
+    private static func inked(_ view: some View, size: CGFloat) throws -> Double {
         let scale: CGFloat = 3
         let renderer = ImageRenderer(content: view)
         renderer.scale = scale
         let image = try #require(renderer.cgImage)
         let width = image.width
         let height = image.height
-        // Redrawn into a bitmap of known layout, rows from the top, so the bytes can be read.
+        #expect(width == Int((size * scale).rounded()) && height == width, "\(size): \(width) × \(height)")
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
             guard let context = CGContext(
@@ -218,11 +177,87 @@ import UIKit
             context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }
-        try #require(drawn, "Couldn't read the drawn badge")
-        return points.map { point in
-            let x = min(max(Int(point.x * scale), 0), width - 1)
-            let y = min(max(Int(point.y * scale), 0), height - 1)
-            return pixels[(y * width + x) * 4 + 3]
+        try #require(drawn, "Couldn't read the drawn Lockling")
+        var inked = 0
+        for index in stride(from: 3, to: pixels.count, by: 4) where pixels[index] > 0 {
+            inked += 1
         }
+        return Double(inked) / Double(width * height)
+    }
+}
+
+/// Apple's island templates leave the margins to the system and keep compact content snug
+/// against the camera. Measured here, every sample: the views are exactly as big as what they
+/// draw, with no padding of our own.
+@Suite struct IslandLayoutTests {
+    /// The compact island's height (HIG, iOS dimensions).
+    private static let islandHeight: CGFloat = 36.67
+
+    @Test(arguments: LiveActivitySamples.catalogue(now: LiveActivitySamples.fixtureDate))
+    @MainActor func compactLeadingAndMinimalAreTheLocklingAlone(sample: LiveActivitySample) {
+        let side = ActivityMetrics.islandCreature
+        let leading = Self.size(of: CompactLeadingView(attributes: sample.attributes, state: sample.state))
+        let minimal = Self.size(of: MinimalView(attributes: sample.attributes, state: sample.state))
+        #expect(leading == CGSize(width: side, height: side), "\(sample.id): \(leading)")
+        #expect(minimal == CGSize(width: side, height: side), "\(sample.id): \(minimal)")
+    }
+
+    @Test(arguments: LiveActivitySamples.catalogue(now: LiveActivitySamples.fixtureDate))
+    @MainActor func compactTrailingIsOnlyAsWideAsItsLongestReading(sample: LiveActivitySample) {
+        let presentation = sample.presentation
+        let size = Self.size(of: CompactTrailingView(attributes: sample.attributes, state: sample.state))
+        #expect(size.height <= Self.islandHeight, "\(sample.id): \(size)")
+        switch presentation.compactTrailing {
+        case .countdown(let countdown, _):
+            if let reserved = countdown.reservedWidth(fontSize: ActivityTimer.island.pointSize) {
+                #expect(size.width == reserved, "\(sample.id): \(size.width) for \(reserved)")
+            } else {
+                // A word ("Done") takes its own width, and no more than a timer would.
+                #expect(size.width > 0 && size.width <= ActivityTimer.island.pointSize * 4, "\(sample.id): \(size)")
+            }
+        case .squadmates:
+            #expect(size.width > 0 && size.width <= ActivityTimer.island.pointSize * 2, "\(sample.id): \(size)")
+        case .empty:
+            #expect(size.width == 0, "\(sample.id): \(size)")
+        }
+    }
+
+    @Test(arguments: LiveActivitySamples.catalogue(now: LiveActivitySamples.fixtureDate))
+    @MainActor func expandedFitsInsideTheIsland(sample: LiveActivitySample) {
+        let width: CGFloat = 371
+        let leading = Self.size(of: ExpandedLeadingView(attributes: sample.attributes, state: sample.state))
+        let trailing = Self.size(of: ExpandedTrailingView(attributes: sample.attributes, state: sample.state))
+        let bottom = Self.size(of: ExpandedBottomView(attributes: sample.attributes, state: sample.state), width: width)
+        let side = ActivityMetrics.expandedCreature
+        #expect(leading == CGSize(width: side, height: side), "\(sample.id): \(leading)")
+        // The time sits at the top of a box as tall as the Lockling, so their tops line up.
+        #expect(trailing.height == side, "\(sample.id): \(trailing)")
+        // The expanded island is at most 160 tall. Above the bottom region: the system's top
+        // margin and the Lockling; below it, the bottom margin. Leave 40 for the margins.
+        #expect(side + bottom.height + 40 <= 160, "\(sample.id): bottom \(bottom.height)")
+    }
+
+    @Test @MainActor func soloShowsButtonsOnlyWhileThereIsATimer() {
+        let now = LiveActivitySamples.fixtureDate
+        for state in MemberState.allCases {
+            let sample = LiveActivitySamples.solo(now: now, me: state)
+            let bottom = Self.size(of: ExpandedBottomView(attributes: sample.attributes, state: sample.state), width: 371)
+            switch sample.presentation.sessionControls {
+            case .pauseAndEnd, .resumeAndEnd:
+                #expect(bottom.height >= 28, "\(state): \(bottom)")
+            case .hidden:
+                // Nothing drawn: the island shrinks to fit rather than keep an empty row.
+                #expect(bottom.height == 0, "\(state): \(bottom)")
+            }
+        }
+    }
+
+    @MainActor
+    private static func size(of view: some View, width: CGFloat? = nil) -> CGSize {
+        let proposal = CGSize(width: width ?? .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        let fitted = UIHostingController(rootView: view.fixedSize(horizontal: width == nil, vertical: true))
+            .sizeThatFits(in: proposal)
+        // Rounded to the pixel at 3x, so layout's float noise doesn't fail an equality.
+        return CGSize(width: (fitted.width * 3).rounded() / 3, height: (fitted.height * 3).rounded() / 3)
     }
 }

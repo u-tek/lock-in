@@ -1,4 +1,3 @@
-import Creature
 import DesignSystem
 import SwiftUI
 
@@ -25,9 +24,7 @@ import SwiftUI
 enum ActivityFont {
     /// The squad name, the solo headline and the expanded island's title: Headline.
     static let headline = LKFont.headline
-    /// The solo status line under the headline: Subheadline medium.
-    static let subheadline = LKFont.subheadline.weight(.medium)
-    /// "1 of 6 locked in" beside or under the squad name, and "+2": Footnote medium.
+    /// "1 of 6 locked in" beside or under the squad name: Footnote medium.
     static let status = LKFont.footnote.weight(.medium)
     /// Names under Locklings, and the pet row: Caption medium.
     static let caption = LKFont.caption.weight(.medium)
@@ -274,8 +271,8 @@ struct SessionProgressBar: View {
 /// A member as a column, like a share sheet's people: their Lockling, name and countdown. One
 /// VoiceOver element that names them, says their state and reads a running timer as its value.
 ///
-/// About 70 points tall at the default text size on the Lock Screen: Lockling 34 + 2 + name 14.3
-/// + countdown 18; 66 in the expanded island's 30-point row.
+/// About 68 points tall at the default text size on the Lock Screen: Lockling 34 + 2 + name 14.3
+/// + countdown 18; 64 in the expanded island's 30-point row.
 struct MemberColumn: View {
     let member: LiveActivityPresentation.Member
     let creatureSize: CGFloat

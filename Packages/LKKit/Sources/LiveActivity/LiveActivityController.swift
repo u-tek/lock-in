@@ -7,8 +7,11 @@
 //   `(attributes, state)`, so what CI snapshots is what the Lock Screen shows.
 // - `LiveActivitySamples` are fake squads for the Lab and previews.
 //
+// - `SessionIntents.swift` has the activity's buttons (`LiveActivityIntent`s) and the bridge that
+//   hands their commands to the app.
+//
 // The widget extension links this module too, so nothing here may use extension-unavailable API
-// (`UIApplication` and friends) or the network. M1 adds the `LiveActivityIntent`s here.
+// (`UIApplication` and friends) or the network.
 
 #if canImport(ActivityKit) && os(iOS)
 import ActivityKit

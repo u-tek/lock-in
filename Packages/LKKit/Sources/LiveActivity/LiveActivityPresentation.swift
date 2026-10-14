@@ -277,7 +277,7 @@ extension LiveActivityPresentation {
         case hidden
     }
 
-    /// The squad pet, as drawn until the real one arrives (`Creature` in M1, moods and stages in M5).
+    /// The squad pet, as drawn until the real one arrives with its moods and stages (M5).
     public struct Pet: Hashable, Sendable {
         public let code: PetCode
         /// 0 (lowest) to 3 (happiest).

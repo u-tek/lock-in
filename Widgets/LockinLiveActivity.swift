@@ -21,6 +21,10 @@ struct LockinLiveActivity: Widget {
             LockScreenView(attributes: context.attributes, state: context.state)
                 .widgetURL(Self.sessionURL(context.attributes.sid))
         } dynamicIsland: { context in
+            // Apple's island template with the system's default margins: your Lockling and your
+            // time either side of the camera, what you're doing under it, and along the bottom
+            // either the session's buttons (solo) or your squadmates. The buttons are
+            // `Button(intent:)`s inside the views; the system runs their intents in the app.
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     ExpandedLeadingView(attributes: context.attributes, state: context.state)

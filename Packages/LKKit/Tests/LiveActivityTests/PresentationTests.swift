@@ -315,28 +315,55 @@ private func range(_ member: WireMember) -> ClosedRange<Date> {
             wire("ava", .focusing, name: "Bartholomew-Jones"),
         ])
         #expect(presentation.members[0].name == "Someone")
-        #expect(presentation.members[0].initial == "S")
         #expect(presentation.members[1].name == "Bartholomew-")
         #expect(presentation.members[1].name.unicodeScalars.count == LiveActivityLimits.maxNameLength)
     }
 
-    @Test(arguments: [
-        ("Ava", "A"),
-        ("noor", "N"),
-        ("  kai", "K"),
-        ("élan", "É"),
-        ("🦊🦊🦊", "🦊"),
-        ("", "?"),
-        ("   ", "?"),
-    ])
-    func initials(name: String, initial: String) {
-        #expect(LiveActivityPresentation.initial(of: name) == initial)
-    }
-
-    @Test func avatarIsCarriedForCreatures() {
+    @Test func avatarIsCarriedForTheLockling() {
         let ava = WireMember(i: "ava", n: "Ava", a: "b3.c7.e2.h4", s: 0, b: t - 600, e: t + 900)
         let presentation = solo(ava)
         #expect(presentation.primary?.avatar == AvatarCode(body: 3, colour: 7, eyes: 2, hat: 4))
+    }
+
+    @Test func aGarbledAvatarStillDraws() {
+        // From a newer app version, or broken: parts read as the defaults, never a failure.
+        let ava = WireMember(i: "ava", n: "Ava", a: "b99.x7.%%", s: 0, b: t - 600, e: t + 900)
+        #expect(solo(ava).primary?.avatar == AvatarCode(body: 99))
+    }
+}
+
+/// The buttons under a solo session's timer (Pause or Resume, and End).
+@Suite struct SessionControlTests {
+    @Test(arguments: [
+        (MemberState.focusing, LiveActivityPresentation.SessionControls.pauseAndEnd),
+        (MemberState.onBreak, LiveActivityPresentation.SessionControls.pauseAndEnd),
+        (MemberState.paused, LiveActivityPresentation.SessionControls.resumeAndEnd),
+        (MemberState.done, LiveActivityPresentation.SessionControls.hidden),
+        (MemberState.left, LiveActivityPresentation.SessionControls.hidden),
+        (MemberState.slipped, LiveActivityPresentation.SessionControls.hidden),
+    ])
+    func soloSessionsCanBePausedResumedAndEnded(state: MemberState, controls: LiveActivityPresentation.SessionControls) {
+        #expect(LiveActivitySamples.solo(now: now, me: state).presentation.sessionControls == controls)
+    }
+
+    @Test func squadsHaveNoSessionButtonsYet() {
+        // Squad sessions and their buttons (Cheer) arrive in M2.
+        #expect(LiveActivitySamples.squadOfSix(now: now).presentation.sessionControls == .hidden)
+        #expect(LiveActivitySamples.squadOfFour(now: now).presentation.sessionControls == .hidden)
+    }
+
+    @Test func onlyYourOwnSessionHasButtons() {
+        // A solo state that somehow lacks me: whoever leads isn't mine to pause.
+        let presentation = LiveActivityPresentation(
+            attributes: LockinAttributes(sid: "s0LoRun123", me: "me"),
+            state: LockinAttributes.ContentState(v: 1, m: [wire("someone", .focusing)])
+        )
+        #expect(presentation.sessionControls == .hidden)
+        let empty = LiveActivityPresentation(
+            attributes: LockinAttributes(sid: "s0LoRun123", me: "me"),
+            state: LockinAttributes.ContentState(v: 1, m: [])
+        )
+        #expect(empty.sessionControls == .hidden)
     }
 }
 

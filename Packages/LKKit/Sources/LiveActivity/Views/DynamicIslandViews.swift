@@ -139,7 +139,7 @@ public struct ExpandedCenterView: View {
 /// spaced whoever is in it; anyone past four is on the Lock Screen rather than squeezed in as
 /// "+2". Nothing at all once a solo session is over, so the island shrinks to fit.
 ///
-/// The squad row is about 66 points tall (Lockling 30 + 2 + name 14.3 + countdown 18) and the
+/// The squad row is about 64 points tall (Lockling 30 + 2 + name 14.3 + countdown 18) and the
 /// buttons about 34, which with the 44-point Lockling above keeps the island well inside its 160.
 /// Text stays at the default size or under (`islandAppearance()`), so those numbers hold.
 public struct ExpandedBottomView: View {

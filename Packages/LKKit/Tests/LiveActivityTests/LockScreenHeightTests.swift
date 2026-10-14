@@ -48,7 +48,7 @@ import UIKit
 
     /// Held, not frozen: on the Lock Screen the text does grow with the reader's size, up to the
     /// top of the range, as the rest of the system's does. The squad layout is all text but the
-    /// monograms, so it grows by several points a step.
+    /// Locklings, so it grows by several points a step.
     @Test @MainActor func lockScreenTextGrowsWithDynamicType() {
         let sample = LiveActivitySamples.squadOfSix(now: LiveActivitySamples.fixtureDate)
         let standard = Self.height(of: sample, layout: .lockScreen, textSize: .large)
