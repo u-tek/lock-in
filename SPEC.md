@@ -223,13 +223,13 @@ cosmetics(user_id, item_id, acquired_at)
 ```
 POST   /auth/apple                      → { token, user }
 GET    /me      PATCH /me     DELETE /me (account deletion, required by App Review)
-POST   /devices                         { apnsToken, env, pushToStartToken?, laEnabled, tz }
+POST   /devices                         { apnsToken, env, pushToStartToken?, laEnabled, tz, quietHours? }
 GET    /friends   POST /friends/redeem/:code   DELETE /friends/:id
 POST   /blocks    POST /reports
 GET    /squads    POST /squads   POST /squads/:id/invite   POST /squads/join/:code
 PATCH  /squads/:id/members/me           { muted }
 POST   /sessions                        { squadId?, minutes } → { session, contentState }
-POST   /sessions/:id/join               { minutes }
+POST   /sessions/:id/join               { minutes, pushToStart? }   (pushToStart: M4 spike)
 POST   /sessions/:id/la-token           { token }
 POST   /sessions/:id/{pause|resume|end|slip}
 POST   /sessions/:id/cheer              { to, kind }
