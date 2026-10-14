@@ -41,7 +41,7 @@ Pet mood 0–3 (0 lowest): `.gray`, `.orange`, `.mint`, `.green`.
 SF Pro (the system font, default design) through Dynamic Type text styles: `.largeTitle`,
 `.title2`, `.headline`, `.body`, `.subheadline`, `.footnote`, `.caption`. Weights only from the
 style or `.fontWeight(_:)`. Every number that counts down or changes uses `.monospacedDigit()`.
-No SF Rounded except member monograms, which follow Contacts' monogram style.
+No SF Rounded: the Lockling carries the playfulness.
 
 Live Activity countdowns: `.title2.weight(.semibold).monospacedDigit()` on the Lock Screen, a
 large `.system(size:weight: .semibold)` hero in StandBy, `.body.weight(.semibold)` in the island.
@@ -72,13 +72,15 @@ large `.system(size:weight: .semibold)` hero in StandBy, `.body.weight(.semibold
   at medium weight or heavier (the HIG's rule for Live Activities): the small styles add
   `.weight(.medium)`.
 - Your own countdown takes your state colour only in the dark appearance (island, StandBy,
-  Always-On, a dark Lock Screen). On a light Lock Screen it's `.primary`; the monogram and the
+  Always-On, a dark Lock Screen). On a light Lock Screen it's `.primary`; the Lockling and the
   progress bar carry the colour, because tinted text on white is hard to read.
 - Lock Screen side margins are 14 pt, Apple's value: the one exception to the 4 pt grid.
 - Dynamic Type is capped per presentation so nothing passes 160 pt: up to xLarge on the Lock
   Screen, Large in the island, StandBy and the Smart Stack.
-- Member monograms: a circle filled with the state colour's gradient (`color.gradient`) and a
-  white initial, with a small status badge carrying the state symbol, like Contacts and Find My.
+- Every member is their Lockling (the `Creature` module), in the pose for their state: reading
+  while focusing, a mug on a break, asleep when paused, cheering when done, faded and waving when
+  they've left, sweating when they slipped. Below 28 pt it drops props and thickens its lines;
+  in Always-On it's an outline.
 - Keyline tint is the tint colour. No custom animation (the system ignores it); content
   transitions only.
 
