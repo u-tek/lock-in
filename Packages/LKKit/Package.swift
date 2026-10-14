@@ -18,6 +18,8 @@ let package = Package(
         .library(name: "LiveActivity", targets: ["LiveActivity"]),
         .library(name: "SessionEngine", targets: ["SessionEngine"]),
         .library(name: "Paywall", targets: ["Paywall"]),
+        .library(name: "API", targets: ["API"]),
+        .library(name: "Social", targets: ["Social"]),
     ],
     targets: [
         .target(name: "Core"),
@@ -42,6 +44,11 @@ let package = Package(
         ),
         // Lockin Plus: plans, entitlements and the purchase flow, on StoreKit 2. App only.
         .target(name: "Paywall", dependencies: ["Core", "Model", "DesignSystem", "Creature"]),
+        // The Lockin API: REST client, the session token in the Keychain, and the JSON models.
+        // App only (the widget extension has no network).
+        .target(name: "API", dependencies: ["Core", "Model"]),
+        // Accounts and friends: Sign in with Apple, handles, friend codes and QR, block and report.
+        .target(name: "Social", dependencies: ["Core", "Model", "API"]),
 
         .testTarget(name: "CoreTests", dependencies: ["Core"]),
         .testTarget(name: "ModelTests", dependencies: ["Model"]),
@@ -50,5 +57,7 @@ let package = Package(
         .testTarget(name: "LiveActivityTests", dependencies: ["LiveActivity", "Model"]),
         .testTarget(name: "SessionEngineTests", dependencies: ["SessionEngine", "Core", "Model", "LiveActivity"]),
         .testTarget(name: "PaywallTests", dependencies: ["Paywall", "Creature", "Model"]),
+        .testTarget(name: "APITests", dependencies: ["API", "Core", "Model"]),
+        .testTarget(name: "SocialTests", dependencies: ["Social", "API", "Core", "Model"]),
     ]
 )

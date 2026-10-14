@@ -1,0 +1,147 @@
+[
+  {
+    "kind": "handle",
+    "input": "ava",
+    "expected": "ok"
+  },
+  {
+    "kind": "handle",
+    "input": "Ava_Smith",
+    "expected": "ok"
+  },
+  {
+    "kind": "handle",
+    "input": "noor.k",
+    "expected": "ok"
+  },
+  {
+    "kind": "handle",
+    "input": "classy",
+    "expected": "ok"
+  },
+  {
+    "kind": "handle",
+    "input": "grapefruit",
+    "expected": "ok"
+  },
+  {
+    "kind": "handle",
+    "input": "cassidy99",
+    "expected": "ok"
+  },
+  {
+    "kind": "handle",
+    "input": "ab",
+    "expected": "invalid"
+  },
+  {
+    "kind": "handle",
+    "input": "1ava",
+    "expected": "invalid"
+  },
+  {
+    "kind": "handle",
+    "input": "ava-smith",
+    "expected": "invalid"
+  },
+  {
+    "kind": "handle",
+    "input": "abcdefghijklmnopqrstu",
+    "expected": "invalid"
+  },
+  {
+    "kind": "handle",
+    "input": "ava smith",
+    "expected": "invalid"
+  },
+  {
+    "kind": "handle",
+    "input": "fuckface",
+    "expected": "not_allowed"
+  },
+  {
+    "kind": "handle",
+    "input": "sh1t_happens",
+    "expected": "not_allowed"
+  },
+  {
+    "kind": "handle",
+    "input": "big.ass",
+    "expected": "not_allowed"
+  },
+  {
+    "kind": "handle",
+    "input": "rape",
+    "expected": "not_allowed"
+  },
+  {
+    "kind": "handle",
+    "input": "admin",
+    "expected": "not_allowed"
+  },
+  {
+    "kind": "handle",
+    "input": "lockin_official",
+    "expected": "not_allowed"
+  },
+  {
+    "kind": "name",
+    "input": "Ava",
+    "expected": "ok"
+  },
+  {
+    "kind": "name",
+    "input": "  Noor  ",
+    "expected": "ok"
+  },
+  {
+    "kind": "name",
+    "input": "Cassidy",
+    "expected": "ok"
+  },
+  {
+    "kind": "name",
+    "input": "🦊🦊",
+    "expected": "ok"
+  },
+  {
+    "kind": "name",
+    "input": "Abcdefghijkl",
+    "expected": "ok"
+  },
+  {
+    "kind": "name",
+    "input": "",
+    "expected": "invalid"
+  },
+  {
+    "kind": "name",
+    "input": "   ",
+    "expected": "invalid"
+  },
+  {
+    "kind": "name",
+    "input": "Abcdefghijklm",
+    "expected": "invalid"
+  },
+  {
+    "kind": "name",
+    "input": "Nina\u0007",
+    "expected": "invalid"
+  },
+  {
+    "kind": "name",
+    "input": "Big Ass",
+    "expected": "not_allowed"
+  },
+  {
+    "kind": "name",
+    "input": "Sh!t",
+    "expected": "not_allowed"
+  },
+  {
+    "kind": "name",
+    "input": "Hitler",
+    "expected": "not_allowed"
+  }
+]

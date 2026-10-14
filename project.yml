@@ -73,6 +73,9 @@ targets:
         # Xcode signs with "development"; exporting for App Store Connect switches it to
         # production, which is what TestFlight builds use.
         aps-environment: development
+        # Accounts (M2): Sign in with Apple.
+        com.apple.developer.applesignin:
+          - Default
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(LK_BUNDLE_ID)
@@ -98,6 +101,10 @@ targets:
         product: SessionEngine
       - package: LKKit
         product: Paywall
+      - package: LKKit
+        product: API
+      - package: LKKit
+        product: Social
       - target: LockinWidgets
 
   # The Live Activity (every presentation), and later the Home/Lock Screen widgets and the
