@@ -246,11 +246,13 @@ jobs:
         timeout-minutes: 15
         run: scripts/export-snapshots.sh "iPhone 16 Pro"
       # A narrowed run ([snapshots: a,b]) is a quick check: the iPhone 16 Pro only.
+      # The SE isn't kept between runs like the 16 Pro, so its first boot (several minutes) comes
+      # out of this step's time, on top of every non-lab route in both appearances.
       - name: iPhone SE
         id: se
         if: env.LK_ONLY_ROUTES == ''
         continue-on-error: true
-        timeout-minutes: 15
+        timeout-minutes: 30
         run: scripts/export-snapshots.sh "iPhone SE (3rd generation)"
       # M6: App Store screenshots, only for [snapshots: store]. There are no store.* routes yet,
       # so this stops before booting the phone, and fails because "store" matches no route.

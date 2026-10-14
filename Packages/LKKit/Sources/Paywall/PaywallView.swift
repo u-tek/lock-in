@@ -36,9 +36,6 @@ public struct PaywallView: View {
             VStack(spacing: LKSpacing.xl) {
                 header
                 features
-                if !store.isPlus {
-                    plans
-                }
             }
             .padding(.horizontal, LKSpacing.gutter)
             .padding(.top, LKSpacing.xl)
@@ -76,8 +73,8 @@ public struct PaywallView: View {
 
     private var header: some View {
         VStack(spacing: LKSpacing.s) {
-            CreatureView(avatar: Self.crowned(avatar), pose: .celebrating, size: 140)
-                .frame(width: 160, height: 160)
+            CreatureView(avatar: Self.crowned(avatar), pose: .celebrating, size: 110)
+                .frame(width: 124, height: 124)
                 .background {
                     Circle()
                         .fill(RadialGradient(
@@ -86,7 +83,7 @@ public struct PaywallView: View {
                             startRadius: 0,
                             endRadius: 120
                         ))
-                        .frame(width: 240, height: 240)
+                        .frame(width: 200, height: 200)
                 }
                 .padding(.bottom, LKSpacing.s)
                 .accessibilityHidden(true)
@@ -102,17 +99,18 @@ public struct PaywallView: View {
     }
 
     private var features: some View {
-        VStack(alignment: .leading, spacing: LKSpacing.l) {
+        VStack(alignment: .leading, spacing: LKSpacing.m) {
             ForEach(PlusFeature.all) { feature in
                 HStack(spacing: LKSpacing.m) {
-                    LKIconTile(systemName: feature.symbol, color: feature.color, size: 34)
-                    VStack(alignment: .leading, spacing: LKSpacing.xxs) {
+                    LKIconTile(systemName: feature.symbol, color: feature.color, size: 30)
+                    VStack(alignment: .leading, spacing: 0) {
                         Text(feature.title)
-                            .font(.headline)
+                            .font(.subheadline.weight(.semibold))
                         Text(feature.detail)
-                            .font(.subheadline)
+                            .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+                    Spacer(minLength: 0)
                 }
                 .accessibilityElement(children: .combine)
             }
@@ -120,8 +118,9 @@ public struct PaywallView: View {
         .lkCard()
     }
 
+    /// The three plans side by side, pinned above the button so they're never scrolled away.
     private var plans: some View {
-        VStack(spacing: LKSpacing.s) {
+        HStack(spacing: LKSpacing.s) {
             ForEach(PlusPlan.allCases) { option in
                 PlanCard(
                     plan: option,
@@ -147,6 +146,7 @@ public struct PaywallView: View {
                 .lkProminentButton()
                 .controlSize(.large)
             } else {
+                plans
                 Button(action: buy) {
                     ZStack {
                         Text(plan.callToAction(trialAvailable: store.isTrialAvailable))
@@ -268,7 +268,8 @@ struct PlusFeature: Identifiable, Sendable {
     ]
 }
 
-/// A plan to pick: its name, price and a radio-style check. The selected card wears the tint.
+/// A plan to pick, as one of three cards in a row: the badge (if any), the name, the price and a
+/// short line under it. The selected card wears the tint.
 private struct PlanCard: View {
     let plan: PlusPlan
     let price: String
@@ -278,56 +279,46 @@ private struct PlanCard: View {
     let select: () -> Void
 
     private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: LKRadius.card, style: .continuous)
+        RoundedRectangle(cornerRadius: LKRadius.medium, style: .continuous)
     }
 
     var body: some View {
         Button(action: select) {
-            HStack(spacing: LKSpacing.m) {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
-                    .foregroundStyle(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-                    .contentTransition(.symbolEffect(.replace))
-                VStack(alignment: .leading, spacing: LKSpacing.xxs) {
-                    HStack(spacing: LKSpacing.s) {
-                        Text(plan.title)
-                            .font(.headline)
-                        if let badge {
-                            Text(badge)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, LKSpacing.s)
-                                .padding(.vertical, LKSpacing.xxs)
-                                .background(.tint, in: Capsule())
-                        }
-                    }
-                    if let detail {
-                        Text(detail)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer(minLength: LKSpacing.s)
-                VStack(alignment: .trailing, spacing: LKSpacing.xxs) {
-                    Text(price)
-                        .font(.headline)
-                        .monospacedDigit()
-                    if let period = plan.period {
-                        Text(period)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            VStack(spacing: LKSpacing.xxs) {
+                // Every card keeps the badge's height, so the three line up.
+                Text(badge ?? " ")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, LKSpacing.s)
+                    .padding(.vertical, 2)
+                    .background(badge == nil ? AnyShapeStyle(.clear) : AnyShapeStyle(.tint), in: Capsule())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(plan.title)
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.top, LKSpacing.xxs)
+                Text(price)
+                    .font(.headline)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(detail ?? plan.period ?? " ")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
-            .padding(LKSpacing.cardPadding)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, LKSpacing.s)
+            .padding(.horizontal, LKSpacing.xs)
+            .frame(maxWidth: .infinity)
             .background(LKColor.secondaryGroupedBackground, in: shape)
             .overlay {
-                shape.strokeBorder(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.clear), lineWidth: 2)
+                shape.strokeBorder(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(LKColor.separator), lineWidth: isSelected ? 2 : 0.5)
             }
             .contentShape(shape)
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

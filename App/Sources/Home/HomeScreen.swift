@@ -5,8 +5,8 @@ import Paywall
 import SessionEngine
 import SwiftUI
 
-/// Home: your Lockling, how long, and one button. Coins, Plus and Settings sit in the bar; squads
-/// are a quiet row at the bottom until they arrive (M3).
+/// Home: your Lockling, how long, and one button. Coins, Plus and Settings sit in a row across
+/// the top; squads are a quiet row at the bottom until they arrive (M3).
 struct HomeScreen: View {
     enum Sheet: String, Identifiable {
         case paywall
@@ -35,6 +35,7 @@ struct HomeScreen: View {
         NavigationStack {
             GeometryReader { proxy in
                 VStack(spacing: 0) {
+                    topBar
                     Spacer(minLength: LKSpacing.s)
                     hero(height: proxy.size.height)
                     StatChips(stats: engine.stats)
@@ -53,8 +54,9 @@ struct HomeScreen: View {
                 .frame(width: proxy.size.width, height: proxy.size.height)
             }
             .background(Color(uiColor: .systemBackground))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { toolbar }
+            // The row is part of the screen, not a navigation bar: iOS 26 bars shrink custom items
+            // to icons, which dropped the coin count and the word "Plus".
+            .toolbar(.hidden, for: .navigationBar)
         }
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .sheet(item: $sheet) { sheet in
@@ -116,13 +118,13 @@ struct HomeScreen: View {
         .buttonStyle(.borderless)
     }
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
+    private var topBar: some View {
+        HStack(spacing: LKSpacing.s) {
             CoinCount(coins: engine.stats.coins)
-                .toolbarPill()
-        }
-        ToolbarItemGroup(placement: .topBarTrailing) {
+                .padding(.horizontal, LKSpacing.m)
+                .frame(minHeight: 36)
+                .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+            Spacer()
             if !plus.isPlus {
                 Button {
                     sheet = .paywall
@@ -133,15 +135,27 @@ struct HomeScreen: View {
                         Image(systemName: LockinSymbol.plus)
                             .foregroundStyle(LockinColour.plus)
                     }
-                    .labelStyle(.titleAndIcon)
                     .font(LKFont.subheadline.weight(.semibold))
+                    .padding(.horizontal, LKSpacing.m)
+                    .frame(minHeight: 36)
+                    .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel("Lockin Plus")
             }
-            Button("Settings", systemImage: "gearshape") {
+            Button {
                 sheet = .settings
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(LKFont.body.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, height: 36)
+                    .background(Color(uiColor: .tertiarySystemFill), in: Circle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Settings")
         }
+        .padding(.top, LKSpacing.s)
     }
 }
 

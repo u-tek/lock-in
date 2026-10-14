@@ -25,26 +25,6 @@ extension View {
         }
     }
 
-    /// A capsule behind a toolbar item that isn't a button. iOS 26 puts toolbar items on Liquid
-    /// Glass already, so it's only drawn before that.
-    func toolbarPill() -> some View {
-        modifier(ToolbarPillModifier())
-    }
-}
-
-private struct ToolbarPillModifier: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content
-                .padding(.horizontal, LKSpacing.xs)
-        } else {
-            content
-                .padding(.horizontal, LKSpacing.m)
-                .padding(.vertical, 6)
-                .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
-        }
-    }
 }
 
 /// Coins, with the coin symbol: "120".
