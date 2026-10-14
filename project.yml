@@ -105,6 +105,8 @@ targets:
         product: API
       - package: LKKit
         product: Social
+      - package: LKKit
+        product: DeepFocus
       - target: LockinWidgets
 
   # The Live Activity (every presentation), and later the Home/Lock Screen widgets and the
@@ -147,6 +149,117 @@ targets:
       - package: LKKit
         product: LiveActivity
 
+  # Deep Focus (M8): draws the shield over an app you blocked.
+  # Built on every CI run so it keeps compiling, but not embedded in the app (and not archived)
+  # until Apple approves the Family Controls (Distribution) entitlement: see docs/milestones/M8.md.
+  LockinShieldConfiguration:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: DeepFocusExtensions/ShieldConfiguration
+    info:
+      path: DeepFocusExtensions/ShieldConfiguration/Info.plist
+      properties:
+        CFBundleDisplayName: Lockin
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LKAppGroupIdentifier: $(LK_APP_GROUP)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.ManagedSettingsUI.shield-configuration-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShieldConfigurationExtension
+    entitlements:
+      path: DeepFocusExtensions/ShieldConfiguration/ShieldConfiguration.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(LK_APP_GROUP)
+        com.apple.developer.family-controls: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(LK_BUNDLE_ID).shieldconfig
+        PRODUCT_NAME: LockinShieldConfiguration
+        TARGETED_DEVICE_FAMILY: "1" # Per target, see Lockin.
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SWIFT_VERSION: "5.0"
+    dependencies:
+      - package: LKKit
+        product: Core
+      - package: LKKit
+        product: DeepFocus
+
+  # Deep Focus (M8): handles the shield's buttons; "Open anyway" records a slip.
+  # Built on every CI run so it keeps compiling, but not embedded in the app (and not archived)
+  # until Apple approves the Family Controls (Distribution) entitlement: see docs/milestones/M8.md.
+  LockinShieldAction:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: DeepFocusExtensions/ShieldAction
+    info:
+      path: DeepFocusExtensions/ShieldAction/Info.plist
+      properties:
+        CFBundleDisplayName: Lockin
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LKAppGroupIdentifier: $(LK_APP_GROUP)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.ManagedSettings.shield-action-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShieldActionExtension
+    entitlements:
+      path: DeepFocusExtensions/ShieldAction/ShieldAction.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(LK_APP_GROUP)
+        com.apple.developer.family-controls: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(LK_BUNDLE_ID).shieldaction
+        PRODUCT_NAME: LockinShieldAction
+        TARGETED_DEVICE_FAMILY: "1" # Per target, see Lockin.
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SWIFT_VERSION: "5.0"
+    dependencies:
+      - package: LKKit
+        product: Core
+      - package: LKKit
+        product: DeepFocus
+
+  # Deep Focus (M8): applies and lifts the shields with the session.
+  # Built on every CI run so it keeps compiling, but not embedded in the app (and not archived)
+  # until Apple approves the Family Controls (Distribution) entitlement: see docs/milestones/M8.md.
+  LockinActivityMonitor:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: DeepFocusExtensions/ActivityMonitor
+    info:
+      path: DeepFocusExtensions/ActivityMonitor/Info.plist
+      properties:
+        CFBundleDisplayName: Lockin
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LKAppGroupIdentifier: $(LK_APP_GROUP)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.deviceactivity.monitor-extension
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ActivityMonitorExtension
+    entitlements:
+      path: DeepFocusExtensions/ActivityMonitor/ActivityMonitor.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(LK_APP_GROUP)
+        com.apple.developer.family-controls: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(LK_BUNDLE_ID).activitymonitor
+        PRODUCT_NAME: LockinActivityMonitor
+        TARGETED_DEVICE_FAMILY: "1" # Per target, see Lockin.
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SWIFT_VERSION: "5.0"
+    dependencies:
+      - package: LKKit
+        product: Core
+      - package: LKKit
+        product: DeepFocus
+
   # Exports PNGs of screens for design review (see UITests/SnapshotExportTests.swift).
   LockinUITests:
     type: bundle.ui-testing
@@ -168,6 +281,11 @@ schemes:
       targets:
         Lockin: all
         LockinUITests: [test]
+        # Deep Focus extensions: compiled with the tests so CI catches breakage, never archived
+        # until they're embedded (M8.md).
+        LockinShieldConfiguration: [test]
+        LockinShieldAction: [test]
+        LockinActivityMonitor: [test]
     run:
       config: Debug
     test:

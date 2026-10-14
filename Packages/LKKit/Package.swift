@@ -20,6 +20,7 @@ let package = Package(
         .library(name: "Paywall", targets: ["Paywall"]),
         .library(name: "API", targets: ["API"]),
         .library(name: "Social", targets: ["Social"]),
+        .library(name: "DeepFocus", targets: ["DeepFocus"]),
     ],
     targets: [
         .target(name: "Core"),
@@ -49,6 +50,13 @@ let package = Package(
         .target(name: "API", dependencies: ["Core", "Model"]),
         // Accounts and friends: Sign in with Apple, handles, friend codes and QR, block and report.
         .target(name: "Social", dependencies: ["Core", "Model", "API"]),
+        // Deep Focus (M8, Plus): the app picker, shields during sessions and slips. Linked by the app
+        // and the three Screen Time extensions, so it stays extension-safe.
+        .target(
+            name: "DeepFocus",
+            dependencies: ["Core", "Model", "DesignSystem", "Creature"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
 
         .testTarget(name: "CoreTests", dependencies: ["Core"]),
         .testTarget(name: "ModelTests", dependencies: ["Model"]),
@@ -59,5 +67,6 @@ let package = Package(
         .testTarget(name: "PaywallTests", dependencies: ["Paywall", "Creature", "Model"]),
         .testTarget(name: "APITests", dependencies: ["API", "Core", "Model"]),
         .testTarget(name: "SocialTests", dependencies: ["Social", "API", "Core", "Model"]),
+        .testTarget(name: "DeepFocusTests", dependencies: ["DeepFocus", "Core", "Model"]),
     ]
 )
