@@ -80,7 +80,6 @@ struct SquadDetailScreen: View {
         .navigationTitle(squad?.name ?? "")
         .navigationBarTitleDisplayMode(.inline)
         .errorAlert("Something went wrong", message: $failure)
-        .lockinPaywall(isPresented: $showsPaywall, store: plus, avatar: avatar)
     }
 
     private func content(_ squad: Squad) -> some View {
@@ -190,49 +189,75 @@ struct SquadDetailScreen: View {
 
     // MARK: - Squad Boost (M7)
 
-    /// The pet's accessories: none and the six, each on the squad's pet. Without the boost each
-    /// wears Plus's crown and opens the paywall. An egg has nothing to wear them on yet.
+    /// One row on the squad's page: what the pet wears, and a way to the accessories. Plus's
+    /// crown when the squad has no boost. An egg has nothing to wear them on yet.
     @ViewBuilder
     private func accessorySection(_ squad: Squad) -> some View {
         if squad.pet.hasHatched {
             Section {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: LKSpacing.s), count: 4), spacing: LKSpacing.s) {
-                    AccessoryTile(
-                        title: "None",
-                        pet: dressed(squad.pet, in: nil),
-                        isSelected: squad.pet.wornAccessory == nil,
-                        isLocked: false
-                    ) {
-                        choose(nil, in: squad)
-                    }
-                    ForEach(PetAccessory.allCases) { accessory in
-                        AccessoryTile(
-                            title: accessory.title,
-                            pet: dressed(squad.pet, in: accessory),
-                            isSelected: squad.pet.wornAccessory == accessory,
-                            isLocked: !squad.boosted
-                        ) {
-                            choose(accessory, in: squad)
+                NavigationLink {
+                    List {
+                        if let current = self.squad {
+                            accessoryGrid(current)
                         }
                     }
+                    .listStyle(.insetGrouped)
+                    .navigationTitle("Dress up")
+                    .navigationBarTitleDisplayMode(.inline)
+                    // The accessories are the only way to the paywall here (moment 3), so it opens
+                    // from their screen, the one on top.
+                    .lockinPaywall(isPresented: $showsPaywall, store: plus, avatar: avatar)
+                } label: {
+                    LabeledContent {
+                        if squad.boosted {
+                            Text(squad.pet.wornAccessory?.title ?? "Nothing")
+                        } else {
+                            PlusBadge()
+                        }
+                    } label: {
+                        Label("Dress up", systemImage: "tshirt.fill")
+                    }
                 }
-                .padding(.vertical, LKSpacing.s)
-                .sensoryFeedback(.selection, trigger: squad.pet.accessory)
-            } header: {
-                Text("Pet accessories")
-            } footer: {
-                Text(squad.boosted
-                    ? "Anyone in the squad can pick. Everyone sees it, in the Live Activity too."
-                    : "Squad Boost: when anyone in the squad has Lockin Plus, your pet can dress up.")
             }
         } else if squad.boosted {
             Section {
                 Label("Your pet can dress up once it hatches.", systemImage: "sparkles")
                     .font(LKFont.subheadline)
                     .foregroundStyle(LKColor.textSecondary)
-            } header: {
-                Text("Pet accessories")
             }
+        }
+    }
+
+    /// The pet's accessories: none and the six, each on the squad's pet. Without the boost each
+    /// wears Plus's crown and opens the paywall.
+    private func accessoryGrid(_ squad: Squad) -> some View {
+        Section {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: LKSpacing.s), count: 4), spacing: LKSpacing.s) {
+                AccessoryTile(
+                    title: "None",
+                    pet: dressed(squad.pet, in: nil),
+                    isSelected: squad.pet.wornAccessory == nil,
+                    isLocked: false
+                ) {
+                    choose(nil, in: squad)
+                }
+                ForEach(PetAccessory.allCases) { accessory in
+                    AccessoryTile(
+                        title: accessory.title,
+                        pet: dressed(squad.pet, in: accessory),
+                        isSelected: squad.pet.wornAccessory == accessory,
+                        isLocked: !squad.boosted
+                    ) {
+                        choose(accessory, in: squad)
+                    }
+                }
+            }
+            .padding(.vertical, LKSpacing.s)
+            .sensoryFeedback(.selection, trigger: squad.pet.accessory)
+        } footer: {
+            Text(squad.boosted
+                ? "Anyone in the squad can pick. Everyone sees it, in the Live Activity too."
+                : "Squad Boost: when anyone in the squad has Lockin Plus, your pet can dress up.")
         }
     }
 
