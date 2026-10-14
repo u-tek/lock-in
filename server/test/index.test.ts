@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { MIN_ADMIN_TOKEN_LENGTH } from "../src/admin.ts";
 import worker, { type Env, handle } from "../src/index.ts";
 import { PAYLOAD_BUDGET_BYTES, parseContentState, payloadByteCount } from "../src/liveActivity.ts";
+import { testApp } from "./app.ts";
 import { DEVICE_TOKEN, decodeJWT, fakeAPNs, makeKey, readFixture } from "./helpers.ts";
 
 const ADMIN_TOKEN = "a".repeat(20) + "0123456789abcdef0123";
@@ -56,8 +57,52 @@ describe("routes", () => {
     ]) {
       const response = await handle(request, env());
       expect(response.status).toBe(404);
-      expect(await response.json()).toEqual({ error: "Not found" });
+      expect(await response.json()).toEqual({ error: "Not found", code: "not_found" });
     }
+  });
+
+  test("every account and friends route needs a bearer token", async () => {
+    const authed: Array<[string, string]> = [
+      ["GET", "/me"],
+      ["PATCH", "/me"],
+      ["DELETE", "/me"],
+      ["GET", "/handles/ava"],
+      ["POST", "/devices"],
+      ["GET", "/friends"],
+      ["POST", "/friends/code"],
+      ["POST", "/friends/redeem/ABCDEFGH"],
+      ["DELETE", "/friends/Av4Nq8sT2b"],
+      ["GET", "/blocks"],
+      ["POST", "/blocks"],
+      ["DELETE", "/blocks/Av4Nq8sT2b"],
+      ["POST", "/reports"],
+    ];
+    const app = await testApp();
+    for (const [method, path] of authed) {
+      const response = await app.request(method, path, { body: method === "GET" || method === "DELETE" ? undefined : {} });
+      expect(response.status, `${method} ${path}`).toBe(401);
+      expect(await response.json()).toEqual({ error: expect.any(String), code: "unauthorised" });
+    }
+    // These don't.
+    for (const path of ["/health", "/j/ABCDEFGH", "/.well-known/apple-app-site-association"]) {
+      expect((await app.request("GET", path)).status, path).not.toBe(401);
+    }
+  });
+
+  test("an unexpected failure is a JSON 500 whose log names the route, not the path", async () => {
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => errors.push(args.map(String).join(" ")));
+    const broken = {
+      prepare() {
+        throw new Error("D1_ERROR: something about secret.handle");
+      },
+    } as unknown as D1Database;
+    const app = await testApp({ DB: broken });
+    const response = await app.request("GET", "/j/ABCDEFGH");
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Something went wrong", code: "internal" });
+    expect(errors).toEqual(["GET /j/:code: unhandled Error"]);
+    vi.restoreAllMocks();
   });
 
   test("the default export serves the same routes", async () => {
@@ -91,7 +136,7 @@ describe("POST /admin/push-test", () => {
     const apns = fakeAPNs({ status: 200 });
     const response = await handle(pushTest(BLOB), env({ ENVIRONMENT: "production" }), { fetch: apns.fetch, now: () => NOW });
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: "Not found" });
+    expect(await response.json()).toEqual({ error: "Not found", code: "not_found" });
     expect(apns.requests).toHaveLength(0);
   });
 
@@ -111,7 +156,7 @@ describe("POST /admin/push-test", () => {
     for (const authorization of [null, "", `Bearer ${ADMIN_TOKEN}x`, `Bearer ${ADMIN_TOKEN.slice(1)}`, `Basic ${ADMIN_TOKEN}`, ADMIN_TOKEN]) {
       const response = await handle(pushTest(BLOB, authorization), env(), deps);
       expect(response.status).toBe(404);
-      expect(await response.json()).toEqual({ error: "Not found" });
+      expect(await response.json()).toEqual({ error: "Not found", code: "not_found" });
     }
     expect(apns.requests).toHaveLength(0);
   });

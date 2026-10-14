@@ -64,11 +64,15 @@ export class AppleKeys {
    * only when there are no keys at all to check against.
    */
   async find(kid: string): Promise<CryptoKey | undefined> {
-    const now = this.now();
-    if (now - this.fetchedAt >= KEYS_CACHE_SECONDS && now - this.attemptedAt >= KEYS_MIN_REFETCH_SECONDS) await this.refresh();
-    if (!this.keys.has(kid) && this.now() - this.attemptedAt >= KEYS_MIN_REFETCH_SECONDS) await this.refresh();
+    if (this.now() - this.fetchedAt >= KEYS_CACHE_SECONDS && this.mayFetch()) await this.refresh();
+    if (!this.keys.has(kid) && this.mayFetch()) await this.refresh();
     if (this.fetchedAt === Number.NEGATIVE_INFINITY) throw new AppleUnavailableError("Couldn't fetch Apple's keys");
     return this.keys.get(kid);
+  }
+
+  /** A fetch in flight can always be joined; a new one waits a minute after the last. */
+  private mayFetch(): boolean {
+    return this.refreshing !== undefined || this.now() - this.attemptedAt >= KEYS_MIN_REFETCH_SECONDS;
   }
 
   /** Concurrent requests share one fetch. Failures keep whatever keys are cached. */

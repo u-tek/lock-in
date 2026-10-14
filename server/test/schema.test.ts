@@ -1,20 +1,9 @@
 // Applies migrations/ to an in-memory SQLite (Node's built-in node:sqlite, the same engine D1 runs)
 // with foreign keys on, as D1 has them, and checks the constraints do their job.
 
-import { readFileSync, readdirSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, test } from "vitest";
-
-const MIGRATIONS = new URL("../migrations/", import.meta.url);
-
-function migrated(): DatabaseSync {
-  const db = new DatabaseSync(":memory:");
-  db.exec("PRAGMA foreign_keys = ON");
-  for (const file of readdirSync(MIGRATIONS).filter((name) => name.endsWith(".sql")).sort()) {
-    db.exec(readFileSync(new URL(file, MIGRATIONS), "utf8"));
-  }
-  return db;
-}
+import { migratedSQLite as migrated } from "./d1.ts";
 
 let db: DatabaseSync;
 const run = (sql: string, ...params: Array<string | number | null>) => db.prepare(sql).run(...params);
@@ -50,6 +39,7 @@ describe("the D1 schema", () => {
         "squad_members",
         "squads",
         "users",
+        "auth_tokens",
       ]),
     );
   });
@@ -106,6 +96,26 @@ describe("the D1 schema", () => {
     expect(count("SELECT count(*) AS n FROM events")).toBe(0);
     expect(db.prepare("SELECT owner_id FROM squads").get()).toEqual({ owner_id: null });
     expect(db.prepare("SELECT host_id, squad_id FROM sessions").get()).toEqual({ host_id: null, squad_id: "Sq00000001" });
+  });
+
+  test("0002: sessions, the Apple refresh token and report notes", () => {
+    const token = "INSERT INTO auth_tokens (token_hash, user_id, created_at, last_used_at) VALUES (?, ?, 1, 1)";
+    run(token, "a".repeat(64), "Av4Nq8sT2b");
+    expect(() => run(token, "a".repeat(64), "Nr2Kx7pQ1m")).toThrow(/UNIQUE|PRIMARY/);
+    expect(() => run(token, "short", "Nr2Kx7pQ1m")).toThrow(/CHECK/);
+    expect(() => run(token, "b".repeat(64), "Nobody0000")).toThrow(/FOREIGN KEY/);
+    run("UPDATE users SET apple_refresh_token = 'r.1' WHERE id = 'Av4Nq8sT2b'");
+
+    const report = "INSERT INTO reports (id, reporter_id, target_user_id, reason, note, created_at) VALUES (?, ?, ?, 'other', ?, 1)";
+    run(report, "Rp00000001", "Av4Nq8sT2b", "Nr2Kx7pQ1m", "x".repeat(500));
+    expect(() => run(report, "Rp00000002", "Av4Nq8sT2b", "Nr2Kx7pQ1m", "x".repeat(501))).toThrow(/CHECK/);
+    expect(() => run(report, "Rp00000003", "Av4Nq8sT2b", "Nr2Kx7pQ1m", "")).toThrow(/CHECK/);
+    run(report, "Rp00000004", "Nr2Kx7pQ1m", "Av4Nq8sT2b", null);
+
+    // Deleting Ava takes her sessions and the report about her; the one she filed stays, anonymised.
+    run("DELETE FROM users WHERE id = 'Av4Nq8sT2b'");
+    expect(count("SELECT count(*) AS n FROM auth_tokens")).toBe(0);
+    expect(db.prepare("SELECT id, reporter_id FROM reports").all().map((row) => ({ ...row }))).toEqual([{ id: "Rp00000001", reporter_id: null }]);
   });
 
   test("a session's end and its status agree", () => {

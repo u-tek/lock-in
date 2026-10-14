@@ -9,14 +9,22 @@ compatibility_date = "2026-10-01"
 #   APNS_KEY_ID        the APNs key's 10-character ID
 #   APNS_PRIVATE_KEY   the contents of AuthKey_XXXXXXXXXX.p8
 #   ADMIN_TOKEN        32+ random characters; turns on POST /admin/push-test outside production
+#   SIWA_KEY_ID        the Sign in with Apple key's 10-character ID (M2)
+#   SIWA_PRIVATE_KEY   the contents of that key's AuthKey_XXXXXXXXXX.p8. With SIWA_KEY_ID, sign-in
+#                      keeps Apple's refresh token so account deletion can revoke it (Apple requires
+#                      that); without them sign-in still works and nothing is revoked
 # For `npm run dev`, put the same names in server/.dev.vars (gitignored) instead.
 
 [vars]
 # The app's bundle ID (LK_BUNDLE_ID), not the widget extension's: APNs pushes Live Activity
-# updates to the topic "<this>.push-type.liveactivity".
+# updates to the topic "<this>.push-type.liveactivity", Sign in with Apple identity tokens must be
+# for it, and universal links name "<APNS_TEAM_ID>.<this>".
 APNS_BUNDLE_ID = "com.example.lockin"
 # "production" turns off the /admin routes.
 ENVIRONMENT = "development"
+# The host invite links point at: https://<INVITE_HOST>/j/<code>. Leave it out until the invite
+# domain exists (M9); links then use this Worker's own host, which serves the landing page too.
+# INVITE_HOST = "lockin.app"
 
 [[d1_databases]]
 binding = "DB"
