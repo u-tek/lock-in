@@ -70,9 +70,10 @@ wait "$watcher" 2>/dev/null || true
 kill "$logger" 2>/dev/null || true
 rm -f "$out/ready" "$out/recording" "$out/done"
 
-# Small enough to commit and to play on a phone: H.264, at most 1920 × 1080.
+# Small enough to commit and to play on a phone: H.264, at most 1280 × 720 (the 1920 × 1080 preset
+# made a 44 MB film).
 if [[ -f "$raw_video" ]]; then
-  if ! avconvert --source "$raw_video" --output "$out/island.mp4" --preset Preset1920x1080 --replace; then
+  if ! avconvert --source "$raw_video" --output "$out/island.mp4" --preset Preset1280x720 --replace; then
     echo "::warning::avconvert couldn't shrink the film; keeping it as recorded"
     cp "$raw_video" "$out/island.mp4"
   fi
