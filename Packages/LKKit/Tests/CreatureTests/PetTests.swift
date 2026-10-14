@@ -58,7 +58,7 @@ private func code(_ species: PetSpecies, _ stage: Int) -> PetCode {
                         let geometry = PetGeometry(code: code(species, stage), mood: mood.rawValue, size: size)
                         let paints = geometry.layers(reduced: reduced).map(\.paint)
                         let name = "\(species) \(stage) \(mood) at \(size), Always-On \(reduced)"
-                        #expect(paints.contains(reduced ? .bodyOutline : (stage == 0 ? .egg : .body)), "\(name)")
+                        #expect(paints.contains(reduced ? PetPaint.bodyOutline : (stage == 0 ? PetPaint.egg : PetPaint.body)), "\(name)")
                         #expect(paints.contains(.face) == (stage != 0), "\(name)")
                     }
                 }
@@ -78,8 +78,9 @@ private func code(_ species: PetSpecies, _ stage: Int) -> PetCode {
                     for reduced in [false, true] {
                         let geometry = PetGeometry(code: code(species, stage), mood: mood.rawValue, size: size)
                         for layer in geometry.layers(reduced: reduced) {
+                            // The curves' own extent, not their control points'.
                             let reach = (layer.lineWidth ?? 0) / 2
-                            let bounds = layer.path.boundingRect.insetBy(dx: -reach, dy: -reach)
+                            let bounds = layer.path.cgPath.boundingBoxOfPath.insetBy(dx: -reach, dy: -reach)
                             #expect(frame.contains(bounds), "\(species) \(stage) \(mood) at \(size): \(layer.paint) at \(bounds)")
                         }
                     }
@@ -193,7 +194,7 @@ private func code(_ species: PetSpecies, _ stage: Int) -> PetCode {
     @Test func theEggLeansWithItsMood() {
         let tilts = PetMood.allCases.map { PetGeometry(code: code(.sprout, 0), mood: $0.rawValue, size: 64).eggTilt }
         #expect(Set(tilts).count == tilts.count)
-        #expect(tilts[PetMood.happy.rawValue] == tilts.map(abs).max().map { -$0 })
+        #expect(tilts[PetMood.happy.rawValue] == -(tilts.map { abs($0) }.max() ?? 0))
         #expect(tilts[PetMood.hungry.rawValue] == 0)
     }
 
@@ -201,7 +202,7 @@ private func code(_ species: PetSpecies, _ stage: Int) -> PetCode {
     @Test func eggsDifferOnlyInColour() {
         let eggs = PetSpecies.allCases.map { PetGeometry(code: code($0, 0), mood: 2, size: 64) }
         let shapes = eggs.map { $0.layers(reduced: false).map(\.path) }
-        #expect(Set(shapes.map { $0.description }).count == 1)
+        #expect(shapes.allSatisfy { $0 == shapes[0] })
     }
 
     @Test(arguments: [-7, 4, 99, Int.min, Int.max])
@@ -271,7 +272,7 @@ private func code(_ species: PetSpecies, _ stage: Int) -> PetCode {
     private static func inkedBounds(_ geometry: PetGeometry) -> CGRect {
         geometry.layers(reduced: false)
             .filter { $0.paint != .glow && $0.paint != .halo && $0.paint != .sparkle }
-            .map(\.path.boundingRect)
+            .map { $0.path.cgPath.boundingBoxOfPath }
             .reduce(CGRect.null) { $0.union($1) }
     }
 
@@ -298,23 +299,25 @@ private func code(_ species: PetSpecies, _ stage: Int) -> PetCode {
 }
 
 @Suite struct PetViewTests {
-    @Test(arguments: [
-        ("sprout.2", 3, "Squad pet, teen sprout, happy"),
-        ("puff.1", 2, "Squad pet, baby puff, content"),
-        ("ember.3", 1, "Squad pet, adult ember, hungry"),
-        ("pebble.4", 0, "Squad pet, prestige pebble, sad"),
-        ("pebble.5", 3, "Squad pet, prestige 2 pebble, happy"),
-        // The egg keeps its species to itself until it hatches.
-        ("ember.0", 3, "Squad pet, egg, happy"),
-        // A species this version doesn't know is named as what's drawn.
-        ("dragonling.3", 2, "Squad pet, adult puff, content"),
-        ("%%%", 2, "Squad pet, egg, content"),
-        // Moods out of range are held.
-        ("sprout.1", 9, "Squad pet, baby sprout, happy"),
-        ("sprout.1", -1, "Squad pet, baby sprout, sad"),
-    ] as [(String, Int, String)])
-    func accessibilityLabels(code: String, mood: Int, label: String) {
-        #expect(PetView.accessibilityLabel(code: PetCode(code), mood: mood) == label)
+    @Test func accessibilityLabels() {
+        let table: [(code: String, mood: Int, label: String)] = [
+            ("sprout.2", 3, "Squad pet, teen sprout, happy"),
+            ("puff.1", 2, "Squad pet, baby puff, content"),
+            ("ember.3", 1, "Squad pet, adult ember, hungry"),
+            ("pebble.4", 0, "Squad pet, prestige pebble, sad"),
+            ("pebble.5", 3, "Squad pet, prestige 2 pebble, happy"),
+            // The egg keeps its species to itself until it hatches.
+            ("ember.0", 3, "Squad pet, egg, happy"),
+            // A species this version doesn't know is named as what's drawn.
+            ("dragonling.3", 2, "Squad pet, adult puff, content"),
+            ("%%%", 2, "Squad pet, egg, content"),
+            // Moods out of range are held.
+            ("sprout.1", 9, "Squad pet, baby sprout, happy"),
+            ("sprout.1", -1, "Squad pet, baby sprout, sad"),
+        ]
+        for row in table {
+            #expect(PetView.accessibilityLabel(code: PetCode(row.code), mood: row.mood) == row.label, "\(row.code), mood \(row.mood)")
+        }
     }
 
     /// Drawn for real, in and out of Always-On: every species, stage and mood produces an image of

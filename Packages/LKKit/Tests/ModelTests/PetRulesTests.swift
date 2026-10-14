@@ -14,6 +14,7 @@ enum PetRulesFixture {
         let streakShare: Double
         let sadMinutes: Int
         let coinsPerMinute: Int
+        let completionBonus: Int
     }
 
     /// Walks up from this source file to the directory holding `fixtures/pet`, as `Fixture` does
@@ -44,13 +45,16 @@ enum PetRulesFixture {
         #expect(file.streakShare == PetRules.streakShare)
         #expect(file.sadMinutes == PetRules.sadMinutes)
         #expect(file.coinsPerMinute == PetRules.coinsPerMinute)
+        #expect(file.completionBonus == PetRules.completionBonus)
     }
 
     /// A rule added to the file needs a constant here too (and a decision about what the app does
     /// with it), so an unknown key fails rather than being skipped by the decoder.
     @Test func theFixtureHasNoRuleTheAppDoesntKnow() throws {
         let keys = try Fixture.keys(PetRulesFixture.data())
-        #expect(keys == ["species", "stageXp", "streakMinMinutes", "streakShare", "sadMinutes", "coinsPerMinute"])
+        #expect(keys == [
+            "species", "stageXp", "streakMinMinutes", "streakShare", "sadMinutes", "coinsPerMinute", "completionBonus",
+        ])
     }
 
     @Test func theTableIsWellFormed() {

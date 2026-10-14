@@ -30,6 +30,10 @@ public enum PetRules {
     /// Coins per whole focused minute, solo or squad.
     public static let coinsPerMinute = 1
 
+    /// Coins for finishing a session, on top of its minutes. The same as `SessionRecord`'s
+    /// `completionBonus` in SessionEngine, which counts coins while signed out.
+    public static let completionBonus = 5
+
     /// The last stage there is. Stages past the table's end don't exist yet.
     public static var lastStage: Int {
         stageXp.count - 1

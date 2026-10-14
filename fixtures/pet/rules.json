@@ -4,5 +4,6 @@
   "streakMinMinutes": 20,
   "streakShare": 0.5,
   "sadMinutes": 30,
-  "coinsPerMinute": 1
+  "coinsPerMinute": 1,
+  "completionBonus": 5
 }

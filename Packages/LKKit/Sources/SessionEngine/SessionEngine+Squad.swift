@@ -154,18 +154,21 @@ extension SessionEngine {
         isStartingSquad = true
         defer { isStartingSquad = false }
         await flushPendingEnd()
+        // Still showing this room's activity (finished in it, joining again): a push-to-start
+        // would start a second one.
+        let token = roomActivity?.attributes.sid == sessionId ? nil : pushToStart
         let joined: JoinedSession
         let recovered: Bool
         do {
-            joined = try await api.joinSession(id: sessionId, minutes: planned, pushToStart: pushToStart)
+            joined = try await api.joinSession(id: sessionId, minutes: planned, pushToStart: token)
             recovered = false
         } catch let error as APIError where error.code == .sessionEnded || error.code == .sessionNotFound {
             Log.session.info("The alert's room has closed; locking in with the squad instead")
-            let started = try await join(squadId: squadId, minutes: planned, pushToStart: pushToStart, api: api)
+            let started = try await join(squadId: squadId, minutes: planned, pushToStart: token, api: api)
             joined = started.0
             recovered = started.recovered
         }
-        let pushed = pushToStart != nil && joined.pushedToStart == true
+        let pushed = token != nil && joined.pushedToStart == true
         try adopt(
             joined,
             squadId: joined.session.squadId ?? squadId,
