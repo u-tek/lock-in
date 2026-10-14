@@ -11,6 +11,17 @@ export function base64url(data: ArrayBuffer | Uint8Array | string): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/** Decodes base64url (padding optional). Throws `TypeError` on anything else. */
+export function fromBase64url(text: string): Uint8Array<ArrayBuffer> {
+  if (!/^[A-Za-z0-9_-]*={0,2}$/.test(text) || text.replace(/=+$/, "").length % 4 === 1) {
+    throw new TypeError("Not base64url");
+  }
+  const binary = atob(text.replace(/=+$/, "").replace(/-/g, "+").replace(/_/g, "/"));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
 /**
  * The DER bytes inside a PKCS#8 PEM: the `.p8` file Apple lets you download once.
  *

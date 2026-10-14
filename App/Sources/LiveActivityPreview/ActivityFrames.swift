@@ -173,6 +173,52 @@ struct LockScreenPreview: View {
     }
 }
 
+// MARK: - Miniatures
+
+/// A presentation drawn smaller as a whole, for overviews such as the Lab's matrix. It's laid out
+/// at its real size and then scaled, so the miniature keeps the real layout rather than squeezing
+/// into less width, and it takes up only the scaled size. Give the content its real width
+/// (`ActivityFrameMetrics.lockScreenWidth`, `expandedWidth`): otherwise it lays out at the width
+/// offered divided by `scale`.
+struct MiniaturePreview<Content: View>: View {
+    let scale: CGFloat
+    let content: Content
+
+    init(scale: CGFloat, @ViewBuilder content: () -> Content) {
+        self.scale = scale
+        self.content = content()
+    }
+
+    var body: some View {
+        MiniatureLayout(scale: scale) {
+            content
+                .scaleEffect(scale)
+        }
+    }
+}
+
+/// Lays its one subview out at full size, centred, and takes up that size times `scale`, so the
+/// subview's own `scaleEffect(scale)` (which doesn't change layout) fills exactly that space.
+private struct MiniatureLayout: Layout {
+    let scale: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        let size = subview.sizeThatFits(fullSize(proposal))
+        return CGSize(width: size.width * scale, height: size.height * scale)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let subview = subviews.first else { return }
+        subview.place(at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center, proposal: fullSize(proposal))
+    }
+
+    /// What the miniature is offered, at full size.
+    private func fullSize(_ proposal: ProposedViewSize) -> ProposedViewSize {
+        ProposedViewSize(width: proposal.width.map { $0 / scale }, height: proposal.height.map { $0 / scale })
+    }
+}
+
 // MARK: - Stages
 
 /// What a preview sits on.

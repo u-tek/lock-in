@@ -34,3 +34,5 @@ lab.liveactivity.standby
 lab.liveactivity.alwayson
 lab.liveactivity.watch
 lab.liveactivity.largest
+lab.liveactivity.matrix
+lab.liveactivity.matrix.expanded
