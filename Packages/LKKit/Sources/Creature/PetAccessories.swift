@@ -175,12 +175,15 @@ extension PetGeometry {
         band.addLine(to: pt(right, top + thickness))
         band.addQuadCurve(to: pt(left, top + thickness), control: pt(0.5, top + thickness + sag * 2))
         band.closeSubpath()
-        let wrap = bodyPath().intersection(band)
+        // Wrapped round the body: only where the body is (Core Graphics' path operations).
+        let wrap = Path(bodyPath().cgPath.intersection(band.cgPath))
 
         let knotX = bodyMinX + bodyWidth * 0.74
         let knotY = top + thickness / 2 + sag * 0.9
-        let knot = ellipse(x: knotX - thickness * 0.62, y: knotY - thickness * 0.62, width: thickness * 1.24, height: thickness * 1.24)
-        let bottom = min(0.985, bodyMaxY + 0.025)
+        // Smaller where the band is thick for its size, so it stays off the square's floor.
+        let knotRadius = thickness * (isDetailed ? 0.62 : 0.5)
+        let knot = circle(knotX, knotY, radius: knotRadius)
+        let bottom = min(isDetailed ? 0.985 : 0.975, bodyMaxY + 0.025)
         var tails = Path()
         let spec: [(offset: CGFloat, lean: CGFloat)] = [(-0.2, -0.3), (0.25, 0.55)]
         for tail in spec {
@@ -212,8 +215,10 @@ extension PetGeometry {
         let width = 0.25 * scale
         let pompom = 0.045 * scale
         let base = inBody(anchor.u, anchor.v)
-        // Never past the top of the square: a tall flame's hat is shorter.
-        let room = (base.y - pompom - 0.015) / CGFloat(cos(anchor.tilt * .pi / 180))
+        // Never past the top of the square: a tall flame's hat is shorter. Small sizes keep room for
+        // Always-On's thicker outline.
+        let margin: CGFloat = isDetailed ? 0.015 : 0.025
+        let room = (base.y - pompom - margin) / CGFloat(cos(anchor.tilt * .pi / 180))
         let height = max(0, min(0.30 * scale, room))
         let turned = Turned(self, anchor)
 

@@ -23,6 +23,15 @@ import Testing
         #expect(AppConfiguration.InfoKey.apiHost == "LKAPIHost")
         #expect(AppConfiguration.InfoKey.apnsEnvironment == "LKAPNsEnvironment")
         #expect(AppConfiguration.InfoKey.developerTools == "LKDeveloperTools")
+        #expect(AppConfiguration.InfoKey.revenueCatKey == "LKRevenueCatKey")
+    }
+
+    /// M7: RevenueCat's public key, from `LK_REVENUECAT_KEY`. Empty (the default) sells Plus
+    /// through StoreKit 2.
+    @Test func theRevenueCatKeyIsReadWhenSet() {
+        #expect(AppConfiguration(infoDictionary: ["LKRevenueCatKey": " appl_TestKey123 \n"]).revenueCatAPIKey == "appl_TestKey123")
+        #expect(AppConfiguration(infoDictionary: ["LKRevenueCatKey": ""]).revenueCatAPIKey == nil)
+        #expect(AppConfiguration(infoDictionary: [:]).revenueCatAPIKey == nil)
     }
 
     @Test func apiBaseURLIsHTTPSOnTheHost() {

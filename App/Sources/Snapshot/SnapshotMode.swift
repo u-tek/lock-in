@@ -584,14 +584,13 @@ enum SnapshotData {
     /// The squad with Squad Boost on (M7): the teen sprout in its party hat, and a streak a freeze
     /// kept going the day before yesterday, with one of Sam's two left this month.
     static func boostedSquad(now: Date) -> Squad {
-        var boosted = Self.squad
-        boosted.openSessionId = nil
-        boosted.boosted = true
-        boosted.pet.accessory = PetAccessory.partyHat.rawValue
-        let zone = boosted.timeZone
-        let frozen = SquadStreak.day(of: now.addingTimeInterval(-2 * 86_400), in: zone)
-        boosted.streak = SquadStreak(count: 6, countedToday: true, doneToday: 2, needed: 2, frozenDays: [frozen], freezes: 1)
-        return boosted
+        var dressed = Self.squad
+        dressed.openSessionId = nil
+        dressed.boosted = true
+        dressed.pet.accessory = PetAccessory.partyHat.rawValue
+        let frozen = SquadStreak.day(of: now.addingTimeInterval(-2 * 86_400), in: dressed.timeZone)
+        dressed.streak = SquadStreak(count: 6, countedToday: true, doneToday: 2, needed: 2, frozenDays: [frozen], freezes: 1)
+        return dressed
     }
 
     /// Demo Buddy, the server's test bot (docs/launch/app-review-notes.md §3).
