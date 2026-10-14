@@ -268,8 +268,9 @@ jobs:
         continue-on-error: true
         timeout-minutes: 30
         run: scripts/export-snapshots.sh "iPhone SE (3rd generation)"
-      # M6: App Store screenshots, only for [snapshots: store]. There are no store.* routes yet,
-      # so this stops before booting the phone, and fails because "store" matches no route.
+      # M6: App Store screenshots (store.1 to store.5), only for [snapshots: store] (or a narrowed
+      # run that names them, e.g. [snapshots: store.1]). Light only, at 1320 x 2868, into
+      # design/appstore/6.9-<n>-light.png; the iPhone 16 Pro step has nothing to do for them.
       - name: iPhone 16 Pro Max (App Store)
         id: store
         if: contains(env.LK_ONLY_ROUTES, 'store')
@@ -398,6 +399,8 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           LK_BUNDLE_ID: ${{ secrets.LK_BUNDLE_ID }}
           LK_API_HOST: ${{ secrets.LK_API_HOST || vars.LK_API_HOST }}
+          # Optional (M7): RevenueCat's public API key (appl_…). Without it Plus sells through StoreKit 2.
+          LK_REVENUECAT_KEY: ${{ secrets.LK_REVENUECAT_KEY }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
@@ -407,11 +410,13 @@ jobs:
           host="${host#https://}"
           host="${host#http://}"
           host="${host%%/*}"
+          revenuecat="${LK_REVENUECAT_KEY//[[:space:]]/}"
           {
             echo "// Written by CI from repository secrets for a TestFlight build."
             echo "LK_TEAM_ID = ${APPLE_TEAM_ID//[[:space:]]/}"
             echo "LK_BUNDLE_ID = ${LK_BUNDLE_ID//[[:space:]]/}"
             if [[ -n "$host" ]]; then echo "LK_API_HOST = $host"; fi
+            if [[ -n "$revenuecat" ]]; then echo "LK_REVENUECAT_KEY = $revenuecat"; fi
           } > Config/Local.xcconfig
           key_id="${ASC_KEY_ID//[[:space:]]/}"
           key="$RUNNER_TEMP/AuthKey_$key_id.p8"
@@ -424,6 +429,9 @@ jobs:
           } >> "$GITHUB_ENV"
           if [[ -z "$host" ]]; then
             echo "::notice::No LK_API_HOST secret: this build runs without a backend (the APNs spike doesn't need one)."
+          fi
+          if [[ -z "$revenuecat" ]]; then
+            echo "::notice::No LK_REVENUECAT_KEY secret: Lockin Plus sells through StoreKit 2, without RevenueCat (docs/milestones/M7.md)."
           fi
 
       - name: Generate the Xcode project

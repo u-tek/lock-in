@@ -108,6 +108,8 @@ struct SessionCover: View {
                 squadPet: squadPetResult(for: record),
                 onDone: { engine.dismissFinished() }
             )
+            // The Lock Screen and desk mode, once each, after the first completed session (M6).
+            .onboardingTips(after: record)
             .transition(.opacity)
         }
     }

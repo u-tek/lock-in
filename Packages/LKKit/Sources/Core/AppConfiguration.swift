@@ -16,17 +16,22 @@ public struct AppConfiguration: Sendable, Equatable {
     /// Shows the Developer menu (APNs spike, Live Activity Lab). On until launch, because the
     /// owner tests TestFlight builds and can't run debug builds from Xcode.
     public var developerToolsEnabled: Bool
+    /// RevenueCat's public API key for this app (`appl_…`, M7). Nil: Lockin Plus is sold through
+    /// StoreKit 2 directly, without RevenueCat.
+    public var revenueCatAPIKey: String?
 
     public init(
         appGroupIdentifier: String? = nil,
         apiHost: String? = nil,
         apnsEnvironment: APNsEnvironment? = nil,
-        developerToolsEnabled: Bool = false
+        developerToolsEnabled: Bool = false,
+        revenueCatAPIKey: String? = nil
     ) {
         self.appGroupIdentifier = appGroupIdentifier
         self.apiHost = apiHost
         self.apnsEnvironment = apnsEnvironment
         self.developerToolsEnabled = developerToolsEnabled
+        self.revenueCatAPIKey = revenueCatAPIKey
     }
 
     /// `https://<apiHost>`, or nil without a host.
@@ -59,7 +64,8 @@ public struct AppConfiguration: Sendable, Equatable {
             appGroupIdentifier: value(InfoKey.appGroup),
             apiHost: value(InfoKey.apiHost),
             apnsEnvironment: value(InfoKey.apnsEnvironment).flatMap { APNsEnvironment(parsing: $0) },
-            developerToolsEnabled: flag(InfoKey.developerTools)
+            developerToolsEnabled: flag(InfoKey.developerTools),
+            revenueCatAPIKey: value(InfoKey.revenueCatKey)
         )
     }
 
@@ -73,5 +79,6 @@ public struct AppConfiguration: Sendable, Equatable {
         public static let apiHost = "LKAPIHost"
         public static let apnsEnvironment = "LKAPNsEnvironment"
         public static let developerTools = "LKDeveloperTools"
+        public static let revenueCatKey = "LKRevenueCatKey"
     }
 }

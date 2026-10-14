@@ -12,6 +12,10 @@ LK_APP_GROUP = group.$(LK_BUNDLE_ID)
 // Host only: "//" starts a comment here. Empty: the app runs without a backend (solo only).
 LK_API_HOST =
 
+// RevenueCat's public API key for the app (appl_…, M7). Empty: Lockin Plus is sold through
+// StoreKit 2 directly. CI fills it from the optional LK_REVENUECAT_KEY secret.
+LK_REVENUECAT_KEY =
+
 // YES until launch: shows the Developer menu (APNs spike, Live Activity Lab) in TestFlight
 // builds, which the owner can't run from Xcode. Set NO for the App Store (M9 checklist).
 LK_DEVELOPER_TOOLS = YES

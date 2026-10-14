@@ -235,6 +235,27 @@ public struct PreviewAPI: LockinAPI {
         )
     }
 
+    /// The server's rules (M7): any accessory while boosted, taking it off whenever.
+    public func setPetAccessory(squadId: String, accessory: Int?) async throws -> Squad {
+        var squad = squadsList.first { $0.id == squadId } ?? Self.sampleSquad
+        if accessory != nil, !squad.boosted {
+            throw APIError.server(status: 402, code: .plusRequired, message: nil, details: APIErrorDetails(limit: "boost"))
+        }
+        squad.pet.accessory = accessory
+        return squad
+    }
+
+    /// Demo Buddy's session, open now.
+    public func askDemoBuddy(squadId: String) async throws -> SessionInfo {
+        SessionInfo(id: "rmPreviewDB", squadId: squadId, hostId: "DemoBuddy0", status: SessionInfo.open, createdAt: 1_791_900_000)
+    }
+
+    // MARK: - Lockin Plus
+
+    public func refreshPlus() async throws -> User {
+        user ?? Self.sampleUser
+    }
+
     // MARK: - Coins and the shop
 
     public func shop() async throws -> [ShopItem] {

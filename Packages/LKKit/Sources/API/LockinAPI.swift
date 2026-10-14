@@ -68,6 +68,20 @@ public protocol LockinAPI: Sendable {
     /// `GET /squads/:id/leaderboard?week=YYYY-MM-DD` (M5): the week holding `week` (any day of
     /// it), or this week in the squad's time zone when nil. 403 `not_member`, 422 `week_invalid`.
     func squadLeaderboard(id: String, week: String?) async throws -> Leaderboard
+    /// `PATCH /squads/:id/pet` (M7, Squad Boost): the pet's accessory, `PetAccessory`'s number,
+    /// or nil to take it off. Any member, while the squad is boosted. 403 `not_member`, 422
+    /// `accessory_invalid`, 402 `plus_required` (`plusLimit` "boost").
+    func setPetAccessory(squadId: String, accessory: Int?) async throws -> Squad
+    /// `POST /squads/:id/demo-buddy/lock-in`: Demo Buddy opens a session in a Review Squad (or
+    /// joins the open one), and the squad gets the usual alert (docs/launch/app-review-notes.md
+    /// §3). 404 `not_found` for a squad without Demo Buddy, 403 `not_member`.
+    func askDemoBuddy(squadId: String) async throws -> SessionInfo
+
+    // MARK: Lockin Plus (M7)
+
+    /// `POST /me/plus/refresh`: the server asks RevenueCat about the caller, after a purchase or a
+    /// restore, and answers with the account (`plusUntil`). 503 `not_configured` / `try_again`.
+    func refreshPlus() async throws -> User
 
     // MARK: Coins and the shop (M5)
 

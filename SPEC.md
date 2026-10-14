@@ -298,7 +298,7 @@ Event counts only, no content. Track: onboarding steps, first session completed,
 
 ### 5.7 Notifications
 - "X is locking in" (per-squad mute, quiet hours 22:00–07:00 local by default).
-- Streak at risk (local, once, at a user-chosen time, only if the squad's day isn't counted yet).
+- Streak at risk (local, once, at a user-chosen time, only if the squad's day isn't counted yet; with no squad streak at risk, your own streak).
 - Weekly recap (Monday).
 - Never more than ~2 non-session notifications a day.
 

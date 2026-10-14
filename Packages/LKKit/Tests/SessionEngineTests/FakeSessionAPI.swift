@@ -204,6 +204,9 @@ final class FakeSessionAPI: LockinAPI, @unchecked Sendable {
     func setSquadMuted(id: String, muted: Bool) async throws -> Squad { throw APIError.notConfigured }
     func leaveSquad(id: String) async throws { throw APIError.notConfigured }
     func squadLeaderboard(id: String, week: String?) async throws -> Leaderboard { throw APIError.notConfigured }
+    func setPetAccessory(squadId: String, accessory: Int?) async throws -> Squad { throw APIError.notConfigured }
+    func askDemoBuddy(squadId: String) async throws -> SessionInfo { throw APIError.notConfigured }
+    func refreshPlus() async throws -> User { throw APIError.notConfigured }
     func shop() async throws -> [ShopItem] { throw APIError.notConfigured }
     func buy(itemId: String) async throws -> (coins: Int, owned: [String]) { throw APIError.notConfigured }
     func cosmetics() async throws -> [String] { throw APIError.notConfigured }

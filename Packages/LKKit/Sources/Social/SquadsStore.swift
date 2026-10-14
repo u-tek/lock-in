@@ -148,6 +148,43 @@ public final class SquadsStore: ObservableObject {
         analytics.track(.inviteShared)
     }
 
+    // MARK: - Squad Boost and Demo Buddy (M7)
+
+    /// Dresses the squad's pet (Squad Boost): `accessory` is a `PetAccessory`'s number, nil takes
+    /// it off. Any member may, while the squad is boosted. The pet changes at once and changes back
+    /// if the server says no. Throws `APIError`: `plusRequired` with `plusLimit` "boost" (nobody in
+    /// the squad has Plus now: the paywall's moment), `accessoryInvalid`, `notMember`.
+    @discardableResult
+    public func setPetAccessory(_ squad: Squad, to accessory: Int?) async throws -> Squad {
+        let before = self.squad(id: squad.id)
+        if let index = squads.firstIndex(where: { $0.id == squad.id }) {
+            squads[index].pet.accessory = accessory
+        }
+        do {
+            let saved = try await call { try await api.setPetAccessory(squadId: squad.id, accessory: accessory) }
+            upsert(saved)
+            return saved
+        } catch {
+            if let before, let index = squads.firstIndex(where: { $0.id == squad.id }), squads[index].pet.accessory == accessory {
+                squads[index] = before
+            }
+            throw error
+        }
+    }
+
+    /// Asks Demo Buddy, the test bot, to lock in (a Review Squad only:
+    /// docs/launch/app-review-notes.md §3). The squad's room is open afterwards, so Home says "Join
+    /// in"; everyone in the squad gets the usual alert. Throws `APIError`: 404 when Demo Buddy isn't
+    /// in the squad or is switched off.
+    @discardableResult
+    public func askDemoBuddy(_ squad: Squad) async throws -> SessionInfo {
+        let session = try await call { try await api.askDemoBuddy(squadId: squad.id) }
+        if let index = squads.firstIndex(where: { $0.id == squad.id }) {
+            squads[index].openSessionId = session.id
+        }
+        return session
+    }
+
     // MARK: - Leaderboard (M5)
 
     /// This week's leaderboard for `squad`, now in `leaderboards`. A failure keeps the last one

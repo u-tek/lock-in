@@ -47,6 +47,13 @@ public struct User: Codable, Hashable, Sendable, Identifiable {
     public var plusUntilDate: Date? {
         plusUntil.map(UnixTime.date)
     }
+
+    /// Lockin Plus on the account, as the server counts it (M7): `plusUntil` is still ahead.
+    /// Lifetime Plus is year 9999.
+    public func hasPlus(at now: Date = Date()) -> Bool {
+        guard let plusUntil, plusUntil.isFinite else { return false }
+        return plusUntil > now.timeIntervalSince1970
+    }
 }
 
 /// Someone you're friends with, or someone you've blocked (`GET /blocks` uses the same shape).

@@ -146,6 +146,21 @@ public struct APIClient: LockinAPI {
         return try await send(.get, ["squads", id, "leaderboard"], query: query, as: Leaderboard.self)
     }
 
+    public func setPetAccessory(squadId: String, accessory: Int?) async throws -> Squad {
+        let body = PetAccessoryRequest(accessory: accessory)
+        return try await send(.patch, ["squads", squadId, "pet"], body: body, as: SquadEnvelope.self).squad
+    }
+
+    public func askDemoBuddy(squadId: String) async throws -> SessionInfo {
+        try await send(.post, ["squads", squadId, "demo-buddy", "lock-in"], as: SessionEnvelope.self).session
+    }
+
+    // MARK: - Lockin Plus
+
+    public func refreshPlus() async throws -> User {
+        try await send(.post, ["me", "plus", "refresh"], as: UserEnvelope.self).user
+    }
+
     // MARK: - Coins and the shop
 
     public func shop() async throws -> [ShopItem] {

@@ -76,11 +76,17 @@ final class LiveServices {
     /// The latest push-to-start token, for the M4 spike (`devices.push_to_start_token`). Saved
     /// in the App Group as it arrives, so a background launch has it straight away.
     private var pushToStartToken: String?
+    /// Lockin Plus following the account (M7).
+    private var plusFollowsAccount: AnyCancellable?
 
     init() {
         let engine = SessionEngine(liveActivities: AppServices.liveActivities)
         self.engine = engine
-        plus = PlusStore(bundleID: Bundle.main.bundleIdentifier ?? "com.example.lockin")
+        // Through RevenueCat when the build has its key (LK_REVENUECAT_KEY, M7), else StoreKit 2.
+        plus = PlusStore(
+            bundleID: Bundle.main.bundleIdentifier ?? "com.example.lockin",
+            revenueCatKey: AppConfiguration.main.revenueCatAPIKey
+        )
         // Paywall views, trials and purchases: counts only (SPEC.md §5.6).
         plus.analytics = AppServices.analytics
         // The API host and the Keychain token come from the build and the phone.
@@ -115,6 +121,17 @@ final class LiveServices {
         deepFocus = DeepFocusCoordinator(engine: engine, plus: plus)
         // From here on, including a background launch for the Lock in widget's button.
         widgets.watch(engine: engine, social: social)
+        // Lockin Plus follows the account (M7): its `plusUntil` counts, RevenueCat knows purchases
+        // by its id, and after a purchase or a restore the server checks with RevenueCat.
+        let plus = self.plus
+        plus.afterPurchase = { [weak account] in
+            _ = await account?.refreshPlus()
+        }
+        plusFollowsAccount = account.$state.sink { state in
+            MainActor.assumeIsolated {
+                plus.noteAccount(id: state.user?.id, plusUntil: state.user?.plusUntil)
+            }
+        }
         AppServices.analytics.track(.appOpened)
     }
 

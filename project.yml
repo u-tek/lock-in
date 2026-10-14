@@ -65,6 +65,8 @@ targets:
         LKAPIHost: $(LK_API_HOST)
         LKAPNsEnvironment: $(LK_APNS_ENV)
         LKDeveloperTools: $(LK_DEVELOPER_TOOLS)
+        # Lockin Plus through RevenueCat (M7); empty sells through StoreKit 2.
+        LKRevenueCatKey: $(LK_REVENUECAT_KEY)
     entitlements:
       path: App/Lockin.entitlements
       properties:

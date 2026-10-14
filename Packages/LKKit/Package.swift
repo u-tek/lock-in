@@ -25,6 +25,11 @@ let package = Package(
         .library(name: "WidgetViews", targets: ["WidgetViews"]),
         .library(name: "ShareCards", targets: ["ShareCards"]),
     ],
+    dependencies: [
+        // Lockin Plus's purchases (M7): RevenueCat's SDK, behind `PlusStore`, used only when the
+        // build has a RevenueCat key (LK_REVENUECAT_KEY). Paywall is the only module that links it.
+        .package(url: "https://github.com/RevenueCat/purchases-ios-spm", from: "5.92.0"),
+    ],
     targets: [
         .target(name: "Core"),
         .target(name: "Model", dependencies: ["Core"]),
@@ -46,8 +51,15 @@ let package = Package(
             dependencies: ["Core", "Model", "LiveActivity", "API"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
-        // Lockin Plus: plans, entitlements and the purchase flow, on StoreKit 2. App only.
-        .target(name: "Paywall", dependencies: ["Core", "Model", "DesignSystem", "Creature"]),
+        // Lockin Plus: plans, entitlements and the purchase flow, through RevenueCat when the
+        // build has its key, on StoreKit 2 when it doesn't (M7). App only.
+        .target(
+            name: "Paywall",
+            dependencies: [
+                "Core", "Model", "DesignSystem", "Creature",
+                .product(name: "RevenueCat", package: "purchases-ios-spm"),
+            ]
+        ),
         // The Lockin API: REST client, the session token in the Keychain, and the JSON models.
         // App only (the widget extension has no network).
         .target(name: "API", dependencies: ["Core", "Model"]),

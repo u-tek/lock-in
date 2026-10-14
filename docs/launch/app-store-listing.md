@@ -127,39 +127,42 @@ like the pet, streaks and leaderboard (M5).]
 ## Screenshots: the 6.9-inch set
 
 Apple needs one iPhone set, and 6.9-inch (1320 × 2868 portrait) is the size it scales down for
-smaller phones. CI already renders it: `store.*` snapshot routes run on the **iPhone 16 Pro Max**
-simulator, in light appearance, and land in `design/appstore/6.9-<name>-light.png`
-(`scripts/export-snapshots.sh`, `scripts/collect-snapshots.sh`). The routes don't exist yet. They're
-M6 work, triggered with `[snapshots: store]`.
+smaller phones. CI renders it: the `store.1`…`store.5` snapshot routes run on the **iPhone 16 Pro
+Max** simulator, in light appearance, and land in `design/appstore/6.9-<n>-light.png`
+(`scripts/export-snapshots.sh`, `scripts/collect-snapshots.sh`) when a commit subject says
+`[snapshots: store]` (or names one, `[snapshots: store.2]`). Upload them in this order.
 
-Each route renders the app's own views (the `LiveActivity` module's presentations, the
-`Creature` views and the real screens) under a short headline drawn by the route. They're not
+Each route renders the app's own views (the `LiveActivity` module's presentations, the widgets'
+`WidgetViews`, the `Creature` views and the real screens) under a headline drawn by the route
+(`App/Sources/Snapshot/StoreScreenshots.swift`): SF Pro Rounded Bold, white, with a short line
+under it, on the tint deepening to purple, over a phone drawn round the screen. They're not
 mock-ups, which keeps them honest under Guideline 2.3.3. Squads use the made-up friends the
 onboarding already uses (Ava, Noor, Kai and so on), never real testers' names.
 
 The first three show up in search results, so they carry the 4.3 story.
 
-| # | Route | Headline | What it shows | Built from |
-|---|---|---|---|---|
-| 1 | `store.island` | **Your friends' timers. In your Dynamic Island.** | The top of a phone with the expanded island (you and three squadmates with countdowns), above the Lock Screen card with the full squad row, pet and streak | `FriendsIsland` / `PhoneTopMock` (onboarding), the Lock Screen view in `LiveActivity` |
-| 2 | `store.standby` | **Desk mode for study sessions.** | The StandBy squad view (squad name, "3 of 4 locked in", pet bar, six Locklings with timers), drawn as a phone on its side on a desk inside the portrait frame | The StandBy presentation (`lab.liveactivity.standby`) |
-| 3 | `store.pet` | **Raise a squad pet together.** | Squad screen: the pet (teen stage), mood, streak and this week's leaderboard | M5 squad and pet screens |
-| 4 | `store.lockling` | **Make your Lockling.** | The Lockling maker with a grid of other Locklings in different colours, hats and poses | `LocklingEditor`, `CreatureView` |
-| 5 | `store.plus` | **More squad, more style.** | Plus features (bigger squads, cosmetics, Squad Boost and so on). No prices, because they differ by country and change with experiments | `PaywallView`'s feature list |
+| # | Route | Headline | Line under it | What it shows | Built from |
+|---|---|---|---|---|---|
+| 1 | `store.1` | **Your friends, in your Dynamic Island** | See who's still locked in, without opening a thing. | The expanded island (you and three squadmates, all locked in, with their countdowns) over the Home Screen with the Squad pet and Lock in widgets | `ExpandedIslandPreview` (the Lab's frame round the `LiveActivity` views), `WidgetViews` |
+| 2 | `store.2` | **Lock in together** | Your whole squad's timers, right on your Lock Screen. | A Lock Screen at night: the clock, the Squad pet's Lock Screen widgets, and the squad's Live Activity with five members (three locked in, one on a break, one done) | `LockScreenPreview`, `SquadPetWidgetView` |
+| 3 | `store.3` | **Desk mode for study sessions** | Stand your phone on its side while it charges. | A phone on its side in StandBy on a stand on a desk: squad name, "4 of 4 locked in", the pet, your big countdown and everyone's Locklings with timers | The StandBy presentation (`lab.liveactivity.standby`) |
+| 4 | `store.4` | **Grow a squad pet** | It grows with every minute you focus together. | The squad's page: the pet (teen sprout), its mood, the six-day streak and this week's leaderboard | `squads.detail` |
+| 5 | `store.5` | **Works solo too** | Earn coins, keep a streak, dress up your Lockling. | Home, solo: your Lockling, coins, today's minutes, your streak and the session lengths | `home` |
 
-Optional extras, if there's room for up to 10:
+Ideas for more, up to 10 (not built):
 
-| # | Route | Headline | What it shows |
-|---|---|---|---|
-| 6 | `store.solo` | **Great solo, too.** | The session screen: the Lockling reading inside the progress ring, the timer and "Locked in" |
-| 7 | `store.invite` | **Friends by code. No strangers.** | The Friends screen with your code and QR code, and the friends list with Locklings |
-| 8 | `store.cheer` | **Cheer them on.** | Lock Screen card with a cheer popping on a squadmate |
+| Headline | What it shows |
+|---|---|
+| **Make your Lockling.** | The Lockling maker with a grid of other Locklings in different colours, hats and poses |
+| **More squad, more style.** | Plus features (bigger squads, cosmetics, Squad Boost and so on), no prices |
+| **Friends by code. No strangers.** | The Friends screen with your code and QR code, and the friends list with Locklings |
+| **Cheer them on.** | Lock Screen card with a cheer popping on a squadmate |
 
 Rules for all of them:
 
-- Light appearance (the script exports light only). Live Activity views stay dark as they are on a
-  real phone, which stands out on a light background.
-- The status bar time is 9:41, as in the existing snapshots.
+- Light appearance (the script exports light only). The island and StandBy stay dark as they are
+  on a real phone, and the Lock Screen shot is a Lock Screen at night.
+- The system status bar is hidden; the phones drawn in the shots say 9:41, as in the snapshots.
 - Don't show prices or "free trial" in screenshots. The paywall shows the right local price.
 - Re-render the set whenever the island, Lock Screen or StandBy views change, as part of the
   "visible in the Live Activity Lab" rule in CLAUDE.md.

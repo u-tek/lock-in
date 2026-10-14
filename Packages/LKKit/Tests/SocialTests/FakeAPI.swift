@@ -35,6 +35,9 @@ final class FakeAPI: LockinAPI, @unchecked Sendable {
         case buy(String)
         case cosmetics
         case importCoins(coins: Int, owned: [String])
+        case setPetAccessory(String, Int?)
+        case askDemoBuddy(String)
+        case refreshPlus
     }
 
     /// What the fake answers with. Change it with `set(_:)`.
@@ -57,6 +60,8 @@ final class FakeAPI: LockinAPI, @unchecked Sendable {
         var owned: [String] = []
         /// The account has had its coin import (M5): the next one is 409 `already_imported`.
         var imported = false
+        /// What `POST /me/plus/refresh` sets the account's `plusUntil` to (M7).
+        var refreshedPlusUntil: Double?
         /// Errors by route name ("me", "friends", "redeem", "joinSquad", "buy", …), thrown every
         /// time until removed.
         var failures: [String: APIError] = [:]
@@ -225,6 +230,47 @@ final class FakeAPI: LockinAPI, @unchecked Sendable {
                 throw APIError.server(status: 403, code: .notMember, message: nil)
             }
             return board
+        }
+    }
+
+    /// The server's rules (server/src/squads.ts, M7): any accessory while boosted, none whenever.
+    func setPetAccessory(squadId: String, accessory: Int?) async throws -> Squad {
+        try answer(.setPetAccessory(squadId, accessory), route: "setPetAccessory") { answers in
+            guard let index = answers.squads.firstIndex(where: { $0.id == squadId }) else {
+                throw APIError.server(status: 403, code: .notMember, message: nil)
+            }
+            if let accessory, !(1...6).contains(accessory) {
+                throw APIError.server(status: 422, code: .accessoryInvalid, message: nil)
+            }
+            if accessory != nil, !answers.squads[index].boosted {
+                throw APIError.server(status: 402, code: .plusRequired, message: nil, details: APIErrorDetails(limit: "boost"))
+            }
+            answers.squads[index].pet.accessory = accessory
+            return answers.squads[index]
+        }
+    }
+
+    /// Demo Buddy opens a room in a squad it's in (server/src/reviewSquad.ts).
+    func askDemoBuddy(squadId: String) async throws -> SessionInfo {
+        try answer(.askDemoBuddy(squadId), route: "askDemoBuddy") { answers in
+            guard let index = answers.squads.firstIndex(where: { $0.id == squadId }) else {
+                throw APIError.server(status: 403, code: .notMember, message: nil)
+            }
+            guard answers.squads[index].hasBot else {
+                throw APIError.server(status: 404, code: .other("not_found"), message: nil)
+            }
+            let session = SessionInfo(id: "RmBuddy001", squadId: squadId, hostId: "DemoBuddy0", status: SessionInfo.open, createdAt: 1_791_900_000)
+            answers.squads[index].openSessionId = session.id
+            return session
+        }
+    }
+
+    // MARK: Lockin Plus
+
+    func refreshPlus() async throws -> User {
+        try answer(.refreshPlus, route: "refreshPlus") { answers in
+            answers.user.plusUntil = answers.refreshedPlusUntil
+            return answers.user
         }
     }
 

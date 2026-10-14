@@ -26,6 +26,9 @@ public struct Squad: Codable, Hashable, Sendable, Identifiable {
     public var streak: SquadStreak
     /// The IANA time zone the squad's days and its Monday follow (M5); nil from an older server.
     public var tz: String?
+    /// Squad Boost (M7): a member has Lockin Plus, so any member can dress the pet
+    /// (`pet.accessory`). False from an older server.
+    public var boosted: Bool
 
     public init(
         id: String,
@@ -36,7 +39,8 @@ public struct Squad: Codable, Hashable, Sendable, Identifiable {
         muted: Bool = false,
         pet: SquadPet = SquadPet(),
         streak: SquadStreak = SquadStreak(),
-        tz: String? = nil
+        tz: String? = nil,
+        boosted: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -47,10 +51,12 @@ public struct Squad: Codable, Hashable, Sendable, Identifiable {
         self.pet = pet
         self.streak = streak
         self.tz = tz
+        self.boosted = boosted
     }
 
-    /// M5's fields (`pet.mood`, `pet.progress`, `streak`, `tz`) may be missing, from a server that
-    /// predates them: they read as their defaults rather than failing the whole list.
+    /// M5's fields (`pet.mood`, `pet.progress`, `streak`, `tz`) and M7's (`boosted`) may be
+    /// missing, from a server that predates them: they read as their defaults rather than failing
+    /// the whole list.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -62,6 +68,7 @@ public struct Squad: Codable, Hashable, Sendable, Identifiable {
         pet = try container.decodeIfPresent(SquadPet.self, forKey: .pet) ?? SquadPet()
         streak = (try? container.decodeIfPresent(SquadStreak.self, forKey: .streak)) ?? SquadStreak()
         tz = try? container.decodeIfPresent(String.self, forKey: .tz)
+        boosted = (try? container.decodeIfPresent(Bool.self, forKey: .boosted)) ?? false
     }
 
     /// Someone is locked in with the squad right now.
@@ -76,6 +83,12 @@ public struct Squad: Codable, Hashable, Sendable, Identifiable {
     public func member(id: String) -> SquadMember? {
         members.first { $0.id == id }
     }
+
+    /// A Review Squad (docs/launch/app-review-notes.md §3): Demo Buddy, the test bot, is in it. It
+    /// doesn't count against the free squad limit, and it has "Ask Demo Buddy to lock in".
+    public var hasBot: Bool {
+        members.contains { $0.isBot }
+    }
 }
 
 /// A member of a squad, as the squad lists them.
@@ -86,13 +99,27 @@ public struct SquadMember: Codable, Hashable, Sendable, Identifiable {
     public var avatarCode: String
     /// When they joined the squad, Unix seconds.
     public var joinedAt: Double
+    /// Demo Buddy, the server's test bot (docs/launch/app-review-notes.md §3): the app labels it
+    /// "Test bot". False from an older server.
+    public var isBot: Bool
 
-    public init(id: String, handle: String?, displayName: String?, avatarCode: String, joinedAt: Double) {
+    public init(id: String, handle: String?, displayName: String?, avatarCode: String, joinedAt: Double, isBot: Bool = false) {
         self.id = id
         self.handle = handle
         self.displayName = displayName
         self.avatarCode = avatarCode
         self.joinedAt = joinedAt
+        self.isBot = isBot
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        handle = try container.decodeIfPresent(String.self, forKey: .handle)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+        avatarCode = try container.decode(String.self, forKey: .avatarCode)
+        joinedAt = try container.decode(Double.self, forKey: .joinedAt)
+        isBot = (try? container.decodeIfPresent(Bool.self, forKey: .isBot)) ?? false
     }
 
     /// What to call them: their display name, else their handle, else "Lockling" (what the Live
@@ -126,20 +153,32 @@ public struct SquadPet: Codable, Hashable, Sendable {
     public var mood: Int
     /// Towards the next stage, 0–1: 0 for an egg, 1 at the last stage (`PetRules.progress`).
     public var progress: Double
+    /// Squad Boost (M7): what it wears, `pet.<n>` of the shop's catalogue (`PetAccessory`), only
+    /// while the squad is boosted. The server keeps the choice when the boost lapses and brings it
+    /// back with it.
+    public var accessory: Int?
 
     /// - Parameters:
     ///   - mood: content unless said, as an older server's pet reads.
     ///   - progress: worked out from `xp` and `stage` unless said.
-    public init(species: String? = nil, stage: Int = 0, xp: Int = 0, mood: Int = PetMood.content.rawValue, progress: Double? = nil) {
+    public init(
+        species: String? = nil,
+        stage: Int = 0,
+        xp: Int = 0,
+        mood: Int = PetMood.content.rawValue,
+        progress: Double? = nil,
+        accessory: Int? = nil
+    ) {
         self.species = species
         self.stage = stage
         self.xp = xp
         self.mood = mood
         self.progress = progress ?? PetRules.progress(xp: xp, stage: stage)
+        self.accessory = accessory
     }
 
-    /// `mood` and `progress` arrived with M5: missing (an older server), the pet is content and its
-    /// progress comes from its XP, as `init` has it.
+    /// `mood` and `progress` arrived with M5, `accessory` with M7: missing (an older server), the
+    /// pet is content, its progress comes from its XP, as `init` has it, and it wears nothing.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let species = try container.decodeIfPresent(String.self, forKey: .species)
@@ -147,7 +186,15 @@ public struct SquadPet: Codable, Hashable, Sendable {
         let xp = try container.decode(Int.self, forKey: .xp)
         let mood: Int? = try? container.decodeIfPresent(Int.self, forKey: .mood)
         let progress: Double? = try? container.decodeIfPresent(Double.self, forKey: .progress)
-        self.init(species: species, stage: stage, xp: xp, mood: mood ?? PetMood.content.rawValue, progress: progress)
+        let accessory: Int? = try? container.decodeIfPresent(Int.self, forKey: .accessory)
+        self.init(
+            species: species,
+            stage: stage,
+            xp: xp,
+            mood: mood ?? PetMood.content.rawValue,
+            progress: progress,
+            accessory: accessory
+        )
     }
 
     /// Out of its egg: stage 1 or later.
@@ -155,10 +202,17 @@ public struct SquadPet: Codable, Hashable, Sendable {
         stage >= 1
     }
 
-    /// Species and stage as `PetView` draws them, read leniently like a pushed `Pet.k`: a species
-    /// this version doesn't know (or none, from an older server) draws as the default.
+    /// Species, stage and accessory as `PetView` draws them, read leniently like a pushed `Pet.k`:
+    /// a species this version doesn't know (or none, from an older server) draws as the default.
     public var code: PetCode {
-        PetCode("\(species ?? PetCode.defaultSpecies).\(max(0, stage))")
+        var code = PetCode("\(species ?? PetCode.defaultSpecies).\(max(0, stage))")
+        code.accessory = accessory.flatMap { PetCode.accessoryRange.contains($0) ? $0 : nil }
+        return code
+    }
+
+    /// The accessory it wears, when this version can draw it.
+    public var wornAccessory: PetAccessory? {
+        accessory.flatMap(PetAccessory.init(rawValue:))
     }
 
     /// `mood` held to 0–3.
@@ -190,12 +244,27 @@ public struct SquadStreak: Codable, Hashable, Sendable {
     public var doneToday: Int
     /// How many have to for today to count: half the squad, rounded up, at least 1.
     public var needed: Int
+    /// Streak freezes (M7): days in the last 30, today included, that a Plus member's freeze
+    /// filled, "YYYY-MM-DD" in the squad's zone, oldest first. A frozen day keeps the streak going
+    /// without adding to `count`.
+    public var frozenDays: [String]
+    /// Your freezes left this calendar month (the squad's month): 2 a month with Plus, 0 without.
+    public var freezes: Int
 
-    public init(count: Int = 0, countedToday: Bool = false, doneToday: Int = 0, needed: Int = 1) {
+    public init(
+        count: Int = 0,
+        countedToday: Bool = false,
+        doneToday: Int = 0,
+        needed: Int = 1,
+        frozenDays: [String] = [],
+        freezes: Int = 0
+    ) {
         self.count = count
         self.countedToday = countedToday
         self.doneToday = doneToday
         self.needed = needed
+        self.frozenDays = frozenDays
+        self.freezes = freezes
     }
 
     /// Each field on its own, so one odd value never costs the squad.
@@ -205,7 +274,99 @@ public struct SquadStreak: Codable, Hashable, Sendable {
         countedToday = (try? container.decodeIfPresent(Bool.self, forKey: .countedToday)) ?? false
         doneToday = (try? container.decodeIfPresent(Int.self, forKey: .doneToday)) ?? 0
         needed = (try? container.decodeIfPresent(Int.self, forKey: .needed)) ?? 1
+        frozenDays = (try? container.decodeIfPresent([String].self, forKey: .frozenDays)) ?? []
+        freezes = (try? container.decodeIfPresent(Int.self, forKey: .freezes)) ?? 0
     }
+}
+
+// MARK: - The streak's week (M7)
+
+extension SquadStreak {
+    /// One day of the squad page's week strip.
+    public struct Day: Hashable, Sendable, Identifiable {
+        public enum Mark: Hashable, Sendable {
+            /// Part of the streak: the squad focused.
+            case counted
+            /// A Plus member's freeze filled it.
+            case frozen
+            /// Today, not counted yet.
+            case pending
+            /// Not part of the streak.
+            case missed
+        }
+
+        /// "YYYY-MM-DD", in the squad's zone.
+        public var day: String
+        public var mark: Mark
+        /// 1 Sunday to 7 Saturday, as `Calendar` counts them.
+        public var weekday: Int
+
+        public var id: String { day }
+    }
+
+    /// The last `length` days, oldest first, ending with `today` ("YYYY-MM-DD" in the squad's
+    /// zone, `day(of:in:)`), each marked as the streak has it.
+    ///
+    /// The server sends the streak's length and which days were frozen, not each counted day, so
+    /// this walks back from the streak's last day (today if it counts, else yesterday): a frozen day
+    /// keeps the streak going without adding to the count, any other day counts until `count` days
+    /// have. Empty when `today` isn't a date.
+    public func days(endingOn today: String, length: Int = 7) -> [Day] {
+        guard length > 0, let end = Self.date(today) else { return [] }
+        let frozen = Set(frozenDays)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = Self.utc
+        var marked: [Day] = []
+        var left = max(0, count)
+        var inStreak = true
+        for back in 0..<length {
+            guard let date = calendar.date(byAdding: .day, value: -back, to: end) else { break }
+            let day = Self.day(of: date, in: Self.utc)
+            let weekday = calendar.component(.weekday, from: date)
+            let mark: Day.Mark
+            if back == 0 && !countedToday {
+                mark = frozen.contains(day) ? .frozen : .pending
+            } else if frozen.contains(day) {
+                mark = .frozen
+            } else if inStreak && left > 0 {
+                mark = .counted
+                left -= 1
+            } else {
+                inStreak = false
+                mark = .missed
+            }
+            marked.append(Day(day: day, mark: mark, weekday: weekday))
+        }
+        return marked.reversed()
+    }
+
+    /// The day `date` falls on in `timeZone`, "YYYY-MM-DD", as the server writes days.
+    public static func day(of date: Date, in timeZone: TimeZone) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return "\(padded(parts.year ?? 1970, to: 4))-\(padded(parts.month ?? 1, to: 2))-\(padded(parts.day ?? 1, to: 2))"
+    }
+
+    private static func padded(_ number: Int, to width: Int) -> String {
+        let digits = String(number)
+        return String(repeating: "0", count: max(0, width - digits.count)) + digits
+    }
+
+    /// Midnight UTC of a "YYYY-MM-DD" day, for counting days without time zones getting in.
+    static func date(_ day: String) -> Date? {
+        let parts = day.split(separator: "-")
+        guard parts.count == 3, let year = Int(parts[0]), let month = Int(parts[1]), let dayOfMonth = Int(parts[2]) else {
+            return nil
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = utc
+        let components = DateComponents(year: year, month: month, day: dayOfMonth)
+        guard let date = calendar.date(from: components), Self.day(of: date, in: utc) == day else { return nil }
+        return date
+    }
+
+    private static let utc = TimeZone(identifier: "UTC") ?? TimeZone(secondsFromGMT: 0) ?? .current
 }
 
 // MARK: - Leaderboard
@@ -411,6 +572,21 @@ struct SquadMuteRequest: Encodable, Sendable {
     var muted: Bool
 }
 
+/// `PATCH /squads/:id/pet` (M7): `{ "accessory": n }`, or `{ "accessory": null }` to take it off.
+/// The key is always sent: the server turns a missing one down.
+struct PetAccessoryRequest: Encodable, Sendable {
+    var accessory: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case accessory
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(accessory, forKey: .accessory)
+    }
+}
+
 /// `POST /sessions`. `squadId` is left out for a solo session, `pushToStart` unless the spike
 /// sends one.
 struct StartSessionRequest: Encodable, Sendable {
@@ -445,6 +621,11 @@ struct SquadsEnvelope: Decodable {
 
 struct SquadEnvelope: Decodable {
     var squad: Squad
+}
+
+/// `POST /squads/:id/demo-buddy/lock-in`.
+struct SessionEnvelope: Decodable {
+    var session: SessionInfo
 }
 
 struct ContentStateEnvelope: Decodable {

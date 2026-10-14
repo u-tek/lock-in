@@ -85,6 +85,12 @@ enum SnapshotGallery {
             return onboarding(.notifications, now: now)
         case "onboarding.ready":
             return onboarding(.ready, now: now)
+        case "onboarding.tips":
+            // After the first finished session, in a sheet: the Lock Screen first (M6).
+            return AnyView(OnboardingTipsView(tips: OnboardingTip.allCases, now: now, onDone: {}))
+        case "onboarding.tips.standby":
+            // Its second page: desk mode.
+            return AnyView(OnboardingTipsView(tips: OnboardingTip.allCases, now: now, startAt: .deskMode, onDone: {}))
 
         // The app
         case "home":
@@ -415,6 +421,10 @@ enum SnapshotGallery {
                     PetLabScreen(panels: [panel])
                 })
             }
+            // The App Store screenshots (M6): store.1 to store.5.
+            if let part = suffix(of: route, after: "store."), let shot = StoreShot(routePart: part) {
+                return AnyView(StoreScreenshot(shot: shot, now: now))
+            }
             return nil
         }
     }
@@ -430,9 +440,9 @@ enum SnapshotGallery {
     }
 }
 
-/// The made-up user the app screens are shot with.
+/// The made-up user the app screens are shot with. The App Store screenshots use it too.
 @MainActor
-private enum SnapshotData {
+enum SnapshotData {
     /// Before the first session.
     static var newcomer: FocusStats {
         FocusStats(todayMinutes: 0, streakDays: 0, coins: 0, completedSessions: 0)
@@ -608,7 +618,7 @@ private enum SnapshotData {
 }
 
 /// Owns one shot's preview models, so a redraw never makes new ones.
-private struct PreviewModels<Content: View>: View {
+struct PreviewModels<Content: View>: View {
     @StateObject private var engine: SessionEngine
     @StateObject private var plus: PlusStore
     @StateObject private var account: AccountStore

@@ -2,8 +2,8 @@
 # App screens first, in the order someone meets them; then the developer tools (hidden in the app
 # behind Settings › Version, tapped five times).
 # lab.* routes are design-lab pages (iPhone 16 Pro only, into design/lab).
-# store.* routes are App Store screenshots (iPhone 16 Pro Max only, into design/appstore). M6:
-# the scripts already handle them; none exist yet.
+# store.* routes are App Store screenshots (iPhone 16 Pro Max only, light, into design/appstore),
+# rendered only when asked for with [snapshots: store] (docs/launch/app-store-listing.md).
 # A lab page is taller than one screenshot, so each part is a route of its own too
 # (DesignTokensScreen.Panel, LiveActivityLabScreen.Panel, PetLabScreen.Panel); the page's own route
 # shows its top.
@@ -20,6 +20,8 @@ session.squad
 session.cheer
 finished
 finished.first
+onboarding.tips
+onboarding.tips.standby
 finished.squad
 finished.share
 finished.hatch
@@ -74,3 +76,8 @@ lab.pets.sprout
 lab.pets.ember
 lab.pets.pebble
 lab.pets.liveactivity
+store.1
+store.2
+store.3
+store.4
+store.5

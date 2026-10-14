@@ -173,8 +173,8 @@ private struct GalleryRow<Content: View>: View {
 }
 
 /// A Squad pet widget as the Home Screen shows it: inside the system's margins, on its surface,
-/// with the widget's corners.
-private struct HomeWidget: View {
+/// with the widget's corners. The App Store screenshots use it too.
+struct HomeWidget: View {
     let family: WidgetFamily
     let content: PetWidgetContent
     let isFullColor: Bool
@@ -192,7 +192,7 @@ private struct HomeWidget: View {
     }
 }
 
-private struct LockInHomeWidget: View {
+struct LockInHomeWidget: View {
     let data: WidgetData
     let now: Date
     var isFullColor = true

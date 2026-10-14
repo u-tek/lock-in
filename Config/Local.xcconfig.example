@@ -10,3 +10,8 @@ LK_BUNDLE_ID = com.yourcompany.lockin
 
 // The API Worker's host, no scheme: "//" starts a comment in xcconfig files.
 LK_API_HOST = lockin-api.yourname.workers.dev
+
+// Optional: RevenueCat's public API key (RevenueCat > Project settings > API keys, the App Store
+// app's, starting "appl_"). Left out, Lockin Plus is sold through StoreKit 2 directly
+// (docs/milestones/M7.md). Uncomment and fill in to buy through RevenueCat.
+// LK_REVENUECAT_KEY = appl_yourPublicKey

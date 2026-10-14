@@ -61,6 +61,9 @@ public enum APIErrorCode: Hashable, Sendable {
     case weekInvalid
     /// 422 from `POST /squads`: `tz` isn't an IANA zone.
     case tzInvalid
+    // Plus (M7)
+    /// 422 from `PATCH /squads/:id/pet`: not one of the pet's accessories, or null.
+    case accessoryInvalid
     case other(String)
 
     /// Every code in the contract, for tests.
@@ -72,6 +75,7 @@ public enum APIErrorCode: Hashable, Sendable {
         .sessionEnded, .sessionNotFound, .roomFull, .badState, .tokenInvalid, .cheerInvalid,
         .cheerTooSoon, .minutesInvalid, .tryAgain, .notEnoughCoins, .alreadyOwned, .itemNotFound,
         .alreadyImported, .importInvalid, .itemNotOwned, .weekInvalid, .tzInvalid,
+        .accessoryInvalid,
     ]
 
     public init(rawValue: String) {
@@ -119,6 +123,7 @@ public enum APIErrorCode: Hashable, Sendable {
         case .itemNotOwned: "item_not_owned"
         case .weekInvalid: "week_invalid"
         case .tzInvalid: "tz_invalid"
+        case .accessoryInvalid: "accessory_invalid"
         case .other(let raw): raw
         }
     }
@@ -126,7 +131,8 @@ public enum APIErrorCode: Hashable, Sendable {
 
 /// The extra fields a few error responses carry (docs/milestones/M3.md, "As built").
 public struct APIErrorDetails: Hashable, Sendable {
-    /// 402 `plus_required`: which free limit, "squads" or "members".
+    /// 402 `plus_required`: which free limit, "squads" or "members", or "boost" (M7: the squad's
+    /// pet can't wear accessories until someone in it has Plus).
     public var limit: String?
     /// 409 `already_in_session`: the session the caller is already in.
     public var sessionId: String?
@@ -269,6 +275,7 @@ extension APIError: LocalizedError {
                 switch details.limit {
                 case "squads": return "Lockin Plus lets you be in up to 3 squads."
                 case "members": return "This squad is full. Lockin Plus squads hold up to 6."
+                case "boost": return "Pet accessories need someone in the squad with Lockin Plus."
                 default: return message ?? "That needs Lockin Plus."
                 }
             case .notOwner: return "Only the squad's owner can do that."
@@ -293,6 +300,7 @@ extension APIError: LocalizedError {
             case .itemNotOwned: return "Your Lockling is wearing something you don't own yet."
             case .weekInvalid: return "That week couldn't be shown."
             case .tzInvalid: return "Your time zone couldn't be read."
+            case .accessoryInvalid: return "Your pet can't wear that."
             case .other:
                 if status == 429 { return "That's a lot of tries. Please wait a moment." }
                 return message ?? "Something went wrong. Please try again."

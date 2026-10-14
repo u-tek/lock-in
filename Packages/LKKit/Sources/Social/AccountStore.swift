@@ -257,6 +257,25 @@ public final class AccountStore: ObservableObject {
         }
     }
 
+    // MARK: - Lockin Plus (M7)
+
+    /// After a purchase or a restore: the server asks RevenueCat about this account
+    /// (`POST /me/plus/refresh`), and the account it answers with (its `plusUntil`) is taken. Best
+    /// effort: signed out there's nothing to tell, and offline or a server hiccup leaves it to
+    /// RevenueCat's webhook and the next launch's `GET /me`. True when the server answered.
+    @discardableResult
+    public func refreshPlus() async -> Bool {
+        guard isConfigured, state.user != nil, api.hasSession else { return false }
+        do {
+            let user = try await call { try await api.refreshPlus() }
+            adopt(user)
+            return true
+        } catch {
+            Log.api.error("Couldn't refresh Lockin Plus on the account")
+            return false
+        }
+    }
+
     // MARK: - Device
 
     /// Registers this phone for pushes (`POST /devices`): now if signed in, else as soon as the
