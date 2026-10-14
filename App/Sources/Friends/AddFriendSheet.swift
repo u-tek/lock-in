@@ -2,19 +2,64 @@ import API
 import Creature
 import DesignSystem
 import Model
+import Paywall
 import Social
 import SwiftUI
 
-/// Add a friend by their code: type it or paste it (a link works too), then their Lockling
-/// bounces in.
+/// Add a friend or join a squad by code: type it or paste it (a link works too), then their
+/// Locklings bounce in. An invite link's code goes through here too, as whichever it turns out
+/// to be.
 struct AddFriendSheet: View {
+    enum Purpose: Equatable {
+        /// "Add a friend".
+        case friend
+        /// "Join a squad". A friend's code works here as well: it adds the friend.
+        case squad
+        /// An invite link: a squad's code or a friend's, whichever it is.
+        case link
+
+        var title: LocalizedStringKey {
+            switch self {
+            case .friend: "Add a friend"
+            case .squad: "Join a squad"
+            case .link: "Invite"
+            }
+        }
+
+        var placeholder: LocalizedStringKey {
+            switch self {
+            case .friend: "Friend code"
+            case .squad: "Squad code"
+            case .link: "Code"
+            }
+        }
+
+        var action: LocalizedStringKey {
+            switch self {
+            case .friend, .link: "Add"
+            case .squad: "Join"
+            }
+        }
+    }
+
+    /// What the code turned out to be.
+    enum Added: Equatable {
+        case friend(Friend)
+        case squad(Squad)
+    }
+
     enum Phase: Equatable {
         case entering
         case adding
-        case added(Friend)
+        case added(Added)
     }
 
     @ObservedObject var friends: FriendsStore
+    let squads: SquadsStore
+    let plus: PlusStore
+    /// Yours, for the paywall's header.
+    let avatar: AvatarCode
+    let purpose: Purpose
     let submitsAtOnce: Bool
     let focusesField: Bool
 
@@ -22,6 +67,7 @@ struct AddFriendSheet: View {
     @State private var phase: Phase
     @State private var problem: String? = nil
     @State private var cheers = 0
+    @State private var showsPaywall = false
     @FocusState private var fieldFocused: Bool
     @StateObject private var pasteboard = PasteRelay()
     @Environment(\.dismiss) private var dismiss
@@ -29,9 +75,23 @@ struct AddFriendSheet: View {
     /// - Parameters:
     ///   - code: what's in the field to start with.
     ///   - submitsAtOnce: add straight away (an invite link's code).
-    ///   - added: show the friend as just added (snapshots).
-    init(friends: FriendsStore, code: String = "", submitsAtOnce: Bool = false, added: Friend? = nil, focusesField: Bool = true) {
+    ///   - added: show the friend or squad as just added (snapshots).
+    init(
+        friends: FriendsStore,
+        squads: SquadsStore,
+        plus: PlusStore,
+        avatar: AvatarCode,
+        purpose: Purpose = .friend,
+        code: String = "",
+        submitsAtOnce: Bool = false,
+        added: Added? = nil,
+        focusesField: Bool = true
+    ) {
         self.friends = friends
+        self.squads = squads
+        self.plus = plus
+        self.avatar = avatar
+        self.purpose = purpose
         self.submitsAtOnce = submitsAtOnce
         self.focusesField = focusesField
         _code = State(initialValue: Self.tidy(code))
@@ -50,8 +110,11 @@ struct AddFriendSheet: View {
         NavigationStack {
             Group {
                 switch phase {
-                case .added(let friend):
+                case .added(.friend(let friend)):
                     added(friend)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                case .added(.squad(let squad)):
+                    joined(squad)
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 case .entering, .adding:
                     entry
@@ -61,7 +124,7 @@ struct AddFriendSheet: View {
             .padding(.horizontal, LKSpacing.xl)
             .padding(.bottom, LKSpacing.l)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle(isAdded ? Text(verbatim: "") : Text("Add a friend"))
+            .navigationTitle(isAdded ? Text(verbatim: "") : Text(purpose.title))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if !isAdded {
@@ -73,6 +136,8 @@ struct AddFriendSheet: View {
         }
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .sensoryFeedback(.success, trigger: cheers)
+        // A squad that's full, or one squad too many on the free plan (SPEC.md §2, moment 2).
+        .lockinPaywall(isPresented: $showsPaywall, store: plus, avatar: avatar)
         .onChange(of: pasteboard.paste) { _, paste in
             if let paste {
                 code = Self.tidy(paste.text)
@@ -93,7 +158,7 @@ struct AddFriendSheet: View {
     private var entry: some View {
         VStack(spacing: LKSpacing.l) {
             Spacer(minLength: LKSpacing.l)
-            TextField("Friend code", text: $code)
+            TextField(purpose.placeholder, text: $code)
                 .font(.system(.largeTitle, design: .monospaced).weight(.semibold))
                 .multilineTextAlignment(.center)
                 .textInputAutocapitalization(.characters)
@@ -129,7 +194,7 @@ struct AddFriendSheet: View {
             Spacer(minLength: LKSpacing.l)
             Button(action: add) {
                 ZStack {
-                    Text("Add")
+                    Text(purpose.action)
                         .opacity(phase == .adding ? 0 : 1)
                     if phase == .adding {
                         ProgressView()
@@ -183,16 +248,48 @@ struct AddFriendSheet: View {
             .font(LKFont.subheadline.weight(.semibold))
             .foregroundStyle(LKColor.textSecondary)
             Spacer(minLength: 0)
-            Button {
-                dismiss()
-            } label: {
-                Text("Done")
-                    .font(LKFont.headline)
-                    .frame(maxWidth: .infinity)
-            }
-            .lkProminentButton()
-            .controlSize(.large)
+            doneButton
         }
+    }
+
+    private func joined(_ squad: Squad) -> some View {
+        VStack(spacing: LKSpacing.l) {
+            Spacer(minLength: 0)
+            SquadLocklings(
+                members: squad.members,
+                size: squad.members.count > 4 ? 56 : 72,
+                limit: LiveActivityLimits.maxMembers,
+                pose: .celebrating,
+                ringColour: Color(uiColor: .systemBackground)
+            )
+            .bump(on: cheers)
+            Text(squad.name)
+                .font(LKFont.largeTitle.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Label {
+                Text("You're in")
+            } icon: {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+            .font(LKFont.subheadline.weight(.semibold))
+            .foregroundStyle(LKColor.textSecondary)
+            Spacer(minLength: 0)
+            doneButton
+        }
+    }
+
+    private var doneButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Text("Done")
+                .font(LKFont.headline)
+                .frame(maxWidth: .infinity)
+        }
+        .lkProminentButton()
+        .controlSize(.large)
     }
 
     // MARK: - Actions
@@ -203,19 +300,42 @@ struct AddFriendSheet: View {
         problem = nil
         Task {
             do {
-                let friend = try await friends.redeem(code: code)
+                let added = try await redeem(code)
                 fieldFocused = false
                 withAnimation(.smooth) {
-                    phase = .added(friend)
+                    phase = .added(added)
                 }
                 // Once it's on screen, so the bounce shows.
                 try? await Task.sleep(for: .milliseconds(150))
                 cheers += 1
-            } catch let error as APIError {
+            } catch is CancellationError {
                 phase = .entering
-                problem = error.localizedDescription
             } catch {
                 phase = .entering
+                if error.hitsFreeLimit {
+                    showsPaywall = true
+                } else if purpose == .friend {
+                    problem = (error as? APIError)?.localizedDescription
+                } else {
+                    problem = error.squadMessage
+                }
+            }
+        }
+    }
+
+    /// A friend's code adds the friend. A squad's code, or a link's, tries the squad first and
+    /// falls back to a friend (`redeemInvite`), so whichever code it is just works.
+    private func redeem(_ code: String) async throws -> Added {
+        switch purpose {
+        case .friend:
+            let friend = try await friends.redeem(code: code)
+            return .friend(friend)
+        case .squad, .link:
+            switch try await redeemInvite(code: code, squads: squads, friends: friends) {
+            case .squad(let squad):
+                return .squad(squad)
+            case .friend(let friend):
+                return .friend(friend)
             }
         }
     }

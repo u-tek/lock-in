@@ -1,3 +1,4 @@
+import API
 import Creature
 import DesignSystem
 import Model
@@ -7,33 +8,73 @@ import Social
 import SwiftUI
 
 /// Home: your Lockling, how long, and one button. Coins, Plus and Settings sit in a row across
-/// the top; friends are a quiet row at the bottom.
+/// the top; friends are a quiet row at the bottom. Once you're in a squad, a row of chips above
+/// the lengths picks who to lock in with: solo or a squad.
 struct HomeScreen: View {
-    enum Sheet: String, Identifiable {
+    enum Sheet: Identifiable, Equatable {
         case paywall
         case settings
         case friends
         case customLength
+        /// A squad's page, from a long press on its chip.
+        case squad(String)
 
-        var id: String { rawValue }
+        var id: String {
+            switch self {
+            case .paywall: "paywall"
+            case .settings: "settings"
+            case .friends: "friends"
+            case .customLength: "customLength"
+            case .squad(let id): "squad.\(id)"
+            }
+        }
     }
 
     @ObservedObject var engine: SessionEngine
     @ObservedObject var plus: PlusStore
     @ObservedObject var friends: FriendsStore
+    @ObservedObject var account: AccountStore
+    @ObservedObject var squads: SquadsStore
     let social: SocialModels
 
     @State private var minutes: Int
+    /// The squad chosen in the picker; nil for solo.
+    @State private var squadChoice: String?
     @State private var sheet: Sheet?
     @State private var pokes = 0
     @State private var lockIns = 0
+    /// A squad session is being joined or opened on the server.
+    @State private var isStarting = false
+    @State private var failure: String? = nil
 
-    init(engine: SessionEngine, plus: PlusStore, social: SocialModels, minutes: Int = SessionPreset.twentyFive.minutes) {
+    /// - Parameter squadID: the squad chosen to start with (snapshots); solo otherwise.
+    init(
+        engine: SessionEngine,
+        plus: PlusStore,
+        social: SocialModels,
+        minutes: Int = SessionPreset.twentyFive.minutes,
+        squadID: String? = nil
+    ) {
         self.engine = engine
         self.plus = plus
         self.friends = social.friends
+        self.account = social.account
+        self.squads = social.squads
         self.social = social
         _minutes = State(initialValue: minutes)
+        _squadChoice = State(initialValue: squadID)
+    }
+
+    /// Your squads, once you're signed in with a handle. Signed out there are none to show, even
+    /// if the last account's are still in memory.
+    private var mySquads: [Squad] {
+        account.state.isSignedIn ? squads.squads : []
+    }
+
+    /// The chosen squad, while you're still in it.
+    private var chosenSquad: Squad? {
+        guard let squadChoice else { return nil }
+        return mySquads.first { $0.id == squadChoice }
     }
 
     var body: some View {
@@ -46,6 +87,12 @@ struct HomeScreen: View {
                     StatChips(stats: engine.stats)
                         .padding(.top, LKSpacing.l)
                     Spacer(minLength: LKSpacing.l)
+                    if !mySquads.isEmpty {
+                        SquadPicker(squads: mySquads, rooms: social.rooms, selection: $squadChoice) { squad in
+                            sheet = .squad(squad.id)
+                        }
+                        .padding(.bottom, LKSpacing.m)
+                    }
                     DurationPicker(minutes: $minutes, isPlus: plus.isPlus) {
                         sheet = plus.isPlus ? .customLength : .paywall
                     }
@@ -75,11 +122,21 @@ struct HomeScreen: View {
                     self.sheet = nil
                 }
             case .friends:
-                FriendsFlow(social: social, avatar: engine.avatar)
+                FriendsFlow(social: social, plus: plus, avatar: engine.avatar)
             case .customLength:
                 CustomLengthSheet(minutes: $minutes)
+            case .squad(let id):
+                NavigationStack {
+                    SquadDetailScreen(squads: squads, friends: friends, squadID: id, myID: account.user?.id)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { self.sheet = nil }
+                            }
+                        }
+                }
             }
         }
+        .errorAlert("Couldn't lock in", message: $failure)
         // An invite link opens Friends, once no session covers Home.
         .onChange(of: friends.pendingInviteCode, initial: true) {
             openPendingInvite()
@@ -94,12 +151,13 @@ struct HomeScreen: View {
         sheet = .friends
     }
 
-    /// The Lockling, as large as the screen allows: 200 points on most phones, less on an SE.
+    /// The Lockling, as large as the screen allows: 200 points on most phones, less on an SE, and
+    /// a little less again when the squad chips need the room.
     private func hero(height: CGFloat) -> some View {
         LocklingHero(
             avatar: engine.avatar,
             pose: .idle,
-            size: min(200, max(120, height * 0.3)),
+            size: min(200, max(110, height * (mySquads.isEmpty ? 0.3 : 0.26))),
             backdrop: .halo
         )
         .bump(on: pokes)
@@ -110,24 +168,64 @@ struct HomeScreen: View {
     }
 
     private var lockInButton: some View {
-        Button {
-            lockIns += 1
-            engine.start(minutes: minutes)
-        } label: {
-            Label("Lock in", systemImage: "lock.fill")
-                .font(LKFont.headline)
-                .frame(maxWidth: .infinity)
+        Button(action: lockIn) {
+            ZStack {
+                Label(lockInTitle, systemImage: "lock.fill")
+                    .opacity(isStarting ? 0 : 1)
+                if isStarting {
+                    ProgressView()
+                }
+            }
+            .font(LKFont.headline)
+            .frame(maxWidth: .infinity)
         }
         .lkProminentButton()
         .controlSize(.large)
+        .disabled(isStarting)
         .sensoryFeedback(.impact(weight: .medium), trigger: lockIns)
+    }
+
+    /// "Join in" when the chosen squad's room is already open.
+    private var lockInTitle: LocalizedStringKey {
+        chosenSquad?.openSessionId != nil ? "Join in" : "Lock in"
+    }
+
+    /// Solo starts at once. A squad goes through the server first: it joins the squad's open
+    /// room, or opens one and tells the squad.
+    private func lockIn() {
+        lockIns += 1
+        guard let squad = chosenSquad else {
+            engine.start(minutes: minutes)
+            return
+        }
+        guard !isStarting else { return }
+        isStarting = true
+        let minutes = self.minutes
+        Task {
+            defer { isStarting = false }
+            do {
+                try await engine.startSquad(squadId: squad.id, minutes: minutes)
+            } catch is CancellationError {
+                return
+            } catch {
+                if error.hitsFreeLimit {
+                    sheet = .paywall
+                } else {
+                    failure = error.squadMessage
+                }
+            }
+        }
+    }
+
+    private var friendsTitle: LocalizedStringKey {
+        mySquads.isEmpty ? "Lock in with friends" : "Squads and friends"
     }
 
     private var friendsButton: some View {
         Button {
             sheet = .friends
         } label: {
-            Label("Lock in with friends", systemImage: "person.2.fill")
+            Label(friendsTitle, systemImage: "person.2.fill")
                 .font(LKFont.subheadline.weight(.semibold))
                 .frame(minHeight: 44)
         }

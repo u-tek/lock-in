@@ -134,7 +134,7 @@ struct SettingsScreen: View {
         .sheet(item: $accountSheet) { sheet in
             switch sheet {
             case .signIn:
-                FriendsFlow(social: social, avatar: engine.avatar, purpose: .signIn)
+                FriendsFlow(social: social, plus: plus, avatar: engine.avatar, purpose: .signIn)
             case .profile:
                 if let user = account.user {
                     ProfileEditSheet(account: account, user: user, avatar: engine.avatar)

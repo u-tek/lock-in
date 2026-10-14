@@ -42,13 +42,22 @@ struct RootView: View {
         .fullScreenCover(isPresented: $showsSession) {
             SessionCover(engine: engine, plus: plus, social: social)
         }
-        .onChange(of: engine.phase, initial: true) { _, phase in
+        .onChange(of: engine.phase, initial: true) { oldPhase, phase in
             showsSession = phase != .idle
+            // Back on Home after a session: a room may have opened or closed meanwhile.
+            if phase == .idle, oldPhase != .idle {
+                refreshSquads()
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 engine.reconcile()
+                refreshSquads()
             }
+        }
+        // Squads come with the account: at launch when already signed in, and after signing in.
+        .task(id: account.state.isSignedIn) {
+            await social.refreshSquads()
         }
         // Friends see the Lockling on this phone: send it when signing in and whenever it changes.
         .onChange(of: account.state) { _, state in
@@ -61,6 +70,13 @@ struct RootView: View {
         }
         .onOpenURL { url in
             open(url)
+        }
+    }
+
+    private func refreshSquads() {
+        let social = self.social
+        Task {
+            await social.refreshSquads()
         }
     }
 
@@ -84,7 +100,8 @@ struct RootView: View {
             engine.reconcile()
         case .invite(let invite):
             // Home opens Friends for it (once no session is in the way), signing in first if
-            // need be; the Friends screen then adds the friend.
+            // need be; the Friends screen then redeems it (`redeemInvite`): a squad to join, or
+            // a friend to add.
             social.friends.openInvite(invite)
         }
     }

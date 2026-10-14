@@ -11,11 +11,15 @@ onboarding.lockling
 onboarding.notifications
 onboarding.ready
 home
+home.squad
 session
 session.paused
 session.disabled
+session.squad
+session.cheer
 finished
 finished.first
+finished.squad
 friends.signin
 friends.username
 friends.empty
@@ -23,6 +27,11 @@ friends.add
 friends.added
 friends.list
 friends.unavailable
+squads.list
+squads.new
+squads.detail
+squads.join
+squads.joined
 paywall
 settings
 settings.account

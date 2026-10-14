@@ -5,20 +5,24 @@ import SessionEngine
 import SwiftUI
 
 /// The end of a session: the Lockling celebrates, the coins land. After the very first one it
-/// also asks about friends (SPEC.md §1.1, step 5), never in the way of Done.
+/// also asks about friends (SPEC.md §1.1, step 5); after the first squad session, about Lockin
+/// Plus (SPEC.md §2, paywall moment 1). Never in the way of Done.
 struct FinishedScreen: View {
     let record: SessionRecord
     let avatar: AvatarCode
     /// Show the "Lock in with friends?" card.
     let offersFriends: Bool
     let onFriends: () -> Void
+    /// Show the "Your squad's on a roll" card.
+    var offersPlus = false
+    var onPlus: () -> Void = {}
     let onDone: () -> Void
 
     @State private var cheers = 0
 
     var body: some View {
         GeometryReader { proxy in
-            let hero = min(180, max(100, proxy.size.height * (offersFriends ? 0.22 : 0.3)))
+            let hero = min(180, max(100, proxy.size.height * (offersFriends || offersPlus ? 0.22 : 0.3)))
             VStack(spacing: 0) {
                 Spacer(minLength: LKSpacing.l)
                 celebration(size: hero)
@@ -39,7 +43,10 @@ struct FinishedScreen: View {
                 .padding(.top, LKSpacing.l)
                 .accessibilityElement(children: .combine)
                 Spacer(minLength: LKSpacing.l)
-                if offersFriends {
+                if offersPlus {
+                    PlusCard(onPlus: onPlus)
+                        .padding(.bottom, LKSpacing.l)
+                } else if offersFriends {
                     FriendsCard(onFriends: onFriends)
                         .padding(.bottom, LKSpacing.l)
                 }
@@ -115,6 +122,37 @@ private struct FriendsCard: View {
             .accessibilityElement(children: .combine)
             Button(action: onFriends) {
                 Label("Add friends", systemImage: "person.badge.plus")
+                    .font(LKFont.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .lkSecondaryButton()
+            .controlSize(.large)
+        }
+        .padding(LKSpacing.l)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: LKRadius.card, style: .continuous))
+    }
+}
+
+/// After the first squad session: the squad's the reason to go Plus.
+private struct PlusCard: View {
+    let onPlus: () -> Void
+
+    var body: some View {
+        VStack(spacing: LKSpacing.l) {
+            HStack(spacing: LKSpacing.m) {
+                LKIconTile(systemName: LockinSymbol.plus, color: LockinColour.plus, size: 40)
+                VStack(alignment: .leading, spacing: LKSpacing.xxs) {
+                    Text("Your squad's on a roll")
+                        .font(LKFont.headline)
+                    Text("Grow it to six, and start more squads.")
+                        .font(LKFont.subheadline)
+                        .foregroundStyle(LKColor.textSecondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .accessibilityElement(children: .combine)
+            Button(action: onPlus) {
+                Text("Get Lockin Plus")
                     .font(LKFont.headline)
                     .frame(maxWidth: .infinity)
             }

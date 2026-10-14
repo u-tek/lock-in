@@ -78,6 +78,8 @@ public final class AccountStore: ObservableObject {
     /// What the server has, so an unchanged registration isn't sent again.
     private var sentDevice: DeviceRegistration?
     private var isSendingDevice = false
+    /// The server being told about the last sign-out (`DELETE /auth/session`), while it is.
+    private(set) var signOutTask: Task<Void, Never>?
 
     static let cacheKey = "LKAccountUser"
 
@@ -120,6 +122,8 @@ public final class AccountStore: ObservableObject {
     /// stands; a rejected session signs out.
     public func restore() async {
         guard isConfigured else { return }
+        // A sign-out still being sent will forget the token: it's not a session to restore.
+        await signOutTask?.value
         guard api.hasSession else {
             if state != .signedOut {
                 endSession()
@@ -144,6 +148,8 @@ public final class AccountStore: ObservableObject {
     /// - Parameter displayName: Apple's given name, when it shared one. Sent only if it would pass
     ///   as a display name; either way the handle picker lets the person change it.
     public func signIn(identityToken: String, authorizationCode: String?, displayName: String?) async throws {
+        // The last sign-out finishes first, so it can't forget the token this one brings.
+        await signOutTask?.value
         let name = displayName.map(Moderation.trimmed).flatMap { Moderation.checkName($0) == .ok ? $0 : nil }
         let result = try await api.signInWithApple(
             identityToken: identityToken,
@@ -155,10 +161,18 @@ public final class AccountStore: ObservableObject {
         await flushDevice()
     }
 
-    /// Forgets the session on this phone. Friends and history stay on the server.
+    /// Signs out: the app shows signed out at once, and the server is asked to forget the session
+    /// (`DELETE /auth/session`) before this phone forgets the token. That part is best effort:
+    /// offline, the token is forgotten here all the same. Friends and history stay on the server.
     public func signOut() {
-        api.signOut()
+        let api = self.api
+        let previous = signOutTask
         endSession()
+        signOutTask = Task {
+            await previous?.value
+            try? await api.signOutSession()
+            api.signOut()
+        }
     }
 
     /// Deletes the account and everything the server holds for it (App Review 5.1.1(v)), then

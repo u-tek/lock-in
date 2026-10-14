@@ -1,7 +1,9 @@
 import Core
 import Foundation
+import Model
 
-/// The Lockin API over HTTPS, as JSON (docs/milestones/M2.md).
+/// The Lockin API over HTTPS, as JSON (docs/milestones/M2.md, M3.md), and the live view of a
+/// session over a WebSocket (APIClient+Live.swift).
 ///
 /// A plain value: it holds nothing that changes except the token, which lives in its
 /// `TokenStore`. Every request except sign-in carries `Authorization: Bearer <token>`. A 401 on an
@@ -9,8 +11,8 @@ import Foundation
 public struct APIClient: LockinAPI {
     /// `https://<LK_API_HOST>`, or nil when the build has none.
     public let baseURL: URL?
-    private let tokens: any TokenStore
-    private let session: URLSession
+    let tokens: any TokenStore
+    let session: URLSession
 
     public init(
         baseURL: URL? = AppConfiguration.main.apiBaseURL,
@@ -96,6 +98,91 @@ public struct APIClient: LockinAPI {
 
     public func report(userId: String, reason: ReportReason, note: String?) async throws {
         try await send(.post, ["reports"], body: ReportRequest(userId: userId, reason: reason, note: note))
+    }
+
+    // MARK: - Signing out
+
+    public func signOutSession() async throws {
+        let sent = tokens.load()
+        try await send(.delete, ["auth", "session"])
+        // Unless a new sign-in has stored another token meanwhile.
+        if tokens.load() == sent {
+            tokens.clear()
+        }
+    }
+
+    // MARK: - Squads
+
+    public func squads() async throws -> [Squad] {
+        try await send(.get, ["squads"], as: SquadsEnvelope.self).squads
+    }
+
+    public func createSquad(name: String) async throws -> Squad {
+        try await send(.post, ["squads"], body: SquadNameRequest(name: name), as: SquadEnvelope.self).squad
+    }
+
+    public func renameSquad(id: String, name: String) async throws -> Squad {
+        try await send(.patch, ["squads", id], body: SquadNameRequest(name: name), as: SquadEnvelope.self).squad
+    }
+
+    public func squadInvite(id: String) async throws -> FriendCode {
+        try await send(.post, ["squads", id, "invite"], as: FriendCode.self)
+    }
+
+    public func joinSquad(code: String) async throws -> Squad {
+        try await send(.post, ["squads", "join", code], as: SquadEnvelope.self).squad
+    }
+
+    public func setSquadMuted(id: String, muted: Bool) async throws -> Squad {
+        try await send(.patch, ["squads", id, "members", "me"], body: SquadMuteRequest(muted: muted), as: SquadEnvelope.self).squad
+    }
+
+    public func leaveSquad(id: String) async throws {
+        try await send(.delete, ["squads", id, "members", "me"])
+    }
+
+    // MARK: - Sessions
+
+    public func startSession(squadId: String?, minutes: Int) async throws -> JoinedSession {
+        try await send(.post, ["sessions"], body: StartSessionRequest(squadId: squadId, minutes: minutes), as: JoinedSession.self)
+    }
+
+    public func joinSession(id: String, minutes: Int) async throws -> JoinedSession {
+        try await send(.post, ["sessions", id, "join"], body: JoinSessionRequest(minutes: minutes), as: JoinedSession.self)
+    }
+
+    public func uploadLiveActivityToken(sessionId: String, token: String, env: APNsEnvironment) async throws {
+        try await send(.post, ["sessions", sessionId, "la-token"], body: LiveActivityTokenRequest(token: token, env: env))
+    }
+
+    public func pauseSession(id: String) async throws -> LockinAttributes.ContentState {
+        try await memberAction("pause", sessionId: id)
+    }
+
+    public func resumeSession(id: String) async throws -> LockinAttributes.ContentState {
+        try await memberAction("resume", sessionId: id)
+    }
+
+    public func endSession(id: String) async throws -> LockinAttributes.ContentState {
+        try await memberAction("end", sessionId: id)
+    }
+
+    public func slipSession(id: String) async throws -> LockinAttributes.ContentState {
+        try await memberAction("slip", sessionId: id)
+    }
+
+    public func cheer(sessionId: String, to memberId: String, kind: Int) async throws {
+        try await send(.post, ["sessions", sessionId, "cheer"], body: CheerRequest(to: memberId, kind: kind))
+    }
+
+    public func session(id: String) async throws -> (session: SessionInfo, contentState: LockinAttributes.ContentState?) {
+        let snapshot = try await send(.get, ["sessions", id], as: SessionSnapshot.self)
+        return (snapshot.session, snapshot.contentState)
+    }
+
+    /// `POST /sessions/:id/<action>`: no body, the room's state back.
+    private func memberAction(_ action: String, sessionId: String) async throws -> LockinAttributes.ContentState {
+        try await send(.post, ["sessions", sessionId, action], as: ContentStateEnvelope.self).contentState
     }
 
     // MARK: - Plumbing

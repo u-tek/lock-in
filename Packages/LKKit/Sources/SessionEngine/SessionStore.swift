@@ -147,6 +147,13 @@ struct StoredSessions: Codable, Equatable, Sendable {
     var coins: Int
     /// Counted apart from the history, which is capped.
     var completedSessions: Int
+    /// The squad room this phone is in (M3): from joining until the room ends or this phone
+    /// leaves it. It outlives `active` while squadmates are still focusing after this phone's
+    /// timer is done: the room's Live Activity stays up until the room ends.
+    var room: RoomLink?
+    /// A squad session ended on this phone while the server couldn't be told (offline): its id,
+    /// until `POST /sessions/:id/end` goes through.
+    var pendingEnd: String?
 
     init(
         memberID: String = ShortID.make(),
@@ -154,7 +161,9 @@ struct StoredSessions: Codable, Equatable, Sendable {
         active: ActiveSession? = nil,
         history: [SessionRecord] = [],
         coins: Int = 0,
-        completedSessions: Int = 0
+        completedSessions: Int = 0,
+        room: RoomLink? = nil,
+        pendingEnd: String? = nil
     ) {
         self.memberID = memberID
         self.avatar = avatar
@@ -162,6 +171,8 @@ struct StoredSessions: Codable, Equatable, Sendable {
         self.history = history
         self.coins = coins
         self.completedSessions = completedSessions
+        self.room = room
+        self.pendingEnd = pendingEnd
     }
 
     init(from decoder: Decoder) throws {
@@ -172,6 +183,9 @@ struct StoredSessions: Codable, Equatable, Sendable {
         history = try container.decodeIfPresent([SessionRecord].self, forKey: .history) ?? []
         coins = try container.decodeIfPresent(Int.self, forKey: .coins) ?? 0
         completedSessions = try container.decodeIfPresent(Int.self, forKey: .completedSessions) ?? 0
+        // A room this version can't read is only a lost live view, never lost coins.
+        room = try? container.decodeIfPresent(RoomLink.self, forKey: .room)
+        pendingEnd = try? container.decodeIfPresent(String.self, forKey: .pendingEnd)
     }
 
     /// Adds a finished session, dropping the oldest beyond the limit.
@@ -196,7 +210,16 @@ struct ActiveSession: Codable, Equatable, Sendable {
     /// The Live Activity's content-state version (`v`), raised with every change.
     var version: Int
     /// The ActivityKit id of this session's Live Activity, to find it again after a relaunch.
+    /// Solo only: a squad timer's activity belongs to its room (`RoomLink.activityID`).
     var activityID: String?
+    /// The squad room this timer runs in (`RoomLink.sessionId`); nil for a solo session. The
+    /// room's server is the authority for it: `startedAt`, `endsAt` and `pausedAt` follow this
+    /// phone's member in the room's state (`b`, `e`, `q`).
+    var sessionId: String? = nil
+
+    var isSquad: Bool {
+        sessionId != nil
+    }
 
     var plannedSeconds: TimeInterval {
         TimeInterval(plannedMinutes * 60)
@@ -217,5 +240,31 @@ struct ActiveSession: Codable, Equatable, Sendable {
         // clock set back before the start would make it negative.
         let focused = plannedSeconds - endsAt.timeIntervalSince(pausedAt ?? date)
         return Int(min(max(focused, 0), plannedSeconds).rounded(.down))
+    }
+}
+
+/// The squad room this phone is in (M3), as the server described it when this phone joined.
+struct RoomLink: Codable, Equatable, Sendable {
+    var squadId: String
+    /// The room's Live Activity attributes as the server made them: `sid` is the session and `me`
+    /// this phone's member id (the account's user id).
+    var attributes: LockinAttributes
+    /// The newest state seen, from whichever source got here first: a request's answer, the
+    /// live view, or `GET /sessions/:id`.
+    var state: LockinAttributes.ContentState
+    /// The ActivityKit id of the room's Live Activity, to find it again after a relaunch.
+    var activityID: String?
+
+    var sessionId: String {
+        attributes.sid
+    }
+
+    var me: String {
+        attributes.me
+    }
+
+    /// This phone's member in `state`.
+    var mine: LockinAttributes.ContentState.Member? {
+        state.member(id: me)
     }
 }

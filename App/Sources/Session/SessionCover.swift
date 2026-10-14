@@ -1,6 +1,8 @@
+import Foundation
 import Model
 import Paywall
 import SessionEngine
+import Social
 import SwiftUI
 
 /// Everything shown over Home while a session exists: the timer while it runs or is paused, then
@@ -9,18 +11,45 @@ import SwiftUI
 struct SessionCover: View {
     @ObservedObject var engine: SessionEngine
     @ObservedObject var plus: PlusStore
+    @ObservedObject var squads: SquadsStore
     let social: SocialModels
+    /// Snapshots: a squad room the preview engine can't hold, and a cheer picker already open.
+    private let squadPreview: SquadSessionInfo?
+    private let cheeringPreview: String?
 
     /// The phase on screen. It follows the engine's, except that it never becomes `.idle`: the
     /// last screen stays while the cover slides away.
     @State private var shown: SessionEngine.Phase
     @State private var showsFriends = false
+    @State private var showsPaywall = false
+    /// The session on screen is a squad's. Set while it runs and kept through its finish, which
+    /// the engine may already have moved on from.
+    @State private var isSquad: Bool
+    /// The first squad session ever completed here: Lockin Plus's moment (SPEC.md §2, paywall
+    /// moment 1).
+    @State private var offersPlus: Bool
 
-    init(engine: SessionEngine, plus: PlusStore, social: SocialModels) {
+    /// - Parameters:
+    ///   - squad: the room to show (snapshots); otherwise the engine's.
+    ///   - cheering: a squadmate whose cheer picker is open (snapshots).
+    ///   - firstSquadFinish: show the finish as the first squad session's (snapshots).
+    init(
+        engine: SessionEngine,
+        plus: PlusStore,
+        social: SocialModels,
+        squad: SquadSessionInfo? = nil,
+        cheering: String? = nil,
+        firstSquadFinish: Bool = false
+    ) {
         self.engine = engine
         self.plus = plus
+        self.squads = social.squads
         self.social = social
+        squadPreview = squad
+        cheeringPreview = cheering
         _shown = State(initialValue: engine.phase)
+        _isSquad = State(initialValue: engine.mode != .solo || squad != nil || firstSquadFinish)
+        _offersPlus = State(initialValue: firstSquadFinish)
     }
 
     var body: some View {
@@ -30,11 +59,18 @@ struct SessionCover: View {
                 if phase != .idle {
                     shown = phase
                 }
+                noteChange(to: phase)
+            }
+            .onChange(of: engine.mode) { _, mode in
+                if mode != .solo {
+                    isSquad = true
+                }
             }
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .sheet(isPresented: $showsFriends) {
-                FriendsFlow(social: social, avatar: engine.avatar)
+                FriendsFlow(social: social, plus: plus, avatar: engine.avatar)
             }
+            .lockinPaywall(isPresented: $showsPaywall, store: plus, avatar: engine.avatar)
     }
 
     @ViewBuilder
@@ -45,7 +81,7 @@ struct SessionCover: View {
                 .ignoresSafeArea()
         case .running, .paused:
             if let clock = SessionClock(shown) {
-                SessionScreen(engine: engine, clock: clock)
+                SessionScreen(engine: engine, clock: clock, squad: squad, cheering: cheeringPreview)
                     .transition(.opacity)
             }
         case .finished(let record):
@@ -53,12 +89,53 @@ struct SessionCover: View {
                 record: record,
                 avatar: engine.avatar,
                 // The first session ever finished: the moment to mention friends (SPEC.md §1.1).
-                offersFriends: record.completed && engine.stats.completedSessions == 1,
+                // Not after a squad's: those friends are here already.
+                offersFriends: record.completed && engine.stats.completedSessions == 1 && !isSquad,
                 onFriends: { showsFriends = true },
+                offersPlus: offersPlus,
+                onPlus: { showsPaywall = true },
                 onDone: { engine.dismissFinished() }
             )
             .transition(.opacity)
         }
+    }
+
+    /// The squad room on screen: the snapshot's, or the engine's in a squad session.
+    private var squad: SquadSessionInfo? {
+        if let squadPreview {
+            return squadPreview
+        }
+        guard case .squad(let squadID, _) = engine.mode, let room = engine.room else { return nil }
+        let name = squads.squads.first { $0.id == squadID }?.name
+        return SquadSessionInfo(name: name, room: room, me: engine.me)
+    }
+
+    private func noteChange(to phase: SessionEngine.Phase) {
+        switch phase {
+        case .running, .paused:
+            // A new session can start from the finish screen (a widget, say): it's whatever the
+            // engine says now.
+            isSquad = engine.mode != .solo
+        case .finished(let record):
+            if record.completed, isSquad, !plus.isPlus {
+                offersPlus = PlusMoments.claimFirstSquadFinish()
+            }
+        case .idle:
+            break
+        }
+    }
+}
+
+/// Paywall moments that come once per install (SPEC.md §2).
+enum PlusMoments {
+    static let firstSquadFinishKey = "LKPlusMomentFirstSquadFinish"
+
+    /// True the first time a squad session is completed here, false ever after.
+    @MainActor
+    static func claimFirstSquadFinish(defaults: UserDefaults = .standard) -> Bool {
+        guard !defaults.bool(forKey: firstSquadFinishKey) else { return false }
+        defaults.set(true, forKey: firstSquadFinishKey)
+        return true
     }
 }
 

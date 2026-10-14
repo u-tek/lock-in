@@ -2,12 +2,13 @@ import API
 import AuthenticationServices
 import DesignSystem
 import Model
+import Paywall
 import Social
 import SwiftUI
 
-/// "Lock in with friends": one sheet that takes you from wherever you are to your friends. No
-/// server: it says friends are coming. Signed out: Sign in with Apple. No handle yet: the handle
-/// picker. Then Friends. From Settings' "Sign in" (`.signIn`), it closes once you're in.
+/// "Lock in with friends": one sheet that takes you from wherever you are to your friends and
+/// squads. No server: it says friends are coming. Signed out: Sign in with Apple. No handle yet:
+/// the handle picker. Then Friends. From Settings' "Sign in" (`.signIn`), it closes once you're in.
 struct FriendsFlow: View {
     enum Purpose {
         case friends
@@ -27,7 +28,8 @@ struct FriendsFlow: View {
     }
 
     @ObservedObject var account: AccountStore
-    let friends: FriendsStore
+    let social: SocialModels
+    let plus: PlusStore
     let avatar: AvatarCode
     let purpose: Purpose
 
@@ -39,9 +41,10 @@ struct FriendsFlow: View {
     /// Tall enough for the island, the line and the button on an iPhone SE.
     private static let compact = PresentationDetent.fraction(0.62)
 
-    init(social: SocialModels, avatar: AvatarCode, purpose: Purpose = .friends, now: Date = Date()) {
+    init(social: SocialModels, plus: PlusStore, avatar: AvatarCode, purpose: Purpose = .friends, now: Date = Date()) {
         self.account = social.account
-        friends = social.friends
+        self.social = social
+        self.plus = plus
         self.avatar = avatar
         self.purpose = purpose
         _now = State(initialValue: now)
@@ -78,7 +81,7 @@ struct FriendsFlow: View {
                 }
             case .friends:
                 if purpose == .friends {
-                    FriendsScreen(account: account, friends: friends) {
+                    FriendsScreen(social: social, plus: plus, avatar: avatar) {
                         dismiss()
                     }
                     .transition(.opacity)

@@ -198,7 +198,7 @@ struct EggShape: Shape {
 extension Error {
     /// A free limit was hit (`402 plus_required`): a squad count or a squad's size. The moment
     /// for Lockin Plus (SPEC.md §2, paywall moment 2), never an error alert.
-    var isPlusRequired: Bool {
+    var hitsFreeLimit: Bool {
         guard let error = self as? APIError else { return false }
         return error.status == 402 || error.code?.rawValue == "plus_required"
     }

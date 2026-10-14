@@ -66,8 +66,10 @@ struct SnapshotMode: Sendable {
 /// ones CI exports; `lab.*` routes render on the iPhone 16 Pro only.
 ///
 /// App screens get preview models (`SessionEngine.preview`, `PlusStore.preview`,
-/// `AccountStore.preview`, `FriendsStore.preview`): no store, no ActivityKit, no StoreKit, no
-/// server and no permission prompts. Sheets and covers are shown as screens of their own.
+/// `AccountStore.preview`, `FriendsStore.preview`, `SquadsStore.preview`, `SquadRooms.preview`):
+/// no store, no ActivityKit, no StoreKit, no server and no permission prompts. Sheets and covers
+/// are shown as screens of their own. A squad session's room is handed to the session screen
+/// directly, because the preview engine runs solo.
 @MainActor
 enum SnapshotGallery {
     static func view(for route: String, now: Date) -> AnyView? {
@@ -87,6 +89,17 @@ enum SnapshotGallery {
             return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus, social in
                 HomeScreen(engine: engine, plus: plus, social: social)
             })
+        case "home.squad":
+            // In a squad whose room is open, with it picked: "Join in".
+            return AnyView(PreviewModels(
+                stats: SnapshotData.regular,
+                account: .signedIn(SnapshotData.me),
+                friends: SnapshotData.friends,
+                squads: [SnapshotData.squad],
+                roomCounts: [SnapshotData.squadSessionID: 3]
+            ) { engine, plus, social in
+                HomeScreen(engine: engine, plus: plus, social: social, squadID: SnapshotData.squad.id)
+            })
         case "session":
             // The first session, so the "lock your phone" hint shows.
             return AnyView(PreviewModels(phase: SnapshotData.running(now: now), stats: SnapshotData.newcomer) { engine, plus, social in
@@ -105,6 +118,21 @@ enum SnapshotGallery {
             ) { engine, plus, social in
                 SessionCover(engine: engine, plus: plus, social: social)
             })
+        case "session.squad":
+            // Ava focusing, Kai paused, Noor done.
+            return AnyView(PreviewModels(phase: SnapshotData.running(now: now), stats: SnapshotData.regular, squads: [SnapshotData.squad]) { engine, plus, social in
+                SessionCover(engine: engine, plus: plus, social: social, squad: SnapshotData.squadRoom(now: now))
+            })
+        case "session.cheer":
+            return AnyView(PreviewModels(phase: SnapshotData.running(now: now), stats: SnapshotData.regular, squads: [SnapshotData.squad]) { engine, plus, social in
+                SessionCover(
+                    engine: engine,
+                    plus: plus,
+                    social: social,
+                    squad: SnapshotData.squadRoom(now: now),
+                    cheering: SnapshotData.friends[0].id
+                )
+            })
         case "finished":
             return AnyView(PreviewModels(phase: SnapshotData.finished(now: now), stats: SnapshotData.regular) { engine, plus, social in
                 SessionCover(engine: engine, plus: plus, social: social)
@@ -112,6 +140,11 @@ enum SnapshotGallery {
         case "finished.first":
             return AnyView(PreviewModels(phase: SnapshotData.finished(now: now), stats: SnapshotData.firstFinish) { engine, plus, social in
                 SessionCover(engine: engine, plus: plus, social: social)
+            })
+        case "finished.squad":
+            // The first squad session completed: Lockin Plus's moment.
+            return AnyView(PreviewModels(phase: SnapshotData.finished(now: now), stats: SnapshotData.regular, squads: [SnapshotData.squad]) { engine, plus, social in
+                SessionCover(engine: engine, plus: plus, social: social, firstSquadFinish: true)
             })
         case "paywall":
             return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus, _ in
@@ -129,13 +162,13 @@ enum SnapshotGallery {
 
         // Friends (sheets, shown as screens)
         case "friends.signin":
-            return AnyView(PreviewModels(stats: SnapshotData.firstFinish) { engine, _, social in
-                FriendsFlow(social: social, avatar: engine.avatar, now: now)
+            return AnyView(PreviewModels(stats: SnapshotData.firstFinish) { engine, plus, social in
+                FriendsFlow(social: social, plus: plus, avatar: engine.avatar, now: now)
             })
         case "friends.unavailable":
             // A build without LK_API_HOST.
-            return AnyView(PreviewModels(stats: SnapshotData.firstFinish, isConfigured: false) { engine, _, social in
-                FriendsFlow(social: social, avatar: engine.avatar, now: now)
+            return AnyView(PreviewModels(stats: SnapshotData.firstFinish, isConfigured: false) { engine, plus, social in
+                FriendsFlow(social: social, plus: plus, avatar: engine.avatar, now: now)
             })
         case "friends.username":
             // Just signed in; Apple shared a first name, and a free username is typed in.
@@ -153,20 +186,84 @@ enum SnapshotGallery {
                 )
             })
         case "friends.list":
-            return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me), friends: SnapshotData.friends) { _, _, social in
-                FriendsScreen(account: social.account, friends: social.friends, onDone: {})
+            return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me), friends: SnapshotData.friends) { engine, plus, social in
+                FriendsScreen(social: social, plus: plus, avatar: engine.avatar, onDone: {})
             })
         case "friends.empty":
-            return AnyView(PreviewModels(stats: SnapshotData.firstFinish, account: .signedIn(SnapshotData.me)) { _, _, social in
-                FriendsScreen(account: social.account, friends: social.friends, onDone: {})
+            return AnyView(PreviewModels(stats: SnapshotData.firstFinish, account: .signedIn(SnapshotData.me)) { engine, plus, social in
+                FriendsScreen(social: social, plus: plus, avatar: engine.avatar, onDone: {})
             })
         case "friends.add":
-            return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me)) { _, _, social in
-                AddFriendSheet(friends: social.friends, code: "NR4K7WQE", focusesField: false)
+            return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me)) { engine, plus, social in
+                AddFriendSheet(friends: social.friends, squads: social.squads, plus: plus, avatar: engine.avatar, code: "NR4K7WQE", focusesField: false)
             })
         case "friends.added":
-            return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me)) { _, _, social in
-                AddFriendSheet(friends: social.friends, added: SnapshotData.friends[1], focusesField: false)
+            return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me)) { engine, plus, social in
+                AddFriendSheet(
+                    friends: social.friends,
+                    squads: social.squads,
+                    plus: plus,
+                    avatar: engine.avatar,
+                    added: .friend(SnapshotData.friends[1]),
+                    focusesField: false
+                )
+            })
+
+        // Squads (sheets, shown as screens)
+        case "squads.list":
+            // Friends, with a squad that's locked in right now at the top.
+            return AnyView(PreviewModels(
+                stats: SnapshotData.regular,
+                account: .signedIn(SnapshotData.me),
+                friends: SnapshotData.friends,
+                squads: [SnapshotData.squad]
+            ) { engine, plus, social in
+                FriendsScreen(social: social, plus: plus, avatar: engine.avatar, onDone: {})
+            })
+        case "squads.new":
+            return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me), friends: SnapshotData.friends) { engine, plus, social in
+                NewSquadSheet(squads: social.squads, plus: plus, avatar: engine.avatar, name: "Night Owls", focusesField: false) { _ in }
+            })
+        case "squads.detail":
+            return AnyView(PreviewModels(
+                stats: SnapshotData.regular,
+                account: .signedIn(SnapshotData.me),
+                friends: SnapshotData.friends,
+                squads: [SnapshotData.squad]
+            ) { _, _, social in
+                NavigationStack {
+                    SquadDetailScreen(
+                        squads: social.squads,
+                        friends: social.friends,
+                        squadID: SnapshotData.squad.id,
+                        myID: SnapshotData.me.id,
+                        invite: SnapshotData.squadCode
+                    )
+                }
+            })
+        case "squads.join":
+            return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me)) { engine, plus, social in
+                AddFriendSheet(
+                    friends: social.friends,
+                    squads: social.squads,
+                    plus: plus,
+                    avatar: engine.avatar,
+                    purpose: .squad,
+                    code: SnapshotData.squadCode.code,
+                    focusesField: false
+                )
+            })
+        case "squads.joined":
+            return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me)) { engine, plus, social in
+                AddFriendSheet(
+                    friends: social.friends,
+                    squads: social.squads,
+                    plus: plus,
+                    avatar: engine.avatar,
+                    purpose: .squad,
+                    added: .squad(SnapshotData.squad),
+                    focusesField: false
+                )
             })
 
         // Developer tools
@@ -259,6 +356,73 @@ private enum SnapshotData {
         }
     }
 
+    /// The squad's room on the server.
+    static let squadSessionID = "r7Kq2xP9aL"
+
+    /// Sam's squad with the pitch's three friends, locked in right now.
+    static var squad: Squad {
+        let members = [SquadMember(
+            id: me.id,
+            handle: me.handle,
+            displayName: me.displayName,
+            avatarCode: me.avatarCode,
+            joinedAt: 1_791_900_000
+        )] + friends.enumerated().map { index, friend in
+            SquadMember(
+                id: friend.id,
+                handle: friend.handle,
+                displayName: friend.displayName,
+                avatarCode: friend.avatarCode,
+                joinedAt: 1_791_900_000 + Double(index + 1) * 3_600
+            )
+        }
+        return Squad(
+            id: "sqLibGob01",
+            name: "Library Goblins",
+            ownerId: me.id,
+            members: members,
+            openSessionId: squadSessionID,
+            muted: false,
+            pet: SquadPet(species: nil, stage: 0, xp: 0)
+        )
+    }
+
+    /// The squad's invite code.
+    static var squadCode: FriendCode {
+        FriendCode(code: "M4XQ7TRB", url: URL(string: "https://lockin.example/j/M4XQ7TRB")!, expiresAt: 1_792_500_000)
+    }
+
+    /// The squad's room ten minutes into Sam's 25: Ava focusing, Kai paused, Noor done.
+    static func squadRoom(now: Date) -> SquadSessionInfo {
+        let samples = SampleLocklings.friends
+        let ava = friends[0]
+        let noor = friends[1]
+        let kai = friends[2]
+        let members = [
+            RoomMember(
+                id: me.id, name: "Sam", avatar: SampleLocklings.you, state: .focusing,
+                start: now.addingTimeInterval(-600), end: now.addingTimeInterval(900)
+            ),
+            RoomMember(
+                id: ava.id, name: ava.name, avatar: samples[0].avatar, state: .focusing,
+                start: now.addingTimeInterval(-1_500 + samples[0].secondsLeft), end: now.addingTimeInterval(samples[0].secondsLeft)
+            ),
+            RoomMember(
+                id: kai.id, name: kai.name, avatar: samples[2].avatar, state: .paused,
+                start: now.addingTimeInterval(-900), end: now.addingTimeInterval(600), pausedAt: now.addingTimeInterval(-120)
+            ),
+            RoomMember(
+                id: noor.id, name: noor.name, avatar: samples[1].avatar, state: .done,
+                start: now.addingTimeInterval(-1_600), end: now.addingTimeInterval(-100)
+            ),
+        ]
+        return SquadSessionInfo(
+            name: squad.name,
+            room: LockinAttributes.ContentState(v: 12, m: members),
+            me: me.id
+        )
+    }
+
     /// Ten minutes into 25, as the Live Activity samples are.
     static func running(now: Date) -> SessionEngine.Phase {
         .running(startedAt: now.addingTimeInterval(-600), endsAt: now.addingTimeInterval(900), plannedMinutes: 25)
@@ -296,6 +460,8 @@ private struct PreviewModels<Content: View>: View {
     @StateObject private var plus: PlusStore
     @StateObject private var account: AccountStore
     @StateObject private var friends: FriendsStore
+    @StateObject private var squads: SquadsStore
+    @StateObject private var rooms: SquadRooms
     private let content: (SessionEngine, PlusStore, SocialModels) -> Content
 
     /// - Parameters:
@@ -310,6 +476,8 @@ private struct PreviewModels<Content: View>: View {
         isConfigured: Bool = true,
         suggestedName: String? = nil,
         friends: [Friend] = [],
+        squads: [Squad] = [],
+        roomCounts: [String: Int] = [:],
         @ViewBuilder content: @escaping (SessionEngine, PlusStore, SocialModels) -> Content
     ) {
         _engine = StateObject(wrappedValue: SessionEngine.preview(
@@ -327,11 +495,13 @@ private struct PreviewModels<Content: View>: View {
             code: SnapshotData.code,
             redeems: SnapshotData.friends[1]
         ))
+        _squads = StateObject(wrappedValue: SquadsStore.preview(squads: squads))
+        _rooms = StateObject(wrappedValue: SquadRooms.preview(roomCounts))
         self.content = content
     }
 
     var body: some View {
-        content(engine, plus, SocialModels(account: account, friends: friends))
+        content(engine, plus, SocialModels(account: account, friends: friends, squads: squads, rooms: rooms))
     }
 }
 

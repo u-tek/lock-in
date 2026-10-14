@@ -265,10 +265,29 @@ struct BlockedEnvelope: Decodable {
     var blocked: [Friend]
 }
 
-/// Every error response: `{ "error": "<sentence for people>", "code": "<machine code>" }`.
+/// Every error response: `{ "error": "<sentence for people>", "code": "<machine code>" }`, plus
+/// `limit`, `sessionId` or `retryAfter` on the few that carry one (docs/milestones/M3.md).
+///
+/// Every field is read on its own, so an odd one never costs the code.
 struct ErrorBody: Decodable {
     var error: String?
     var code: String?
+    var limit: String?
+    var sessionId: String?
+    var retryAfter: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case error, code, limit, sessionId, retryAfter
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        error = try? container.decodeIfPresent(String.self, forKey: .error)
+        code = try? container.decodeIfPresent(String.self, forKey: .code)
+        limit = try? container.decodeIfPresent(String.self, forKey: .limit)
+        sessionId = try? container.decodeIfPresent(String.self, forKey: .sessionId)
+        retryAfter = try? container.decodeIfPresent(Double.self, forKey: .retryAfter)
+    }
 }
 
 // MARK: - Time
