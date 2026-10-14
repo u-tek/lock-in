@@ -271,8 +271,9 @@ private struct DeskScene: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Low enough that the desk fills the bottom of the screenshot, not empty colour.
             Spacer(minLength: 0)
-                .frame(height: 96)
+                .frame(height: 200)
             StandByPhone(sample: PitchActivity.squad(now: now), width: Self.phoneWidth)
             ZStack(alignment: .bottom) {
                 DeskStand(width: Self.phoneWidth, style: Color.white.opacity(0.4))
