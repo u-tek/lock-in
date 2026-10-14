@@ -1,6 +1,7 @@
 import API
 import Core
 import Foundation
+import Model
 @testable import Social
 
 /// A Lockin API that answers from fixed values and records every call, for the store tests. It
@@ -21,6 +22,14 @@ final class FakeAPI: LockinAPI, @unchecked Sendable {
         case block(String)
         case unblock(String)
         case report(String, ReportReason, String?)
+        case signOutSession
+        case squads
+        case createSquad(String)
+        case renameSquad(String, String)
+        case squadInvite(String)
+        case joinSquad(String)
+        case setSquadMuted(String, Bool)
+        case leaveSquad(String)
     }
 
     /// What the fake answers with. Change it with `set(_:)`.
@@ -33,7 +42,12 @@ final class FakeAPI: LockinAPI, @unchecked Sendable {
         var blocked: [Friend] = []
         var redeems = TestData.noor
         var availability = HandleAvailability(available: true)
-        /// Errors by route name ("me", "friends", "redeem", …), thrown every time until removed.
+        var squads: [Squad] = []
+        /// What `POST /squads/join/:code` joins.
+        var joins = TestData.goblins
+        var squadCode = TestData.squadCode
+        /// Errors by route name ("me", "friends", "redeem", "joinSquad", …), thrown every time
+        /// until removed.
         var failures: [String: APIError] = [:]
     }
 
@@ -136,6 +150,106 @@ final class FakeAPI: LockinAPI, @unchecked Sendable {
         try answer(.report(userId, reason, note), route: "report") { _ in }
     }
 
+    func signOutSession() async throws {
+        try answer(.signOutSession, route: "signOutSession") { answers in
+            answers.token = nil
+        }
+    }
+
+    // MARK: Squads
+
+    func squads() async throws -> [Squad] {
+        try answer(.squads, route: "squads") { $0.squads }
+    }
+
+    func createSquad(name: String) async throws -> Squad {
+        try answer(.createSquad(name), route: "createSquad") { answers in
+            let squad = Squad(
+                id: "SqNew00001",
+                name: name,
+                ownerId: answers.user.id,
+                members: [SquadMember(id: answers.user.id, handle: answers.user.handle, displayName: answers.user.displayName, avatarCode: answers.user.avatarCode, joinedAt: 1_791_900_000)]
+            )
+            answers.squads.append(squad)
+            return squad
+        }
+    }
+
+    func renameSquad(id: String, name: String) async throws -> Squad {
+        try answer(.renameSquad(id, name), route: "renameSquad") { answers in
+            guard let index = answers.squads.firstIndex(where: { $0.id == id }) else { return TestData.goblins }
+            answers.squads[index].name = name
+            return answers.squads[index]
+        }
+    }
+
+    func squadInvite(id: String) async throws -> FriendCode {
+        try answer(.squadInvite(id), route: "squadInvite") { $0.squadCode }
+    }
+
+    func joinSquad(code: String) async throws -> Squad {
+        try answer(.joinSquad(code), route: "joinSquad") { answers in
+            answers.squads.append(answers.joins)
+            return answers.joins
+        }
+    }
+
+    func setSquadMuted(id: String, muted: Bool) async throws -> Squad {
+        try answer(.setSquadMuted(id, muted), route: "setSquadMuted") { answers in
+            guard let index = answers.squads.firstIndex(where: { $0.id == id }) else { return TestData.goblins }
+            answers.squads[index].muted = muted
+            return answers.squads[index]
+        }
+    }
+
+    func leaveSquad(id: String) async throws {
+        try answer(.leaveSquad(id), route: "leaveSquad") { answers in
+            answers.squads.removeAll { $0.id == id }
+        }
+    }
+
+    // MARK: Sessions: the session engine's tests cover these.
+
+    func startSession(squadId: String?, minutes: Int) async throws -> JoinedSession {
+        throw APIError.notConfigured
+    }
+
+    func joinSession(id: String, minutes: Int) async throws -> JoinedSession {
+        throw APIError.notConfigured
+    }
+
+    func uploadLiveActivityToken(sessionId: String, token: String, env: APNsEnvironment) async throws {
+        throw APIError.notConfigured
+    }
+
+    func pauseSession(id: String) async throws -> LockinAttributes.ContentState {
+        throw APIError.notConfigured
+    }
+
+    func resumeSession(id: String) async throws -> LockinAttributes.ContentState {
+        throw APIError.notConfigured
+    }
+
+    func endSession(id: String) async throws -> LockinAttributes.ContentState {
+        throw APIError.notConfigured
+    }
+
+    func slipSession(id: String) async throws -> LockinAttributes.ContentState {
+        throw APIError.notConfigured
+    }
+
+    func cheer(sessionId: String, to memberId: String, kind: Int) async throws {
+        throw APIError.notConfigured
+    }
+
+    func session(id: String) async throws -> (session: SessionInfo, contentState: LockinAttributes.ContentState?) {
+        throw APIError.notConfigured
+    }
+
+    func liveUpdates(sessionId: String) -> AsyncThrowingStream<LiveMessage, any Error> {
+        AsyncThrowingStream { $0.finish(throwing: APIError.notConfigured) }
+    }
+
     private func answer<Value>(
         _ call: Call,
         route: String,
@@ -182,6 +296,26 @@ enum TestData {
     static let bea = Friend(id: "uBea000001", handle: "bea", displayName: "bea", avatarCode: "b0.c0.e0.h0", since: 1_791_600_000)
     static let code = FriendCode(code: "AVA2CDEF", url: URL(string: "https://lockin.example/j/AVA2CDEF")!, expiresAt: 1_792_500_000)
     static let device = DeviceRegistration(apnsToken: "a1b2c3", env: .sandbox, laEnabled: true, frequentPushes: false, tz: "Australia/Sydney")
+
+    static let goblins = Squad(
+        id: "SqGoblins1",
+        name: "Library Goblins",
+        ownerId: noor.id,
+        members: [
+            SquadMember(id: noor.id, handle: "noor.k", displayName: "Noor", avatarCode: "b2.c4.e2.h0", joinedAt: 1_791_800_000),
+            SquadMember(id: ava.id, handle: "ava", displayName: "Ava", avatarCode: "b1.c1.e1.h1", joinedAt: 1_791_900_000),
+        ]
+    )
+    static let owls = Squad(
+        id: "SqOwls0001",
+        name: "Night Owls",
+        ownerId: ava.id,
+        members: [SquadMember(id: ava.id, handle: "ava", displayName: "Ava", avatarCode: "b1.c1.e1.h1", joinedAt: 1_791_700_000)],
+        openSessionId: "RmOwls0001",
+        muted: false,
+        pet: SquadPet(species: "fox", stage: 1, xp: 120)
+    )
+    static let squadCode = FriendCode(code: "SQD2CDEF", url: URL(string: "https://lockin.example/j/SQD2CDEF")!, expiresAt: 1_792_500_000)
 
     /// A cache of its own for one test.
     static func cache() -> UserDefaults {

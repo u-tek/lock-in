@@ -88,6 +88,8 @@ public final class SessionEngine: ObservableObject {
     var liveTask: Task<Void, Never>?
     /// Live view connections lost in a row, for the wait before the next one.
     var liveFailures = 0
+    /// `liveTask` is only the wait before connecting again.
+    var isLiveWaiting = false
     /// Uploads the room activity's push tokens as they arrive.
     var tokenTask: Task<Void, Never>?
     /// A push token the server hasn't got yet, tried again on `reconcile()`.

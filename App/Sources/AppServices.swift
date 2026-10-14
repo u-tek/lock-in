@@ -36,18 +36,15 @@ enum AppServices {
     /// again: left by a crash or a killed app, they'd otherwise sit in the island until the
     /// system's 8-hour cap (CLAUDE.md, "Live Activity rules").
     ///
-    /// A solo activity can be the session engine's own, which it takes up again when it
-    /// reconciles its saved session, so solo ones are left alone while there's a session for
-    /// them to belong to (`hasSession`). Squad activities only come from the APNs spike, which
-    /// keeps nothing between launches.
+    /// An activity the session engine took up again from its saved session, solo or squad, is
+    /// left alone (`keeping`); everything else (a crash's leftovers, the APNs spike's) ends.
     ///
     /// Only the noted ids, never everything running: the root view's task runs again when the
     /// system reconnects the scene within the same launch, and an activity started since must
     /// survive that. Ended activities drop out of `activities`, so a second run ends nothing.
-    static func endOrphanedActivities(hasSession: Bool) async {
+    static func endOrphanedActivities(keeping isOwned: (String) -> Bool) async {
         let orphans = liveActivities.activities.filter { activity in
-            guard orphanIDs.contains(activity.id) else { return false }
-            return !(hasSession && activity.attributes.isSolo)
+            orphanIDs.contains(activity.id) && !isOwned(activity.id)
         }
         for activity in orphans {
             await liveActivities.end(activity, state: nil, dismissal: .immediate)
@@ -83,7 +80,8 @@ final class LiveServices {
         social = SocialModels(
             account: account,
             friends: friends,
-            squads: SquadsStore(api: api),
+            // With the account, so signing out (or a 401) empties the list.
+            squads: SquadsStore(api: api, account: account),
             rooms: SquadRooms(api: api)
         )
         // Squad sessions go through the server; without one the engine runs solo only.
@@ -102,7 +100,8 @@ final class LiveServices {
 
     /// Clears up after earlier launches. Run once the first screen is up.
     func endOrphanedActivities() async {
-        await AppServices.endOrphanedActivities(hasSession: engine.phase != .idle)
+        let engine = engine
+        await AppServices.endOrphanedActivities(keeping: { engine.ownsActivity(id: $0) })
     }
 
     // MARK: - This phone, for pushes

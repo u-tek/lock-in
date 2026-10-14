@@ -200,12 +200,14 @@ extension SessionEngine {
     // MARK: - Applying the room's state
 
     /// Applies a state of the room, from wherever it came: an action's answer, the live view, or
-    /// `GET /sessions/:id`. An older state than the one held changes nothing but is still read
-    /// for this phone's member (the newer one wins). `ended`: the room is over (nobody's timer is
-    /// running), so this phone's part in it is too.
+    /// `GET /sessions/:id`. Only a newer version replaces the one held: the room never sends two
+    /// different states with the same `v`, and an equal one would undo a change made here ahead
+    /// of the room (a timer that ran out on this phone's clock). This phone's member is then read
+    /// from whichever is newest. `ended`: the room is over (nobody's timer is running), so this
+    /// phone's part in it is too.
     func applyRoom(_ incoming: LockinAttributes.ContentState?, ended: Bool, sessionId: String) {
         guard var link = stored.room, link.sessionId == sessionId else { return }
-        if let incoming, incoming.v >= link.state.v {
+        if let incoming, incoming.v > link.state.v {
             link.state = incoming
             stored.room = link
             updateRoomActivity(with: incoming)
@@ -424,6 +426,11 @@ extension SessionEngine {
         } catch {
             return
         }
+        if isLiveWaiting {
+            // Back in the foreground: no need to sit out the rest of the wait.
+            stopLiveUpdates()
+            liveFailures = 0
+        }
         openLiveUpdates()
     }
 
@@ -489,10 +496,12 @@ extension SessionEngine {
         guard let link = stored.room, link.sessionId == sessionId, isShowing(sessionId) else { return }
         liveFailures += 1
         let delay = min(60, 1 << min(liveFailures, 6))
+        isLiveWaiting = true
         liveTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self, !Task.isCancelled else { return }
             self.liveTask = nil
+            self.isLiveWaiting = false
             self.openLiveUpdates()
         }
     }
@@ -500,6 +509,7 @@ extension SessionEngine {
     func stopLiveUpdates() {
         liveTask?.cancel()
         liveTask = nil
+        isLiveWaiting = false
     }
 
     // MARK: - The room's Live Activity
@@ -679,7 +689,7 @@ extension SessionEngine {
         _ stored: StoredSessions
     ) -> (mode: SessionMode, state: LockinAttributes.ContentState, me: String)? {
         guard let link = stored.room, let active = stored.active, active.sessionId == link.sessionId else { return nil }
-        return (.squad(squadId: link.squadId, sessionId: link.sessionId), link.state, link.me)
+        return (mode: SessionMode.squad(squadId: link.squadId, sessionId: link.sessionId), state: link.state, me: link.me)
     }
 
     static func isConnectivity(_ error: APIError) -> Bool {

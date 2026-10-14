@@ -207,7 +207,7 @@ extension Error {
     /// know yet are worded here; anything else is the client's own sentence.
     var squadMessage: String {
         guard let error = self as? APIError else {
-            return "Something went wrong. Please try again."
+            return (self as? LocalizedError)?.errorDescription ?? "Something went wrong. Please try again."
         }
         switch error.code?.rawValue ?? "" {
         case "name_invalid": return "Squad names are 1 to 20 characters."

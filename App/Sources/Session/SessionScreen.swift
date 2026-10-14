@@ -180,6 +180,15 @@ struct SessionScreen: View {
             .lkSecondaryButton()
             .controlSize(.small)
             .tint(.orange)
+        } else if squad != nil, engine.squadProblem != nil {
+            // A pause or end the server didn't take: the engine catches up on its own (it re-reads
+            // the room), so this only says so rather than asking for anything.
+            Label("Can't reach your squad. Still trying.", systemImage: "wifi.exclamationmark")
+                .font(LKFont.footnote.weight(.semibold))
+                .foregroundStyle(.orange)
+                .padding(.horizontal, 14)
+                .padding(.vertical, LKSpacing.s)
+                .background(.regularMaterial, in: Capsule())
         } else if squad == nil, engine.stats.completedSessions == 0 {
             Label("Lock your phone — your Lockling is on the Lock Screen.", systemImage: "lock.iphone")
                 .font(LKFont.footnote.weight(.medium))

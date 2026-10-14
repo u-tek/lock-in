@@ -175,11 +175,37 @@ import Testing
         #expect(friends.code == TestData.code)
 
         account.signOut()
+        // Signed out on the phone at once; the server is told, then the token goes.
         #expect(account.state == .signedOut)
-        #expect(!api.hasSession)
         #expect(friends.friends.isEmpty)
         #expect(friends.code == nil)
         #expect(!friends.hasLoaded)
+        await account.signOutTask?.value
+        #expect(api.calls.last == .signOutSession)
+        #expect(!api.hasSession)
+    }
+
+    @Test func signingOutOfflineStillForgetsTheToken() async {
+        let api = FakeAPI(token: "t") { $0.failures["signOutSession"] = .offline }
+        let account = AccountStore(api: api, cache: TestData.cache())
+        await account.restore()
+        account.signOut()
+        #expect(account.state == .signedOut)
+        await account.signOutTask?.value
+        #expect(api.calls.last == .signOutSession)
+        #expect(!api.hasSession)
+    }
+
+    @Test func signingInRightAfterSigningOutKeepsTheNewSession() async throws {
+        let api = FakeAPI(token: "t")
+        let account = AccountStore(api: api, cache: TestData.cache())
+        await account.restore()
+        account.signOut()
+        // No waiting: the sign-in waits for the sign-out, which can't then forget the new token.
+        try await account.signIn(identityToken: "eyJ", authorizationCode: nil, displayName: nil)
+        #expect(account.state == .signedIn(TestData.ava))
+        #expect(api.hasSession)
+        #expect(api.calls.filter { $0 == .signOutSession }.count == 1)
     }
 
     @Test func deletingTheAccountSignsOut() async throws {
@@ -216,6 +242,7 @@ import Testing
 
         // Signed out, there's nowhere to save it.
         account.signOut()
+        await account.signOutTask?.value
         let before = api.calls.count
         await account.updateAvatar(AvatarCode("b4.c4.e4.h4"))
         #expect(api.calls.count == before)
@@ -240,6 +267,7 @@ import Testing
 
         // A new account registers the phone again.
         account.signOut()
+        await account.signOutTask?.value
         try await account.signIn(identityToken: "eyJ", authorizationCode: nil, displayName: nil)
         #expect(api.calls.last == .registerDevice(changed))
     }

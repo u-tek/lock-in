@@ -22,7 +22,9 @@ public final class FriendsStore: ObservableObject {
     /// Why the last refresh failed; nil once one works.
     @Published public private(set) var problem: APIError? = nil
     /// An invite link's code, waiting for the Friends screen (and, before that, maybe for
-    /// signing in). The screen takes it with `takePendingInvite()`.
+    /// signing in). It may be a squad's code as well as a friend's: redeem it with
+    /// `redeemPendingInvite(squads:)` (or `takePendingInvite()` and `redeemInvite`), which tells
+    /// them apart.
     @Published public private(set) var pendingInviteCode: String? = nil
 
     /// Invites shared and redeemed: counts only.
@@ -98,6 +100,8 @@ public final class FriendsStore: ObservableObject {
 
     /// Adds the friend whose code this is. Throws `APIError` (`codeNotFound`, `codeExpired`,
     /// `ownCode`, `alreadyFriends`, `blocked`, …); a code that can't exist fails without asking.
+    /// A squad's code answers `codeNotFound` here: for a code that could be either (an invite
+    /// link, a scanned QR code), use `redeemInvite(code:squads:friends:)`.
     @discardableResult
     public func redeem(code input: String) async throws -> Friend {
         let code = FriendCode.normalised(input)
