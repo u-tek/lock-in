@@ -5,7 +5,7 @@ import XCTest
 /// only that the activity started, and writes what it saw.
 ///
 /// The app's script, from the moment its activity starts: you, Noor and Kai locked in ("+2"),
-/// Mateo joins at 10 s ("+3") and Noor cheers you at 20 s.
+/// Mateo joins at 10 s ("+3") and Noor cheers you at 24 s.
 ///
 /// Environment (from xcodebuild with a `TEST_RUNNER_` prefix): `LK_ISLAND_DIR`, where the PNGs
 /// go. Without it the test is skipped, so a plain `xcodebuild test` never runs it.
@@ -57,13 +57,13 @@ final class IslandDemoTests: XCTestCase {
         wait(until: 22)
         save("2-island")
 
-        // Long-press the island: the squad, each with their own timer. Mateo has joined.
+        // Long-press the island: the squad, each with their own timer, and Noor's cheer.
         expandIsland()
         wait(until: 40)
         save("3-island-expanded")
         XCUIDevice.shared.press(.home)
 
-        // Noor's cheer arrived at 20 s; the island is compact again.
+        // Compact again: the cheer in place of "+3".
         wait(until: 50)
         save("4-island-cheer")
 

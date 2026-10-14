@@ -9,9 +9,9 @@ import UIKit
 /// only in builds with the developer tools (`LK_DEVELOPER_TOOLS`), so it never ships.
 ///
 /// It starts a real Live Activity for "Library Goblins" (you, Noor and Kai locked in), then updates
-/// it the way the room's pushes would: Mateo joins after 10 seconds and Noor cheers you at 20. Both
-/// land inside the half-minute iOS gives an app in the background. The app keeps running in the background meanwhile, so the updates land
-/// while the island and the Lock Screen are on show.
+/// it the way the room's pushes would: Mateo joins after 10 seconds and Noor cheers you at 24, after
+/// the test has filmed the island at rest. Both land inside the half-minute iOS gives an app in the
+/// background; nothing clears the cheer, so it stays for the expanded island and the Lock Screen.
 @MainActor
 final class IslandDemo: ObservableObject {
     static let shared = IslandDemo()
@@ -26,7 +26,7 @@ final class IslandDemo: ObservableObject {
     }
 
     private static let joinsAt: TimeInterval = 10
-    private static let cheersAt: TimeInterval = 20
+    private static let cheersAt: TimeInterval = 24
     /// How long the app asks to keep running in the background: iOS allows about 30 seconds.
     private static let lasts: TimeInterval = 28
 
