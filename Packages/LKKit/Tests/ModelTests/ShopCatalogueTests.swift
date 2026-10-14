@@ -5,10 +5,6 @@ import Testing
 /// `fixtures/shop/catalogue.json` at the repository root: what the shop sells, which the server
 /// sells from (docs/milestones/M5.md). `ShopCatalogue.items` is the app's copy of it.
 enum ShopCatalogueFixture {
-    struct File: Decodable {
-        let items: [ShopItem]
-    }
-
     /// Walks up from this source file to the directory holding `fixtures/shop`, as `Fixture` does
     /// for the Live Activity's.
     static func data() throws -> Data {
@@ -23,9 +19,21 @@ enum ShopCatalogueFixture {
         throw Fixture.NotFound(description: "No fixtures/shop/catalogue.json above \(#filePath)")
     }
 
+    /// The Lockling items. The file also lists the squad pet's accessories (part `pet`, M7's
+    /// Squad Boost), which belong to a squad rather than a Lockling: `ShopCatalogue` leaves them
+    /// out, and so does this.
     static func items() throws -> [ShopItem] {
-        try JSONDecoder().decode(File.self, from: data()).items
+        try JSONDecoder().decode([ShopItem].self, from: JSONSerialization.data(withJSONObject: locklingItems()))
     }
+
+    /// The file's items as written, without the pet's.
+    static func locklingItems() throws -> [[String: Any]] {
+        let object = try #require(JSONSerialization.jsonObject(with: data()) as? [String: Any])
+        let items = try #require(object["items"] as? [[String: Any]])
+        return items.filter { ($0["part"] as? String) != petPart }
+    }
+
+    static let petPart = "pet"
 }
 
 @Suite struct ShopCatalogueTests {
@@ -39,9 +47,9 @@ enum ShopCatalogueFixture {
     @Test func everyItemHasExactlyTheKeysTheAppReads() throws {
         let object = try #require(JSONSerialization.jsonObject(with: ShopCatalogueFixture.data()) as? [String: Any])
         #expect(Set(object.keys) == ["items"])
-        let items = try #require(object["items"] as? [[String: Any]])
-        #expect(items.count == ShopCatalogue.items.count)
-        for item in items {
+        let all = try #require(object["items"] as? [[String: Any]])
+        #expect(try ShopCatalogueFixture.locklingItems().count == ShopCatalogue.items.count)
+        for item in all {
             #expect(Set(item.keys) == ["id", "part", "option", "price", "plus"])
         }
     }
