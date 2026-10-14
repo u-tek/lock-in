@@ -28,7 +28,7 @@
 // load it in Node. It uses DurableObjectState through the small `RoomState` interface below, which
 // tests fake.
 
-import { ApnsClient, type ApnsEnvironment, type ApnsPriority, type ApnsResult, isDeviceToken } from "./apns.ts";
+import { ApnsClient, type ApnsEnvironment, type ApnsPriority, type ApnsResult, isDeviceToken, isGoneToken } from "./apns.ts";
 import { SharedProviderToken } from "./apnsAuth.ts";
 import { Database, type EventWrite, type ParticipantWrite, type SquadSnapshotRow, isUniqueViolation } from "./db.ts";
 import type { Env } from "./env.ts";
@@ -746,7 +746,7 @@ export class Room {
       room.pushes.refused += 1;
       const label = `${result.status}${result.reason === undefined ? "" : ` ${result.reason}`}`;
       refusals.set(label, (refusals.get(label) ?? 0) + 1);
-      if (result.status === 410 || result.reason === "BadDeviceToken") {
+      if (isGoneToken(result)) {
         const member = room.members.find((each) => each.id === push.memberId);
         // Only if it's still the token that failed: the app may have sent a new one meanwhile.
         if (member !== undefined && member.laToken === push.token) {

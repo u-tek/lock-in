@@ -35,6 +35,7 @@ squads.joined
 paywall
 settings
 settings.account
+settings.notifications
 developer
 spike
 lab.tokens

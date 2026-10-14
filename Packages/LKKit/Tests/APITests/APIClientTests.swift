@@ -95,6 +95,30 @@ import Testing
         ) { client in
             try await client.registerDevice(DeviceRegistration(apnsToken: "a1b2", env: .production, pushToStartToken: "c3d4", laEnabled: false, frequentPushes: true, tz: "Europe/London"))
         },
+        Route(
+            name: "registerDeviceWithQuietHours",
+            method: "POST",
+            path: "/devices",
+            reply: .noContent,
+            body: #"{"apnsToken":"a1b2","env":"sandbox","laEnabled":true,"frequentPushes":false,"tz":"Australia/Sydney","quietHours":{"start":1320,"end":420}}"#
+        ) { client in
+            try await client.registerDevice(DeviceRegistration(
+                apnsToken: "a1b2", env: .sandbox, laEnabled: true, frequentPushes: false, tz: "Australia/Sydney",
+                quietHours: .window(start: 1_320, end: 420)
+            ))
+        },
+        Route(
+            name: "registerDeviceWithQuietHoursOff",
+            method: "POST",
+            path: "/devices",
+            reply: .noContent,
+            body: #"{"apnsToken":"a1b2","env":"sandbox","laEnabled":true,"frequentPushes":false,"tz":"Australia/Sydney","quietHours":null}"#
+        ) { client in
+            try await client.registerDevice(DeviceRegistration(
+                apnsToken: "a1b2", env: .sandbox, laEnabled: true, frequentPushes: false, tz: "Australia/Sydney",
+                quietHours: .off
+            ))
+        },
         Route(name: "friends", method: "GET", path: "/friends", reply: .ok(#"{"friends":[\#(Sample.friend)]}"#), body: nil) { client in
             _ = try await client.friends()
         },
@@ -373,5 +397,33 @@ import Testing
         store.clear()
         #expect(store.load() == nil)
         #expect(KeychainTokenStore(service: service).load() == nil)
+    }
+}
+
+@Suite struct DeviceRegistrationTests {
+    private func registration(_ quietHours: DeviceQuietHours?) -> DeviceRegistration {
+        DeviceRegistration(apnsToken: "a1b2", env: .sandbox, laEnabled: true, frequentPushes: false, tz: "Europe/London", quietHours: quietHours)
+    }
+
+    /// Left out, the server keeps what it has; null switches quiet hours off (docs/milestones/M4.md).
+    @Test func quietHoursHaveThreeShapesOnTheWire() throws {
+        let kept = try JSONSerialization.jsonObject(with: JSONEncoder().encode(registration(nil))) as? [String: Any]
+        #expect(kept?.keys.contains("quietHours") == false)
+
+        let off = try JSONSerialization.jsonObject(with: JSONEncoder().encode(registration(.off))) as? [String: Any]
+        #expect(off?["quietHours"] is NSNull)
+
+        let window = try JSONSerialization.jsonObject(with: JSONEncoder().encode(registration(.window(start: 1_320, end: 420)))) as? [String: Any]
+        let sent = try #require(window?["quietHours"] as? [String: Any])
+        #expect(sent["start"] as? Int == 1_320)
+        #expect(sent["end"] as? Int == 420)
+    }
+
+    @Test func roundTripsEveryShape() throws {
+        for quietHours in [nil, .off, .window(start: 0, end: 1_439)] as [DeviceQuietHours?] {
+            let device = registration(quietHours)
+            let decoded = try JSONDecoder().decode(DeviceRegistration.self, from: JSONEncoder().encode(device))
+            #expect(decoded == device)
+        }
     }
 }

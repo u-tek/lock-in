@@ -153,6 +153,10 @@ export interface TestApp {
   user(handle: string, displayName?: string | null): Promise<SignedIn>;
   /** Every user id and session token handed out, so tests can check none reached a log. */
   issued: Set<string>;
+  /** What routes handed to `waitUntil` and nobody has awaited yet (M4's alerts). */
+  background: Array<Promise<unknown>>;
+  /** Awaits everything handed to `waitUntil`, including what that work hands on. */
+  settle(): Promise<void>;
   /** One value from D1. */
   value(sql: string, ...params: Array<string | number | null>): unknown;
   count(sql: string, ...params: Array<string | number | null>): number;
@@ -173,8 +177,14 @@ export async function testApp(overrides: Partial<Env> = {}): Promise<TestApp> {
   const d1 = new TestD1();
   const apple = new FakeApple([keys.current]);
   const clock = { now: T0 };
-  const deps: Dependencies = { fetch: apple.fetch, now: () => clock.now };
   const apns = new FakeAPNs();
+  const background: Array<Promise<unknown>> = [];
+  // The Worker reaches Apple's sign-in endpoints and, from M4, APNs itself (alerts, push-to-start).
+  const fetcher = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const host = new URL(input instanceof Request ? input.url : String(input)).host;
+    return host === "api.push.apple.com" || host === "api.sandbox.push.apple.com" ? apns.fetch(input, init) : apple.fetch(input, init);
+  }) as typeof fetch;
+  const deps: Dependencies = { fetch: fetcher, now: () => clock.now, waitUntil: (promise) => void background.push(promise) };
   const rooms = new FakeNamespace<Room>(
     (state) =>
       new Room(state, env, {
@@ -224,6 +234,10 @@ export async function testApp(overrides: Partial<Env> = {}): Promise<TestApp> {
   const issued = new Set<string>();
   const app: TestApp = {
     issued,
+    background,
+    async settle() {
+      while (background.length > 0) await background.shift();
+    },
     env,
     d1,
     sqlite: d1.sqlite,

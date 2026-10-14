@@ -84,5 +84,11 @@ export function fakeAPNs(...responses: FakeResponse[]): { fetch: typeof fetch; r
   return { fetch: fetcher as typeof fetch, requests };
 }
 
+/**
+ * A JWT in a log line: a base64url JSON header (`eyJ…`), a dot, the claims, a dot. Not just "eyJ",
+ * which a random 10-character session id contains now and then.
+ */
+export const JWT_IN_LOG = /eyJ[\w-]*\.[\w-]*\./;
+
 /** 64 hex characters: the shape of a real device or activity push token. */
 export const DEVICE_TOKEN = "80f1c5e2a9b34d7e8c1f0a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f";

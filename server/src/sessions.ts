@@ -1,7 +1,7 @@
 // Sessions (docs/milestones/M3.md, SPEC.md §1.4, §4.7): the Worker side of the rooms.
 //
-//   POST /sessions                    { squadId?, minutes } -> Joined (solo, or the squad's room: joined, or opened)
-//   POST /sessions/:id/join           { minutes } -> Joined
+//   POST /sessions                    { squadId?, minutes, pushToStart? } -> Joined (solo, or the squad's room: joined, or opened)
+//   POST /sessions/:id/join           { minutes, pushToStart? } -> Joined
 //   POST /sessions/:id/la-token       { token, env } -> 204
 //   POST /sessions/:id/pause|resume|end|slip -> { contentState }
 //   POST /sessions/:id/cheer          { to, kind } -> 204
@@ -11,7 +11,12 @@
 // The Worker authenticates the bearer token, checks what only D1 knows (squad membership, the user's
 // other sessions), and forwards to the session's `Room` (src/room.ts) with the user's id in a header
 // the room trusts. It never forwards the client's own request, so a client can't set that header.
+//
+// M4: opening a squad's room tells the rest of the squad "X is locking in" once the response has
+// gone (src/alerts.ts). A join with `pushToStart` also asks iOS to start the joiner's Live Activity
+// (src/pushToStart.ts, the spike) and answers `Joined` plus `pushedToStart`.
 
+import { sendLockinAlerts } from "./alerts.ts";
 import { isDeviceToken } from "./apns.ts";
 import type { AuthedContext } from "./context.ts";
 import { newShortID } from "./context.ts";
@@ -19,7 +24,8 @@ import type { UserRow } from "./db.ts";
 import type { Env } from "./env.ts";
 import { HttpError, apiError, isRecord, json, readObject } from "./http.ts";
 import { MAX_NAME_LENGTH, isShortID, textLength } from "./liveActivity.ts";
-import { ROOM_SESSION_HEADER, ROOM_USER_HEADER, type RoomProfile, plannedMinutes } from "./room.ts";
+import { type PushToStartTarget, parsePushToStart, sendPushToStart } from "./pushToStart.ts";
+import { type Joined, ROOM_SESSION_HEADER, ROOM_USER_HEADER, type RoomProfile, plannedMinutes } from "./room.ts";
 
 /** What a member is called in the Live Activity when they haven't picked a name. */
 export const FALLBACK_MEMBER_NAME = "Lockling";
@@ -75,17 +81,30 @@ async function errorCode(response: Response): Promise<string | undefined> {
   return isRecord(body) && typeof body.code === "string" ? body.code : undefined;
 }
 
+/**
+ * The room's answer to a join or open, as the app gets it. With a push-to-start target and a
+ * successful join, the push goes out first and the answer gains `pushedToStart` (M4 spike).
+ */
+async function answerJoin(context: AuthedContext, response: Response, pushToStart: PushToStartTarget | undefined): Promise<Response> {
+  if (pushToStart === undefined || !response.ok) return response;
+  const joined = (await response.json()) as Joined;
+  const pushedToStart = await sendPushToStart(context, joined, pushToStart);
+  return json({ ...joined, pushedToStart });
+}
+
 // POST /sessions
 
 /**
  * Starts a session. Solo without `squadId`. With one, joins the squad's open room, or opens it if
  * there's none: a squad has one room at a time (migrations/0003_squads.sql), so two members locking
- * in together end up in the same one.
+ * in together end up in the same one. Opening one (not joining) alerts the rest of the squad, after
+ * the response (M4).
  */
 export async function startSession(context: AuthedContext): Promise<Response> {
   const { db, user, env } = context;
   const body = await readObject(context.request);
   const minutes = plannedMinutes(body.minutes);
+  const pushToStart = parsePushToStart(body.pushToStart);
   let squadId: string | null = null;
   if (body.squadId !== undefined && body.squadId !== null) {
     if (!isShortID(body.squadId) || !(await db.isSquadMember(body.squadId, user.id))) throw notMember();
@@ -96,7 +115,7 @@ export async function startSession(context: AuthedContext): Promise<Response> {
   const profile = memberProfile(user);
 
   if (squadId === null) {
-    return callRoom(env, newShortID(context.random), user.id, "open", { squadId: null, minutes, profile });
+    return answerJoin(context, await callRoom(env, newShortID(context.random), user.id, "open", { squadId: null, minutes, profile }), pushToStart);
   }
   // Join the open room, or open one. Each lost race (the room ended as we joined, or someone else
   // opened one as we did) goes round again; three in a row means something's stuck.
@@ -104,10 +123,13 @@ export async function startSession(context: AuthedContext): Promise<Response> {
     const open = await db.openSessionOfSquad(squadId);
     if (open !== null) {
       const joined = await callRoom(env, open.id, user.id, "join", { minutes, profile });
-      if ((await errorCode(joined)) !== "session_ended") return joined;
+      if ((await errorCode(joined)) !== "session_ended") return answerJoin(context, joined, pushToStart);
     }
-    const opened = await callRoom(env, newShortID(context.random), user.id, "open", { squadId, minutes, profile });
-    if ((await errorCode(opened)) !== "room_exists") return opened;
+    const sessionId = newShortID(context.random);
+    const opened = await callRoom(env, sessionId, user.id, "open", { squadId, minutes, profile });
+    if ((await errorCode(opened)) === "room_exists") continue;
+    if (opened.ok) context.waitUntil(sendLockinAlerts(context, { squadId, sessionId, openerId: user.id, openerName: profile.name }));
+    return answerJoin(context, opened, pushToStart);
   }
   throw apiError(503, "try_again", "Couldn't start the session. Try again.");
 }
@@ -118,6 +140,7 @@ export async function joinSession(context: AuthedContext, sessionId: string): Pr
   const { db, user, env } = context;
   const body = await readObject(context.request);
   const minutes = plannedMinutes(body.minutes);
+  const pushToStart = parsePushToStart(body.pushToStart);
   const session = isShortID(sessionId) ? await db.sessionById(sessionId) : null;
   if (session === null) throw sessionNotFound();
   if (session.status === "ended") throw apiError(410, "session_ended", "This session has ended");
@@ -128,7 +151,7 @@ export async function joinSession(context: AuthedContext, sessionId: string): Pr
   if (elsewhere !== null && elsewhere !== sessionId) {
     throw apiError(409, "already_in_session", "You're already in a session. End it first.", { sessionId: elsewhere });
   }
-  return callRoom(env, sessionId, user.id, "join", { minutes, profile: memberProfile(user) });
+  return answerJoin(context, await callRoom(env, sessionId, user.id, "join", { minutes, profile: memberProfile(user) }), pushToStart);
 }
 
 // POST /sessions/:id/la-token

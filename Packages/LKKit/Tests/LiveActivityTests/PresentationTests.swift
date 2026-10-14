@@ -436,11 +436,17 @@ private func range(_ member: WireMember) -> ClosedRange<Date> {
     }
 
     @Test(arguments: [
+        ("sprout.2", "Sprout · teen"),
+        ("pebble.1", "Pebble · baby"),
+        ("ember.4", "Ember · prestige"),
+        ("puff.5", "Puff · prestige 2"),
+        // A species this version can't draw (it draws a puff) keeps its own name.
         ("fox.2", "Fox · teen"),
-        ("fox.0", "Fox · egg"),
         ("owl.3", "Owl · adult"),
         ("dragonling.12", "Dragonling · prestige 9"),
-        ("%%%", "Fox · egg"),
+        // The species is a surprise until the egg hatches.
+        ("ember.0", "Egg"),
+        ("%%%", "Egg"),
     ])
     func titles(code: String, title: String) throws {
         let presentation = squad([wire("me", .focusing)], pet: WirePet(k: code, md: 1, x: 0.5))
@@ -451,7 +457,25 @@ private func range(_ member: WireMember) -> ClosedRange<Date> {
     @Test func accessibilityLabelNeverSaysAHundredTooEarly() throws {
         let nearly = squad([wire("me", .focusing)], pet: WirePet(k: "fox.2", md: 2, x: 0.999))
         let pet = try #require(nearly.pet)
-        #expect(pet.accessibilityLabel == "Squad pet, fox, teen, 99 percent of the way to the next stage")
+        #expect(pet.accessibilityLabel == "Squad pet, fox, teen, content, 99 percent of the way to the next stage")
+    }
+
+    /// The pet's face shows its mood, so VoiceOver says it too.
+    @Test(arguments: [(0, "sad"), (1, "hungry"), (2, "content"), (3, "happy"), (9, "happy")])
+    func accessibilityLabelSaysTheMood(mood: Int, name: String) throws {
+        let presentation = squad([wire("me", .focusing)], pet: WirePet(k: "sprout.3", md: mood, x: 0.25))
+        let pet = try #require(presentation.pet)
+        #expect(pet.accessibilityLabel == "Squad pet, sprout, adult, \(name), 25 percent of the way to the next stage")
+    }
+
+    @Test func anEggKeepsItsSpeciesToItself() throws {
+        let presentation = squad([wire("me", .focusing)], pet: WirePet(k: "ember.0", md: 3, x: 0))
+        let pet = try #require(presentation.pet)
+        #expect(pet.title == "Egg")
+        #expect(pet.accessibilityLabel == "Squad pet, egg, happy")
+        #expect(!pet.accessibilityLabel.contains("ember"))
+        // It still draws in its species' colours.
+        #expect(pet.code == PetCode(species: "ember", stage: 0))
     }
 
     @Test func soloHasNoPet() {

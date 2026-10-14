@@ -201,6 +201,9 @@ public struct DeviceRegistration: Codable, Hashable, Sendable {
     public var frequentPushes: Bool
     /// IANA time zone, for quiet hours and the Monday reset.
     public var tz: String
+    /// When "is locking in" alerts stay away (M4). Nil leaves the key out, so the server keeps
+    /// what it has (22:00 to 07:00 for a new device); `.off` sends null.
+    public var quietHours: DeviceQuietHours?
 
     public init(
         apnsToken: String,
@@ -208,7 +211,8 @@ public struct DeviceRegistration: Codable, Hashable, Sendable {
         pushToStartToken: String? = nil,
         laEnabled: Bool,
         frequentPushes: Bool,
-        tz: String
+        tz: String,
+        quietHours: DeviceQuietHours? = nil
     ) {
         self.apnsToken = apnsToken
         self.env = env
@@ -216,7 +220,66 @@ public struct DeviceRegistration: Codable, Hashable, Sendable {
         self.laEnabled = laEnabled
         self.frequentPushes = frequentPushes
         self.tz = tz
+        self.quietHours = quietHours
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case apnsToken, env, pushToStartToken, laEnabled, frequentPushes, tz, quietHours
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        apnsToken = try container.decode(String.self, forKey: .apnsToken)
+        env = try container.decode(APNsEnvironment.self, forKey: .env)
+        pushToStartToken = try container.decodeIfPresent(String.self, forKey: .pushToStartToken)
+        laEnabled = try container.decode(Bool.self, forKey: .laEnabled)
+        frequentPushes = try container.decode(Bool.self, forKey: .frequentPushes)
+        tz = try container.decode(String.self, forKey: .tz)
+        if !container.contains(.quietHours) {
+            quietHours = nil
+        } else if try container.decodeNil(forKey: .quietHours) {
+            quietHours = .off
+        } else {
+            let window = try container.decode(QuietHoursWindow.self, forKey: .quietHours)
+            quietHours = .window(start: window.start, end: window.end)
+        }
+    }
+
+    /// Optional values are left out when nil, as everywhere in the API, except `quietHours`:
+    /// switched off it's an explicit null.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(apnsToken, forKey: .apnsToken)
+        try container.encode(env, forKey: .env)
+        try container.encodeIfPresent(pushToStartToken, forKey: .pushToStartToken)
+        try container.encode(laEnabled, forKey: .laEnabled)
+        try container.encode(frequentPushes, forKey: .frequentPushes)
+        try container.encode(tz, forKey: .tz)
+        switch quietHours {
+        case nil:
+            break
+        case .off?:
+            try container.encodeNil(forKey: .quietHours)
+        case .window(let start, let end)?:
+            try container.encode(QuietHoursWindow(start: start, end: end), forKey: .quietHours)
+        }
+    }
+
+    /// `quietHours` on the wire: `{ start, end }`.
+    private struct QuietHoursWindow: Codable {
+        var start: Int
+        var end: Int
+    }
+}
+
+/// Quiet hours as `POST /devices` takes them (docs/milestones/M4.md): minutes after local
+/// midnight, whole numbers 0–1439 with `start` ≠ `end`; a start later than the end crosses
+/// midnight. The app's `QuietHours` (Notifications) makes one.
+public enum DeviceQuietHours: Hashable, Sendable {
+    /// No quiet hours: alerts at any time (null on the wire).
+    case off
+    /// Alerts held back from `start` up to `end`.
+    case window(start: Int, end: Int)
 }
 
 /// `POST /blocks`.

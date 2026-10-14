@@ -210,11 +210,11 @@ final class FakeAPI: LockinAPI, @unchecked Sendable {
 
     // MARK: Sessions: the session engine's tests cover these.
 
-    func startSession(squadId: String?, minutes: Int) async throws -> JoinedSession {
+    func startSession(squadId: String?, minutes: Int, pushToStart: PushToStart?) async throws -> JoinedSession {
         throw APIError.notConfigured
     }
 
-    func joinSession(id: String, minutes: Int) async throws -> JoinedSession {
+    func joinSession(id: String, minutes: Int, pushToStart: PushToStart?) async throws -> JoinedSession {
         throw APIError.notConfigured
     }
 

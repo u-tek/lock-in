@@ -125,9 +125,12 @@ describe("routes", () => {
     vi.restoreAllMocks();
   });
 
-  test("the default export serves the same routes", async () => {
-    const response = await worker.fetch(new Request("https://x.example/health") as Parameters<typeof worker.fetch>[0], env());
+  test("the default export serves the same routes, with the runtime's waitUntil", async () => {
+    const kept: Array<Promise<unknown>> = [];
+    const ctx = { waitUntil: (promise: Promise<unknown>) => kept.push(promise), passThroughOnException() {} } as unknown as ExecutionContext;
+    const response = await worker.fetch(new Request("https://x.example/health") as Parameters<typeof worker.fetch>[0], env(), ctx);
     expect(await response.json()).toEqual({ ok: true, environment: "development" });
+    expect(kept).toHaveLength(0);
   });
 });
 

@@ -1,4 +1,6 @@
+import Creature
 import DesignSystem
+import Model
 import SwiftUI
 
 // Pieces the Lock Screen and Dynamic Island views share.
@@ -8,8 +10,10 @@ import SwiftUI
 // - Countdowns are `Text(timerInterval:)` and progress is `ProgressView(timerInterval:)`, so they
 //   tick on the device with no pushes.
 // - No images from the network or asset catalogues: SF Symbols and shapes only. Members are
-//   Locklings (`CreatureView`), drawn in shapes from their avatar codes.
-// - With `isLuminanceReduced` (Always-On) nothing glows: Locklings become outlines, bars dim.
+//   Locklings (`CreatureView`), drawn in shapes from their avatar codes; the squad pet is a
+//   `PetView`, drawn from its pet code.
+// - With `isLuminanceReduced` (Always-On) nothing glows: Locklings and the pet become outlines,
+//   bars dim.
 // - No padding of our own inside the island: the system's region margins place everything.
 //
 // The look is design/SYSTEM.md's: system colours (the member states come from `LKMemberTone`),
@@ -103,6 +107,15 @@ enum ActivityMetrics {
         islandCreature, expandedCreature, expandedRowCreature, lockScreenRowCreature, soloCreature,
         soloStandByCreature, smartStackCreature,
     ]
+
+    /// The squad pet in its row on the Lock Screen and in StandBy: a little larger than the
+    /// caption line beside it, so a baby is still a face (`PetView` keeps its outline and face
+    /// below 28 points and drops the rest).
+    static let petRowCreature: CGFloat = 18
+    /// How far the pet reaches into the space above and below its row. The row is laid out as tall
+    /// as its text (Caption, 14.3 points at the default size) rather than the pet, so the layouts'
+    /// heights, and LockScreenHeightTests' 160-point limit, are what they were with the paw.
+    static let petRowOverhang: CGFloat = 2
 }
 
 extension View {
@@ -353,16 +366,21 @@ struct SessionButtons: View {
     }
 }
 
-/// The squad pet: a paw in its mood's colour, its species and stage, and progress to the next
-/// stage. Stands in for the drawn pet (M5).
+/// The squad pet: the pet itself, in its mood, then its species and stage, and its progress to
+/// the next stage in its mood's colour. One VoiceOver element that names the pet, its stage and
+/// mood, and how far it has to go.
+///
+/// The pet is drawn `ActivityMetrics.petRowOverhang` taller than the row above and below, into the
+/// spacing round it, so the row is as tall as its caption: the Lock Screen and StandBy layouts were
+/// measured with a paw there and stay under 160 points (LockScreenHeightTests).
 struct PetRow: View {
     let pet: LiveActivityPresentation.Pet
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
     var body: some View {
         HStack(spacing: LKSpacing.s) {
-            Image(systemName: "pawprint.fill")
-                .foregroundStyle(LKColor.petMood(pet.mood))
+            PetView(code: pet.code, mood: pet.mood, size: ActivityMetrics.petRowCreature)
+                .padding(.vertical, -ActivityMetrics.petRowOverhang)
             Text(pet.title)
                 .foregroundStyle(LKColor.textSecondary)
                 .lineLimit(1)

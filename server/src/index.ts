@@ -3,6 +3,7 @@
 //   GET    /health                 -> {"ok": true, "environment": "development"}
 //   POST   /admin/push-test        sends a made-up squad to one Live Activity: the M0 APNs spike
 //                                  (src/admin.ts). Development only, behind ADMIN_TOKEN (README.md).
+//   POST   /admin/push-to-start-test   starts that squad's Live Activity by push: the M4 spike. Ditto.
 //   M2, accounts and friends (docs/milestones/M2.md):
 //   POST   /auth/apple             Sign in with Apple -> { token, user, isNew }   (src/accounts.ts)
 //   GET    /me  PATCH /me  DELETE /me
@@ -20,6 +21,9 @@
 //   POST   /sessions  POST /sessions/:id/join  POST /sessions/:id/la-token       (src/sessions.ts)
 //   POST   /sessions/:id/pause|resume|end|slip  POST /sessions/:id/cheer
 //   GET    /sessions/:id  GET /sessions/:id/live (WebSocket)
+//   M4, invites and joining (docs/milestones/M4.md): POST /devices takes quiet hours; opening a
+//   squad's room alerts the squad after the response (src/alerts.ts, through `ctx.waitUntil`); joins
+//   take a push-to-start token (src/pushToStart.ts).
 //
 // Every route but /health, /admin/*, /auth/apple, /j/:code and /.well-known/* needs
 // `Authorization: Bearer <token>`. Each session is a `Room` Durable Object (src/room.ts); the APNs
@@ -29,7 +33,7 @@
 // one isn't a function or class, so constants and helpers live in the other modules.
 
 import { deleteMe, getMe, handleAvailability, patchMe, registerDevice, signInWithApple, signOut } from "./accounts.ts";
-import { pushTest } from "./admin.ts";
+import { pushTest, pushToStartTest } from "./admin.ts";
 import { authenticate } from "./auth.ts";
 import { type AuthedContext, type Context, type Dependencies, makeContext } from "./context.ts";
 import { Database } from "./db.ts";
@@ -67,6 +71,7 @@ function authed(method: string, path: string, run: (context: AuthedContext, para
 const ROUTES: Route[] = [
   open("GET", "/health", async ({ env }) => json({ ok: true, environment: env.ENVIRONMENT })),
   open("POST", "/admin/push-test", ({ request, env, deps }) => pushTest(request, env, deps)),
+  open("POST", "/admin/push-to-start-test", ({ request, env, deps, db }) => pushToStartTest(request, env, deps, db)),
 
   open("POST", "/auth/apple", signInWithApple),
   authed("DELETE", "/auth/session", signOut),
@@ -132,5 +137,6 @@ export async function handle(request: Request, env: Env, deps: Dependencies = {}
 }
 
 export default {
-  fetch: (request, env) => handle(request, env),
+  // The runtime's waitUntil keeps the Worker going for work after the response (M4's alerts).
+  fetch: (request, env, ctx) => handle(request, env, { waitUntil: (promise) => ctx.waitUntil(promise) }),
 } satisfies ExportedHandler<Env>;

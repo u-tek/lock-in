@@ -51,7 +51,31 @@ export interface DeviceInput {
   laEnabled: boolean;
   frequentPushes: boolean;
   tz: string;
+  /** Minutes after local midnight (M4); null is off. */
+  quietHours: { start: number; end: number } | null;
+  /** An existing row keeps its quiet hours rather than taking `quietHours` (the app left them out). */
+  keepQuietHours: boolean;
   now: number;
+}
+
+/** One phone of a squadmate who may get "X is locking in" (M4), before quiet hours and limits. */
+export interface AlertDeviceRow {
+  user_id: string;
+  apns_token: string;
+  apns_env: ApnsEnvironment;
+  tz: string;
+  quiet_start: number | null;
+  quiet_end: number | null;
+}
+
+/** An `alerts` row (M4): one recipient alerted about one room. */
+export interface AlertWrite {
+  recipientId: string;
+  squadId: string;
+  senderId: string;
+  sessionId: string;
+  /** Unix seconds. */
+  sentAt: number;
 }
 
 export interface ReportInput {
@@ -288,10 +312,11 @@ export class Database {
 
   /** One row per APNs token: a phone that signs into another account moves its row with it. */
   async upsertDevice(device: DeviceInput): Promise<void> {
+    const update = device.keepQuietHours ? 0 : 1;
     await this.d1
       .prepare(
-        `INSERT INTO devices (id, user_id, apns_token, apns_env, push_to_start_token, la_enabled, frequent_pushes, tz, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO devices (id, user_id, apns_token, apns_env, push_to_start_token, la_enabled, frequent_pushes, tz, quiet_start, quiet_end, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (apns_token) DO UPDATE SET
            user_id = excluded.user_id,
            apns_env = excluded.apns_env,
@@ -299,6 +324,8 @@ export class Database {
            la_enabled = excluded.la_enabled,
            frequent_pushes = excluded.frequent_pushes,
            tz = excluded.tz,
+           quiet_start = CASE WHEN ? THEN excluded.quiet_start ELSE quiet_start END,
+           quiet_end = CASE WHEN ? THEN excluded.quiet_end ELSE quiet_end END,
            updated_at = excluded.updated_at`,
       )
       .bind(
@@ -310,9 +337,18 @@ export class Database {
         device.laEnabled ? 1 : 0,
         device.frequentPushes ? 1 : 0,
         device.tz,
+        device.quietHours?.start ?? null,
+        device.quietHours?.end ?? null,
         device.now,
+        update,
+        update,
       )
       .run();
+  }
+
+  /** APNs says this push-to-start token is gone: forget it wherever it's stored (M4). */
+  async clearPushToStartToken(token: string): Promise<void> {
+    await this.d1.prepare("UPDATE devices SET push_to_start_token = NULL WHERE push_to_start_token = ?").bind(token).run();
   }
 
   // Friends
@@ -698,6 +734,86 @@ export class Database {
       )
       .bind(since, squadId)
       .first<SquadSnapshotRow>();
+  }
+
+  // "X is locking in" (M4, src/alerts.ts)
+
+  /** Whether `hostId` opened another room in the squad after `since`: open, end, open again. */
+  async openedAnotherRoomSince(squadId: string, hostId: string, sessionId: string, since: number): Promise<boolean> {
+    const row = await this.d1
+      .prepare("SELECT 1 AS yes FROM sessions WHERE squad_id = ? AND host_id = ? AND id <> ? AND created_at > ? LIMIT 1")
+      .bind(squadId, hostId, sessionId, since)
+      .first();
+    return row !== null;
+  }
+
+  /**
+   * Every phone of every squadmate who may be told `openerId` is locking in: not the opener, not
+   * muted, no block either way, not in a session (a running timer anywhere). Quiet hours and the
+   * limits come after.
+   */
+  async alertCandidates(squadId: string, openerId: string): Promise<AlertDeviceRow[]> {
+    const { results } = await this.d1
+      .prepare(
+        `SELECT d.user_id, d.apns_token, d.apns_env, d.tz, d.quiet_start, d.quiet_end
+         FROM squad_members m JOIN devices d ON d.user_id = m.user_id
+         WHERE m.squad_id = ? AND m.user_id <> ? AND m.muted = 0
+           AND NOT EXISTS (SELECT 1 FROM blocks b
+             WHERE (b.user_id = m.user_id AND b.blocked_id = ?) OR (b.user_id = ? AND b.blocked_id = m.user_id))
+           AND NOT EXISTS (SELECT 1 FROM participants p WHERE p.user_id = m.user_id AND p.ended_at IS NULL)
+         ORDER BY m.joined_at, m.user_id, d.id`,
+      )
+      .bind(squadId, openerId, openerId, openerId)
+      .all<AlertDeviceRow>();
+    return results;
+  }
+
+  /**
+   * Records each alert unless it would break a limit: one per squad per recipient since
+   * `squadSince`, fewer than `dailyLimit` per recipient since `daySince`. Each check and write is one
+   * statement, so two rooms opening at once can't both slip under a limit. Whether each was recorded.
+   */
+  async reserveAlerts(alerts: AlertWrite[], limits: { squadSince: number; daySince: number; dailyLimit: number }): Promise<boolean[]> {
+    if (alerts.length === 0) return [];
+    const results = await this.d1.batch(
+      alerts.map((alert) =>
+        this.d1
+          .prepare(
+            `INSERT INTO alerts (recipient_id, squad_id, sender_id, session_id, sent_at)
+             SELECT ?, ?, ?, ?, ?
+             WHERE NOT EXISTS (SELECT 1 FROM alerts WHERE recipient_id = ? AND squad_id = ? AND sent_at > ?)
+               AND (SELECT count(*) FROM alerts WHERE recipient_id = ? AND sent_at > ?) < ?`,
+          )
+          .bind(
+            alert.recipientId,
+            alert.squadId,
+            alert.senderId,
+            alert.sessionId,
+            alert.sentAt,
+            alert.recipientId,
+            alert.squadId,
+            limits.squadSince,
+            alert.recipientId,
+            limits.daySince,
+            limits.dailyLimit,
+          ),
+      ),
+    );
+    return results.map((result) => (result?.meta.changes ?? 0) > 0);
+  }
+
+  /**
+   * After the sends, in one transaction: strikes off recipients none of whose phones took the
+   * alert, deletes devices APNs says are gone, and trims the log to `trimBefore`.
+   */
+  async afterAlerts(done: { sessionId: string; undelivered: string[]; goneTokens: string[]; trimBefore: number }): Promise<void> {
+    await this.d1.batch([
+      ...done.undelivered.map((recipientId) =>
+        this.d1.prepare("DELETE FROM alerts WHERE session_id = ? AND recipient_id = ?").bind(done.sessionId, recipientId),
+      ),
+      ...done.goneTokens.map((token) => this.d1.prepare("DELETE FROM devices WHERE apns_token = ?").bind(token)),
+      this.d1.prepare("DELETE FROM alerts WHERE sent_at < ?").bind(done.trimBefore),
+    ]);
   }
 
   private participantUpsert(p: ParticipantWrite): D1PreparedStatement {

@@ -7,10 +7,11 @@
 //   DELETE /me                -> 204
 //   DELETE /auth/session      -> 204 (signs this token out, M3)
 //   GET    /handles/:handle   -> { available, reason? }
-//   POST   /devices           { apnsToken, env, pushToStartToken?, laEnabled, frequentPushes, tz } -> 204
+//   POST   /devices           { apnsToken, env, pushToStartToken?, laEnabled, frequentPushes, tz, quietHours? } -> 204
 //
 // Logs say what happened, never who: no ids, handles, names or tokens.
 
+import { DEFAULT_QUIET_HOURS, type QuietHours, isQuietHours } from "./alerts.ts";
 import { isDeviceToken } from "./apns.ts";
 import {
   AppleRequestError,
@@ -254,6 +255,9 @@ export async function signOut(context: AuthedContext): Promise<Response> {
 /**
  * Registers the phone for pushes (M3, M4). Upserted by APNs token, so a phone that signs into
  * another account moves rather than doubling up. Anything malformed is 422 `device_invalid`.
+ *
+ * M4: `quietHours` is `{ start, end }` in minutes after local midnight (in `tz`), or null for none.
+ * Left out, a new phone gets 22:00–07:00 and a known one keeps what it had.
  */
 export async function registerDevice(context: AuthedContext): Promise<Response> {
   const body = await readObject(context.request);
@@ -271,6 +275,15 @@ export async function registerDevice(context: AuthedContext): Promise<Response> 
   if (typeof body.tz !== "string" || body.tz.length > MAX_TIME_ZONE_LENGTH || !TIME_ZONE.test(body.tz)) {
     throw invalid("tz must be an IANA time zone name like Australia/Sydney");
   }
+  let quietHours: QuietHours | null | undefined;
+  if (body.quietHours === null) {
+    quietHours = null;
+  } else if (body.quietHours !== undefined) {
+    if (!isQuietHours(body.quietHours)) {
+      throw invalid("quietHours must be null or { start, end }: different whole minutes after midnight, 0–1439");
+    }
+    quietHours = { start: body.quietHours.start, end: body.quietHours.end };
+  }
 
   await context.db.upsertDevice({
     id: newShortID(context.random),
@@ -281,6 +294,8 @@ export async function registerDevice(context: AuthedContext): Promise<Response> 
     laEnabled: body.laEnabled,
     frequentPushes: body.frequentPushes,
     tz: body.tz,
+    quietHours: quietHours === undefined ? DEFAULT_QUIET_HOURS : quietHours,
+    keepQuietHours: quietHours === undefined,
     now: context.now,
   });
   return noContent();

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { APNS_BODY_LIMIT_BYTES, ApnsClient, ApnsConfigError, PROVIDER_TOKEN_REFRESH_SECONDS, isDeviceToken } from "../src/apns.ts";
+import { APNS_BODY_LIMIT_BYTES, ApnsClient, ApnsConfigError, PROVIDER_TOKEN_REFRESH_SECONDS, isDeviceToken, isGoneToken } from "../src/apns.ts";
 import { DEVICE_TOKEN, decodeJWT, fakeAPNs, makeKey, verifyES256 } from "./helpers.ts";
 
 const T0 = 1_791_900_000;
@@ -155,6 +155,60 @@ describe("ApnsClient", () => {
 
     expect(await send(exact)).toMatchObject({ ok: true });
     expect(new TextEncoder().encode(fake.requests[0]?.body).length).toBe(APNS_BODY_LIMIT_BYTES);
+  });
+
+  test("sends an alert to the bundle ID's topic at priority 10, with a collapse id and an expiration", async () => {
+    const fake = fakeAPNs({ status: 200, apnsId: "alert-1" });
+    const { apns } = await client(fake);
+    const alert = { aps: { alert: { title: "Library Goblins", body: "Ava is locking in 🔒" } } };
+    const result = await apns.sendAlert({ deviceToken: DEVICE_TOKEN, environment: "sandbox", payload: alert, collapseId: "lk-r7Kq2xP9aL", expiration: T0 + 1800.9 });
+    expect(result).toEqual({ ok: true, status: 200, apnsId: "alert-1" });
+
+    const [request] = fake.requests;
+    expect(request?.url).toBe(`https://api.sandbox.push.apple.com/3/device/${DEVICE_TOKEN}`);
+    expect(request?.headers).toEqual({
+      authorization: expect.stringMatching(/^bearer /),
+      "apns-push-type": "alert",
+      "apns-topic": "com.example.lockin",
+      "apns-priority": "10",
+      "apns-collapse-id": "lk-r7Kq2xP9aL",
+      "apns-expiration": String(T0 + 1800),
+      "content-type": "application/json",
+    });
+    expect(JSON.parse(request?.body ?? "")).toEqual(alert);
+    expect(apns.alertTopic).toBe("com.example.lockin");
+
+    // Neither is required; the Live Activity topic is unchanged.
+    await apns.sendAlert({ deviceToken: DEVICE_TOKEN, environment: "production", payload: alert });
+    expect(fake.requests[1]?.headers).not.toHaveProperty("apns-collapse-id");
+    expect(fake.requests[1]?.headers).not.toHaveProperty("apns-expiration");
+    expect(apns.topic).toBe("com.example.lockin.push-type.liveactivity");
+  });
+
+  test("an alert retries once on ExpiredProviderToken, and is refused before sending when malformed", async () => {
+    const fake = fakeAPNs({ status: 403, body: { reason: "ExpiredProviderToken" } }, { status: 200 });
+    const { apns } = await client(fake);
+    const payload = { aps: { alert: "hi" } };
+    expect(await apns.sendAlert({ deviceToken: DEVICE_TOKEN, environment: "production", payload })).toMatchObject({ ok: true });
+    expect(fake.requests).toHaveLength(2);
+    expect(fake.requests[1]?.headers.authorization).not.toBe(fake.requests[0]?.headers.authorization);
+
+    fake.requests.length = 0;
+    await expect(apns.sendAlert({ deviceToken: "xyz", environment: "production", payload })).rejects.toThrow(TypeError);
+    await expect(apns.sendAlert({ deviceToken: DEVICE_TOKEN, environment: "production", payload, collapseId: "x".repeat(65) })).rejects.toThrow(/collapseId/);
+    await expect(apns.sendAlert({ deviceToken: DEVICE_TOKEN, environment: "production", payload, collapseId: "" })).rejects.toThrow(/collapseId/);
+    await expect(apns.sendAlert({ deviceToken: DEVICE_TOKEN, environment: "production", payload: { aps: { alert: "x".repeat(APNS_BODY_LIMIT_BYTES) } } })).rejects.toThrow(RangeError);
+    expect(fake.requests).toHaveLength(0);
+    // 64 bytes is fine.
+    expect(await apns.sendAlert({ deviceToken: DEVICE_TOKEN, environment: "production", payload, collapseId: "x".repeat(64) })).toMatchObject({ ok: true });
+  });
+
+  test("a token is gone on 410 or BadDeviceToken, and only then", () => {
+    expect(isGoneToken({ ok: false, status: 410, apnsId: null, reason: "Unregistered" })).toBe(true);
+    expect(isGoneToken({ ok: false, status: 400, apnsId: null, reason: "BadDeviceToken" })).toBe(true);
+    expect(isGoneToken({ ok: false, status: 400, apnsId: null, reason: "BadTopic" })).toBe(false);
+    expect(isGoneToken({ ok: false, status: 429, apnsId: null, reason: "TooManyRequests" })).toBe(false);
+    expect(isGoneToken({ ok: true, status: 200, apnsId: null })).toBe(false);
   });
 
   test("an unusable key is a set-up error", async () => {

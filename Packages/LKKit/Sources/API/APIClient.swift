@@ -143,12 +143,14 @@ public struct APIClient: LockinAPI {
 
     // MARK: - Sessions
 
-    public func startSession(squadId: String?, minutes: Int) async throws -> JoinedSession {
-        try await send(.post, ["sessions"], body: StartSessionRequest(squadId: squadId, minutes: minutes), as: JoinedSession.self)
+    public func startSession(squadId: String?, minutes: Int, pushToStart: PushToStart?) async throws -> JoinedSession {
+        let body = StartSessionRequest(squadId: squadId, minutes: minutes, pushToStart: pushToStart)
+        return try await send(.post, ["sessions"], body: body, as: JoinedSession.self)
     }
 
-    public func joinSession(id: String, minutes: Int) async throws -> JoinedSession {
-        try await send(.post, ["sessions", id, "join"], body: JoinSessionRequest(minutes: minutes), as: JoinedSession.self)
+    public func joinSession(id: String, minutes: Int, pushToStart: PushToStart?) async throws -> JoinedSession {
+        let body = JoinSessionRequest(minutes: minutes, pushToStart: pushToStart)
+        return try await send(.post, ["sessions", id, "join"], body: body, as: JoinedSession.self)
     }
 
     public func uploadLiveActivityToken(sessionId: String, token: String, env: APNsEnvironment) async throws {

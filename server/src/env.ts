@@ -30,7 +30,7 @@ export interface Env {
   APNS_KEY_ID?: string;
   /** The contents of the .p8 file. */
   APNS_PRIVATE_KEY?: string;
-  /** 32+ random characters. Unset or shorter, and /admin/push-test doesn't exist. */
+  /** 32+ random characters. Unset or shorter, and the /admin routes don't exist. */
   ADMIN_TOKEN?: string;
 
   /**

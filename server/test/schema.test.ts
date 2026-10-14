@@ -1,9 +1,10 @@
 // Applies migrations/ to an in-memory SQLite (Node's built-in node:sqlite, the same engine D1 runs)
 // with foreign keys on, as D1 has them, and checks the constraints do their job.
 
-import type { DatabaseSync } from "node:sqlite";
+import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, test } from "vitest";
-import { migratedSQLite as migrated } from "./d1.ts";
+import { migrationFiles, migratedSQLite as migrated } from "./d1.ts";
 
 let db: DatabaseSync;
 const run = (sql: string, ...params: Array<string | number | null>) => db.prepare(sql).run(...params);
@@ -40,6 +41,7 @@ describe("the D1 schema", () => {
         "squads",
         "users",
         "auth_tokens",
+        "alerts",
       ]),
     );
   });
@@ -146,6 +148,51 @@ describe("the D1 schema", () => {
     // Solo sessions aren't a squad's: any number may be open.
     run(open, "q4", null, "open", null);
     run(open, "q5", null, "open", null);
+  });
+
+  test("0004 gives phones registered before it 22:00–07:00", () => {
+    // Up to 0003, a phone; then 0004 over it, as `wrangler d1 migrations apply` would.
+    const before = new DatabaseSync(":memory:");
+    before.exec("PRAGMA foreign_keys = ON");
+    const sql = (file: string) => readFileSync(new URL(`../migrations/${file}`, import.meta.url), "utf8");
+    for (const file of migrationFiles().filter((name) => name < "0004")) before.exec(sql(file));
+    before.exec("INSERT INTO users (id, apple_sub, created_at) VALUES ('Av4Nq8sT2b', 'sub.ava', 1)");
+    before.exec("INSERT INTO devices (id, user_id, apns_token, apns_env, tz, updated_at) VALUES ('d1', 'Av4Nq8sT2b', 'abcd', 'production', 'UTC', 1)");
+    before.exec(sql("0004_invites.sql"));
+    expect({ ...(before.prepare("SELECT quiet_start, quiet_end FROM devices").get() as object) }).toEqual({ quiet_start: 1320, quiet_end: 420 });
+  });
+
+  test("0004: quiet hours are whole minutes of a day, both or neither, never empty", () => {
+    const device = "INSERT INTO devices (id, user_id, apns_token, apns_env, tz, updated_at, quiet_start, quiet_end) VALUES (?, 'Av4Nq8sT2b', ?, 'sandbox', 'UTC', 1, ?, ?)";
+    run(device, "d1", "a1", 1320, 420);
+    run(device, "d2", "a2", null, null);
+    run(device, "d3", "a3", 0, 1439);
+    expect(() => run(device, "d4", "a4", 1320, null)).toThrow(/CHECK/);
+    expect(() => run(device, "d5", "a5", null, 420)).toThrow(/CHECK/);
+    expect(() => run(device, "d6", "a6", 1440, 420)).toThrow(/CHECK/);
+    expect(() => run(device, "d7", "a7", 1320, -1)).toThrow(/CHECK/);
+    expect(() => run(device, "d8", "a8", 600, 600)).toThrow(/CHECK/);
+    // Left out, they're 22:00–07:00.
+    run("INSERT INTO devices (id, user_id, apns_token, apns_env, tz, updated_at) VALUES ('d9', 'Av4Nq8sT2b', 'a9', 'sandbox', 'UTC', 1)");
+    expect({ ...(db.prepare("SELECT quiet_start, quiet_end FROM devices WHERE id = 'd9'").get() as object) }).toEqual({ quiet_start: 1320, quiet_end: 420 });
+  });
+
+  test("0004: alerts go with the accounts of whoever sent or got them", () => {
+    addUser("Ka9Lm3Vx0c", "kai");
+    const alert = "INSERT INTO alerts (recipient_id, squad_id, sender_id, session_id, sent_at) VALUES (?, 'Sq00000001', ?, 'r7Kq2xP9aL', 1)";
+    run(alert, "Nr2Kx7pQ1m", "Av4Nq8sT2b");
+    run(alert, "Ka9Lm3Vx0c", "Av4Nq8sT2b");
+    run(alert, "Av4Nq8sT2b", "Ka9Lm3Vx0c");
+    expect(() => run(alert, "Nobody0000", "Av4Nq8sT2b")).toThrow(/FOREIGN KEY/);
+    expect(() => run("INSERT INTO alerts (recipient_id, squad_id, sender_id, session_id) VALUES ('Nr2Kx7pQ1m', 's', 'Av4Nq8sT2b', 'r')")).toThrow(/NOT NULL/);
+
+    run("DELETE FROM users WHERE id = 'Nr2Kx7pQ1m'");
+    expect(count("SELECT count(*) AS n FROM alerts")).toBe(2);
+    run("DELETE FROM users WHERE id = 'Av4Nq8sT2b'");
+    expect(count("SELECT count(*) AS n FROM alerts")).toBe(0);
+    // The limits' queries use the index.
+    const plan = db.prepare("EXPLAIN QUERY PLAN SELECT count(*) FROM alerts WHERE recipient_id = ? AND sent_at > ?").all("x", 1);
+    expect(JSON.stringify(plan)).toContain("alerts_recipient");
   });
 
   test("a session's end and its status agree", () => {

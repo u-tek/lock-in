@@ -36,6 +36,8 @@ struct HomeScreen: View {
     @ObservedObject var account: AccountStore
     @ObservedObject var squads: SquadsStore
     let social: SocialModels
+    /// Alerts: a tap on "is locking in" picks its squad here (M4).
+    @ObservedObject private var alerts: NotificationInbox = AppServices.notificationInbox
 
     @State private var minutes: Int
     /// The squad chosen in the picker; nil for solo.
@@ -144,6 +146,17 @@ struct HomeScreen: View {
         .onChange(of: engine.phase) {
             openPendingInvite()
         }
+        // A tap on an "is locking in" alert: its squad, picked, with "Join in" waiting.
+        .onChange(of: alerts.squadRequest, initial: true) { _, request in
+            pick(request)
+        }
+    }
+
+    private func pick(_ request: NotificationInbox.SquadRequest?) {
+        guard let request else { return }
+        squadChoice = request.squadId
+        sheet = nil
+        alerts.squadRequest = nil
     }
 
     private func openPendingInvite() {

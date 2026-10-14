@@ -1,0 +1,8 @@
+{
+  "species": ["puff", "sprout", "ember", "pebble"],
+  "stageXp": [0, 0, 600, 3000, 10000, 25000],
+  "streakMinMinutes": 20,
+  "streakShare": 0.5,
+  "sadMinutes": 30,
+  "coinsPerMinute": 1
+}

@@ -1,10 +1,11 @@
 import Foundation
 
-/// The squad pet's species and stage, as carried in `Pet.k`: `<species>.<stage>`, e.g. "fox.2".
+/// The squad pet's species and stage, as carried in `Pet.k`: `<species>.<stage>`, e.g. "sprout.2".
 ///
 /// Parsing never fails, for the same reason as `AvatarCode`: a code from a newer server may name a
 /// species this app version can't draw yet. A garbled species reads as `defaultSpecies` and a
-/// garbled stage as 0, the egg. The species catalogue itself arrives with the pet (M5).
+/// garbled stage as 0, the egg. A well-formed species is kept even when it isn't one of
+/// `PetRules.species`: the `Creature` module draws those as the default.
 public struct PetCode: Hashable, Sendable, CustomStringConvertible {
     /// Lowercase ASCII letters, digits, "-" and "_".
     public var species: String
@@ -49,6 +50,18 @@ public struct PetCode: Hashable, Sendable, CustomStringConvertible {
         max(0, stage - Growth.adult.rawValue)
     }
 
+    /// The stage in words: "egg", "baby", "teen", "adult", then "prestige", "prestige 2" and on.
+    /// English only until the app has a string catalogue.
+    public var stageName: String {
+        switch growth {
+        case .egg: "egg"
+        case .baby: "baby"
+        case .teen: "teen"
+        case .adult: "adult"
+        case .prestige: prestigeLevel > 1 ? "prestige \(prestigeLevel)" : "prestige"
+        }
+    }
+
     public var code: String {
         "\(species).\(stage)"
     }
@@ -57,8 +70,8 @@ public struct PetCode: Hashable, Sendable, CustomStringConvertible {
         code
     }
 
-    /// Drawn when a code's species can't be read.
-    public static let defaultSpecies = "fox"
+    /// Drawn when a code's species can't be read: the first of `PetRules.species`.
+    public static let defaultSpecies = "puff"
 
     public static let `default` = PetCode()
 

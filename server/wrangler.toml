@@ -8,7 +8,8 @@ compatibility_date = "2026-10-01"
 #   APNS_TEAM_ID       your Apple Developer team ID, e.g. ABCDE12345
 #   APNS_KEY_ID        the APNs key's 10-character ID
 #   APNS_PRIVATE_KEY   the contents of AuthKey_XXXXXXXXXX.p8
-#   ADMIN_TOKEN        32+ random characters; turns on POST /admin/push-test outside production
+#   ADMIN_TOKEN        32+ random characters; turns on POST /admin/push-test and
+#                      /admin/push-to-start-test outside production
 #   SIWA_KEY_ID        the Sign in with Apple key's 10-character ID (M2)
 #   SIWA_PRIVATE_KEY   the contents of that key's AuthKey_XXXXXXXXXX.p8. With SIWA_KEY_ID, sign-in
 #                      keeps Apple's refresh token so account deletion can revoke it (Apple requires

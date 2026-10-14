@@ -6,19 +6,22 @@ deployed Worker can push a Live Activity update to a TestFlight build on a real 
 handles and names, friend codes and invite links, blocks, reports and account deletion. M3 adds
 **squads and sessions**: each session is a `Room` Durable Object that runs everyone's timers,
 pushes the squad's Live Activity to every member and serves a WebSocket live view, with one APNs
-provider token for all of them from the `ApnsAuth` Durable Object. The contracts the app is written
-against are `docs/milestones/M2.md` and `docs/milestones/M3.md`.
+provider token for all of them from the `ApnsAuth` Durable Object. M4 adds **invites and
+joining**: opening a squad's room tells the rest of the squad "Ava is locking in 🔒" (muted squads,
+blocks, quiet hours and limits permitting), and the push-to-start spike. The contracts the app is
+written against are `docs/milestones/M2.md`, `M3.md` and `M4.md`.
 
 | Route | Auth | What it does |
 |---|---|---|
 | `GET /health` | | `{"ok": true, "environment": "development"}` |
 | `POST /admin/push-test` | admin | Sends a made-up squad to one Live Activity. Development only, behind `ADMIN_TOKEN` |
+| `POST /admin/push-to-start-test` | admin | `{ token, env }`: starts the made-up squad's Live Activity by push-to-start (M4 spike). Same guard |
 | `POST /auth/apple` | | `{ identityToken, authorizationCode?, displayName? }` → `{ token, user, isNew }`. Verifies the identity token against Apple's keys, creates the account on first sign-in |
 | `GET /me` | bearer | `{ user }` |
 | `PATCH /me` | bearer | `{ handle?, displayName?, avatarCode? }` → `{ user }` |
 | `DELETE /me` | bearer | Deletes the account and everything that's only theirs, revokes Apple's token → 204 |
 | `GET /handles/:handle` | bearer | `{ available, reason? }` for the handle picker |
-| `POST /devices` | bearer | `{ apnsToken, env, pushToStartToken?, laEnabled, frequentPushes, tz }` → 204 |
+| `POST /devices` | bearer | `{ apnsToken, env, pushToStartToken?, laEnabled, frequentPushes, tz, quietHours? }` → 204. `quietHours` is `{ start, end }` (minutes after local midnight) or `null`; left out, 22:00–07:00 for a new phone |
 | `GET /friends` | bearer | `{ friends: [Friend] }`, newest first |
 | `POST /friends/code` | bearer | Your friend code: the current one, or a new one once it expires (7 days) |
 | `POST /friends/redeem/:code` | bearer | Befriends the code's owner (both ways) → `{ friend }` |
@@ -35,8 +38,8 @@ against are `docs/milestones/M2.md` and `docs/milestones/M3.md`.
 | `POST /squads/join/:code` | bearer | → `{ squad }`. Free squads hold 4, a Plus owner's (or Plus joiner's) 6 |
 | `PATCH /squads/:id/members/me` | bearer | `{ muted }` → `{ squad }` |
 | `DELETE /squads/:id/members/me` | bearer | Leaves → 204. An owner hands the squad to the longest-standing member; the last one out deletes it |
-| `POST /sessions` | bearer | `{ squadId?, minutes }` → `Joined`: solo, or the squad's room (joined, or opened) |
-| `POST /sessions/:id/join` | bearer | `{ minutes }` → `Joined` |
+| `POST /sessions` | bearer | `{ squadId?, minutes, pushToStart? }` → `Joined`: solo, or the squad's room (joined, or opened; opening alerts the squad) |
+| `POST /sessions/:id/join` | bearer | `{ minutes, pushToStart? }` → `Joined`. With `pushToStart: { token, env }`, also starts the Live Activity by push and adds `pushedToStart` |
 | `POST /sessions/:id/la-token` | bearer | `{ token, env }` → 204: the Live Activity's push token and its APNs environment |
 | `POST /sessions/:id/pause`, `resume`, `end`, `slip` | bearer | → `{ contentState }` |
 | `POST /sessions/:id/cheer` | bearer | `{ to, kind }` (0–7) → 204, one per 10 s |
@@ -46,7 +49,7 @@ against are `docs/milestones/M2.md` and `docs/milestones/M3.md`.
 Everything else answers `404`. Errors are `{"error": "<a sentence>", "code": "<machine code>"}`;
 the app switches on `code`. A few carry one more field: `limit` on 402 `plus_required`, `sessionId`
 on 409 `already_in_session`, `retryAfter` (seconds) on 429 `cheer_too_soon`. The codes per route are
-in `docs/milestones/M2.md` and `docs/milestones/M3.md`; on top of those, any route can answer
+in `docs/milestones/M2.md`, `M3.md` and `M4.md`; on top of those, any route can answer
 `400 bad_request` (a body that isn't a JSON object), `413 too_large` (a body over 16 KB) and
 `500 internal`, and `POST /auth/apple` answers `502 apple_unavailable` when Apple's keys can't be
 fetched.
@@ -59,18 +62,21 @@ fetched.
 | `src/invite.ts` | `/j/:code` and the apple-app-site-association file |
 | `src/squads.ts` | `/squads…`: limits, codes, joining, leaving and handing on |
 | `src/sessions.ts` | `/sessions…`: checks what only D1 knows (squad membership, your other session), then forwards to the room |
+| `src/alerts.ts` | "X is locking in": who's told, quiet hours in each phone's time zone, the limits, the payload |
+| `src/pushToStart.ts` | The push-to-start spike: `pushToStart` on joins, the `start` payload |
+| `src/push.ts` | The Worker's own APNs client for those two, on `ApnsAuth`'s provider token |
 | `src/room.ts` | The `Room` Durable Object: one per session ("The rooms" below) |
 | `src/apnsAuth.ts` | The `ApnsAuth` Durable Object: the one APNs provider token every room presents, and the rooms' client for it |
 | `src/appleAuth.ts` | Sign in with Apple: identity-token verification (RS256 against Apple's cached keys), the code-for-refresh-token exchange and revocation (ES256 client secret) |
 | `src/auth.ts` | Session tokens (32 random bytes; only the SHA-256 is stored) and the bearer check |
 | `src/moderation.ts` | The handle and name check in `fixtures/moderation/README.md`, with the shared word list |
 | `src/db.ts` | Every D1 query, typed |
-| `src/admin.ts` | `POST /admin/push-test` |
+| `src/admin.ts` | `POST /admin/push-test`, `POST /admin/push-to-start-test` |
 | `src/liveActivity.ts` | The Live Activity wire format (SPEC.md §4.3): strict parsing, canonical encoding, the 3.5 KB budget, `stale-date`, APNs payloads for `update`, `end` and push-to-start, within APNs' 4 KB body limit |
-| `src/apns.ts` | The APNs sender: token auth with an ES256 JWT (signed itself, or from `ApnsAuth`), one retry on `ExpiredProviderToken` (never on a 429), bodies over 4 KB refused before sending |
+| `src/apns.ts` | The APNs sender, for Live Activity pushes and alerts: token auth with an ES256 JWT (signed itself, or from `ApnsAuth`), one retry on `ExpiredProviderToken` (never on a 429), bodies over 4 KB refused before sending |
 | `src/jwt.ts` | ES256 signing with Web Crypto, from a `.p8` file |
 | `src/demo.ts` | The spike's scenarios: `squad`, `join`, `cheer`, `end` |
-| `migrations/` | The D1 schema (SPEC.md §4.6); `0002_accounts.sql` adds sessions, Apple's refresh token and report notes; `0003_squads.sql` adds `participants.la_env` and the indexes that keep one running timer per user and one open room per squad |
+| `migrations/` | The D1 schema (SPEC.md §4.6); `0002_accounts.sql` adds sessions, Apple's refresh token and report notes; `0003_squads.sql` adds `participants.la_env` and the indexes that keep one running timer per user and one open room per squad; `0004_invites.sql` adds quiet hours to `devices` and the `alerts` log |
 | `test/` | vitest. Route tests run real SQL on an in-memory SQLite behind a D1 stand-in (`test/d1.ts`), against a fake Apple with generated keys (`test/app.ts`). Rooms run on a fake Durable Objects runtime (`test/rooms.ts`: storage, alarms the test fires as its clock moves, WebSockets, eviction) and push to a fake APNs. The shared fixtures in `fixtures/live-activity/` and `fixtures/moderation/` are tested here and by the Swift tests |
 
 The moderation word list is imported straight from `fixtures/moderation/words.json`: wrangler
@@ -278,6 +284,35 @@ when APNs answers 403 `ExpiredProviderToken` to the current one, never because o
 there's nothing new to set. If they're missing, rooms still work and log `push failed
 (ApnsConfigError)` instead of pushing.
 
+## Squad alerts (M4)
+
+When `POST /sessions` opens a squad's room (not when it joins one), the Worker answers first and
+then, through the runtime's `waitUntil`, alerts every other member who hasn't muted the squad,
+hasn't blocked the opener (or been blocked by them) and isn't in a session, on each of their
+phones that isn't in its quiet hours (in the phone's own `tz`). The limits: one per squad per
+person every 30 minutes, six per person in any 24 hours, and none at all when the opener opened
+another room in the squad in the last 10 minutes. Each person told gets a row in `alerts`, which is
+trimmed to two days as alerts go out; someone none of whose phones took it isn't charged. APNs
+saying 410 or `BadDeviceToken` deletes that phone's `devices` row. One log line per room opened:
+
+```
+alerts r7Kq2xP9aL: 2 alerted, 1 in quiet hours, 0 over a limit; 3 pushes accepted, 0 refused, 0 failed, 0 devices removed
+```
+
+The alerts and push-to-start use the same `ApnsAuth` provider token as the rooms. Without the APNs
+secrets, the routes work as before and nothing is sent; each isolate logs `push: APNs isn't set
+up (…)` once.
+
+## Upgrading to M4
+
+```powershell
+cd server
+npx wrangler d1 migrations apply lockin --remote   # applies migrations/0004_invites.sql only
+npx wrangler deploy
+```
+
+Phones registered before it get quiet hours 22:00–07:00. No new secrets.
+
 ## Upgrading to M3
 
 A Worker deployed for M2 needs the new migration and a deploy, which also creates the `ApnsAuth`
@@ -377,6 +412,28 @@ body) or couldn't be reached (`{"error": "Couldn't reach APNs: …"}`), so `curl
 | `TooManyProviderTokenUpdates` (429) | Transport works: the Worker reached APNs. Two isolates sent different provider tokens on one connection; record it (docs/decisions/0004-shared-apns-provider-token.md) |
 | `Couldn't reach APNs` | From `npm run dev`: expected, the local runtime has no HTTP/2 (see Local development). From the deployed Worker: it couldn't talk HTTP/2 to APNs. Try a few times over an hour; if it keeps failing, that's the spike's failure case: write it up in docs/spikes/apns-worker.md. The fallback is a small Node relay using `node:http2` behind the same `sendLiveActivity` interface (SPEC.md §4.2) |
 | `200` but nothing changes on the phone | Live Activities are off in Settings; iOS is throttling priority-10 pushes for this activity (its hourly budget, SPEC.md §3), so try `"priority": 5`; or the phone couldn't decode the content-state, which it drops silently: check the Swift `LockinAttributes` against `fixtures/live-activity/` |
+
+## The push-to-start spike (M4)
+
+`POST /sessions/:id/join` and `POST /sessions` take `pushToStart: { token, env }`, the app's
+push-to-start token (from `pushToStartTokenUpdates`, hex) and its APNs environment. After a squad
+join or open, the Worker sends a `start` push to it (`attributes-type: LockinAttributes`, the
+joiner's `attributes`, the room's content-state, an alert titled with the squad's name, and
+`input-push-token: 1`) and adds `"pushedToStart": true | false` to the answer. A solo session has
+no squad name for the alert, so it's always `false` there. A 410 or `BadDeviceToken` clears that
+token from `devices`. The log line is `push-to-start <session id>: <env> -> APNs <status>`.
+
+To try it from a phone with no squad, copy the app's push-to-start token from its spike screen,
+lock the phone, and:
+
+```sh
+curl --fail-with-body -sS https://lockin-api.yourname.workers.dev/admin/push-to-start-test \
+  -H "Authorization: Bearer $LOCKIN_ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"token":"…","env":"production"}'
+```
+
+It starts the `squad` scenario's activity (`sid` `spike00000`, `me` `me00000000`, "Spike Squad")
+and answers like `/admin/push-test`, plus the `attributes` sent.
 
 ## Local development
 

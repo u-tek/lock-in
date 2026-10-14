@@ -378,6 +378,9 @@ describe("POST /devices", () => {
         la_enabled: 1,
         frequent_pushes: 0,
         tz: "Australia/Sydney",
+        // M4: quiet hours 22:00–07:00 unless the app says otherwise.
+        quiet_start: 1320,
+        quiet_end: 420,
         updated_at: T0,
       },
     ]);
@@ -398,7 +401,42 @@ describe("POST /devices", () => {
     expect(rows()).toEqual([expect.objectContaining({ user_id: noor.user.id, push_to_start_token: null })]);
   });
 
+  test("quiet hours: 22:00–07:00 for a new phone, kept when left out, set, or turned off", async () => {
+    const quiet = () => app.sqlite.prepare("SELECT quiet_start, quiet_end FROM devices").get() as Record<string, unknown>;
+    await app.request("POST", "/devices", { token, body: device });
+    expect({ ...quiet() }).toEqual({ quiet_start: 1320, quiet_end: 420 });
+
+    expect((await app.request("POST", "/devices", { token, body: { ...device, quietHours: { start: 23 * 60 + 30, end: 6 * 60 } } })).status).toBe(204);
+    expect({ ...quiet() }).toEqual({ quiet_start: 1410, quiet_end: 360 });
+    // Left out: kept, while everything else updates.
+    expect((await app.request("POST", "/devices", { token, body: { ...device, tz: "Europe/London" } })).status).toBe(204);
+    expect(rows()).toEqual([expect.objectContaining({ tz: "Europe/London", quiet_start: 1410, quiet_end: 360 })]);
+    // Same-day hours and the edges of the day are fine.
+    expect((await app.request("POST", "/devices", { token, body: { ...device, quietHours: { start: 0, end: 1439 } } })).status).toBe(204);
+    expect({ ...quiet() }).toEqual({ quiet_start: 0, quiet_end: 1439 });
+    // null is off, and stays off when left out.
+    expect((await app.request("POST", "/devices", { token, body: { ...device, quietHours: null } })).status).toBe(204);
+    expect({ ...quiet() }).toEqual({ quiet_start: null, quiet_end: null });
+    await app.request("POST", "/devices", { token, body: device });
+    expect({ ...quiet() }).toEqual({ quiet_start: null, quiet_end: null });
+
+    // A phone new to the server with them set gets what it sent.
+    const noor = await app.signIn("sub.noor");
+    const other = { ...device, apnsToken: "ab".repeat(32), quietHours: { start: 60, end: 120 } };
+    expect((await app.request("POST", "/devices", { token: noor.token, body: other })).status).toBe(204);
+    expect(app.sqlite.prepare("SELECT quiet_start, quiet_end FROM devices WHERE user_id = ?").get(noor.user.id)).toEqual({ quiet_start: 60, quiet_end: 120 });
+  });
+
   test.each([
+    { quietHours: { start: 1320 } },
+    { quietHours: { start: 1320, end: 1320 } },
+    { quietHours: { start: -1, end: 420 } },
+    { quietHours: { start: 1320, end: 1440 } },
+    { quietHours: { start: 1320.5, end: 420 } },
+    { quietHours: { start: "1320", end: 420 } },
+    { quietHours: [1320, 420] },
+    { quietHours: "22:00-07:00" },
+    { quietHours: false },
     { apnsToken: "not-hex" },
     { apnsToken: "abc" },
     { apnsToken: undefined },

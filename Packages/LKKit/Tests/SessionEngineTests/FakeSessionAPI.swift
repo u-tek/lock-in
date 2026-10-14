@@ -31,6 +31,8 @@ final class FakeSessionAPI: LockinAPI, @unchecked Sendable {
         var snapshot = SessionSnapshotAnswer(session: SquadData.session(), contentState: SquadData.room(v: 1, SquadData.mine()))
         /// Errors by route ("startSession", "pause", "session", …), every time until removed.
         var failures: [String: APIError] = [:]
+        /// What a start or join with a push-to-start token says about the push (M4 spike).
+        var pushedToStart = true
     }
 
     struct SessionSnapshotAnswer {
@@ -41,6 +43,7 @@ final class FakeSessionAPI: LockinAPI, @unchecked Sendable {
     private let lock = NSLock()
     private var answers: Answers
     private var recorded: [Call] = []
+    private var sentPushToStarts: [PushToStart?] = []
     private var live: [AsyncThrowingStream<LiveMessage, any Error>.Continuation] = []
 
     init(_ configure: (inout Answers) -> Void = { _ in }) {
@@ -80,12 +83,34 @@ final class FakeSessionAPI: LockinAPI, @unchecked Sendable {
 
     // MARK: - Squad sessions
 
-    func startSession(squadId: String?, minutes: Int) async throws -> JoinedSession {
-        try answer(.startSession(squadId: squadId, minutes: minutes), route: "startSession") { $0.joined }
+    func startSession(squadId: String?, minutes: Int, pushToStart: PushToStart?) async throws -> JoinedSession {
+        note(pushToStart)
+        return try answer(.startSession(squadId: squadId, minutes: minutes), route: "startSession") { answers in
+            Self.answering(pushToStart, with: answers.joined, pushed: answers.pushedToStart)
+        }
     }
 
-    func joinSession(id: String, minutes: Int) async throws -> JoinedSession {
-        try answer(.joinSession(id, minutes: minutes), route: "joinSession") { $0.rejoined }
+    func joinSession(id: String, minutes: Int, pushToStart: PushToStart?) async throws -> JoinedSession {
+        note(pushToStart)
+        return try answer(.joinSession(id, minutes: minutes), route: "joinSession") { answers in
+            Self.answering(pushToStart, with: answers.rejoined, pushed: answers.pushedToStart)
+        }
+    }
+
+    /// The push-to-start tokens sent with starts and joins, in order (nil for none).
+    var pushToStarts: [PushToStart?] {
+        lock.withLock { sentPushToStarts }
+    }
+
+    private func note(_ pushToStart: PushToStart?) {
+        lock.withLock { sentPushToStarts.append(pushToStart) }
+    }
+
+    /// `pushedToStart` comes back only when a token went with the request, as from the server.
+    private static func answering(_ pushToStart: PushToStart?, with joined: JoinedSession, pushed: Bool) -> JoinedSession {
+        var answer = joined
+        answer.pushedToStart = pushToStart == nil ? nil : pushed
+        return answer
     }
 
     func uploadLiveActivityToken(sessionId: String, token: String, env: APNsEnvironment) async throws {

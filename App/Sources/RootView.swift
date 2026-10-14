@@ -15,6 +15,8 @@ struct RootView: View {
     @State private var hasOnboarded: Bool
     @State private var showsSession = false
     @Environment(\.scenePhase) private var scenePhase
+    /// Alerts: a Join that didn't go through says why here (M4).
+    @ObservedObject private var alerts: NotificationInbox = AppServices.notificationInbox
 
     init(engine: SessionEngine, plus: PlusStore, social: SocialModels) {
         self.engine = engine
@@ -42,6 +44,7 @@ struct RootView: View {
         .fullScreenCover(isPresented: $showsSession) {
             SessionCover(engine: engine, plus: plus, social: social)
         }
+        .errorAlert("Couldn't join", message: $alerts.failure)
         .onChange(of: engine.phase, initial: true) { oldPhase, phase in
             showsSession = phase != .idle
             // Back on Home after a session: a room may have opened or closed meanwhile.

@@ -102,6 +102,9 @@ public final class SessionEngine: ObservableObject {
     var isStartingSquad = false
     /// The APNs host the room's push tokens belong to. Tests set one.
     var pushEnvironment: APNsEnvironment = .current
+    /// Watches for Live Activities iOS starts by push (the M4 push-to-start spike), to take up
+    /// the room's.
+    var pushedActivityTask: Task<Void, Never>?
 
     /// - Parameters:
     ///   - liveActivities: The controller that mirrors the session as a Live Activity, or nil for
@@ -145,6 +148,7 @@ public final class SessionEngine: ObservableObject {
             // Tokens can change while the app isn't running: the current one goes up again.
             startTokenUploads()
         }
+        watchPushedActivities()
         reconcile()
     }
 
@@ -569,6 +573,15 @@ public final class SessionEngine: ObservableObject {
         }
         if let id = stored.room?.activityID {
             roomActivity = running.first { $0.id == id }
+        }
+        if roomActivity == nil, var link = stored.room,
+           let pushed = running.first(where: { $0.attributes.sid == link.sessionId && $0.id != activity?.id }) {
+            // The room's activity, started by push (M4 spike) while this phone's join was in
+            // flight or the app wasn't running.
+            roomActivity = pushed
+            link.activityID = pushed.id
+            stored.room = link
+            save()
         }
         let keep = activity?.id ?? roomActivity?.id
         guard running.contains(where: { $0.id != keep }) else { return }

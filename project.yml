@@ -107,6 +107,8 @@ targets:
         product: Social
       - package: LKKit
         product: DeepFocus
+      - package: LKKit
+        product: Notifications
       - target: LockinWidgets
 
   # The Live Activity (every presentation), and later the Home/Lock Screen widgets and the

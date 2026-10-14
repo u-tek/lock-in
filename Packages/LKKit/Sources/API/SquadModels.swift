@@ -155,11 +155,36 @@ public struct JoinedSession: Codable, Hashable, Sendable {
     public var session: SessionInfo
     public var attributes: LockinAttributes
     public var contentState: LockinAttributes.ContentState
+    /// Only when the request carried `pushToStart` (the M4 spike): whether the server push-started
+    /// the Live Activity. False when APNs refused it or it couldn't be built: the app starts the
+    /// activity itself then, next time it's in the foreground.
+    public var pushedToStart: Bool?
 
-    public init(session: SessionInfo, attributes: LockinAttributes, contentState: LockinAttributes.ContentState) {
+    public init(
+        session: SessionInfo,
+        attributes: LockinAttributes,
+        contentState: LockinAttributes.ContentState,
+        pushedToStart: Bool? = nil
+    ) {
         self.session = session
         self.attributes = attributes
         self.contentState = contentState
+        self.pushedToStart = pushedToStart
+    }
+}
+
+/// The push-to-start spike's addition to `POST /sessions` and `POST /sessions/:id/join`
+/// (docs/milestones/M4.md): after joining, the server starts the Live Activity on this token by
+/// push, and says whether it could (`JoinedSession.pushedToStart`).
+public struct PushToStart: Codable, Hashable, Sendable {
+    /// ActivityKit's push-to-start token, as hex.
+    public var token: String
+    /// The APNs host the token belongs to.
+    public var env: APNsEnvironment
+
+    public init(token: String, env: APNsEnvironment) {
+        self.token = token
+        self.env = env
     }
 }
 
@@ -221,15 +246,18 @@ struct SquadMuteRequest: Encodable, Sendable {
     var muted: Bool
 }
 
-/// `POST /sessions`. `squadId` is left out for a solo session.
+/// `POST /sessions`. `squadId` is left out for a solo session, `pushToStart` unless the spike
+/// sends one.
 struct StartSessionRequest: Encodable, Sendable {
     var squadId: String?
     var minutes: Int
+    var pushToStart: PushToStart?
 }
 
 /// `POST /sessions/:id/join`.
 struct JoinSessionRequest: Encodable, Sendable {
     var minutes: Int
+    var pushToStart: PushToStart?
 }
 
 /// `POST /sessions/:id/la-token`.

@@ -26,6 +26,15 @@ public enum AnalyticsEvent: String, CaseIterable, Sendable {
     case inviteRedeemed = "invite.redeemed"
     case squadSessionJoined = "squad.sessionJoined"
 
+    // "Is locking in" alerts (M4)
+    /// Join 25 or Join 50 on the alert. Counts: `minutes`.
+    case notificationJoin = "notifications.join"
+    /// The alert itself tapped: Home opens with the squad picked.
+    case notificationOpened = "notifications.opened"
+    /// The push-to-start spike: a join from the background whose Live Activity the server started
+    /// by push.
+    case pushToStartJoin = "notifications.pushToStartJoin"
+
     // Retention: D1/D7/D30 are worked out from the days this arrives on.
     case appOpened = "app.opened"
 

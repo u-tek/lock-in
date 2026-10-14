@@ -4,10 +4,12 @@ import Core
 import Foundation
 import LiveActivity
 import Model
+import Notifications
 import Paywall
 import SessionEngine
 import Social
 import UIKit
+import UserNotifications
 
 /// What the app's screens share, made once per launch.
 @MainActor
@@ -22,6 +24,9 @@ enum AppServices {
 
     /// This phone's APNs device token as hex, once iOS hands it over (`LockinAppDelegate`).
     static var deviceToken: String?
+
+    /// What a tap on an "is locking in" alert asks the screens to do (M4).
+    static let notificationInbox = NotificationInbox()
 
     /// Activities that were already running when this launch began, by id.
     private(set) static var orphanIDs: Set<String> = []
@@ -63,7 +68,8 @@ final class LiveServices {
     let plus: PlusStore
     let social: SocialModels
 
-    /// The latest push-to-start token, for the M4 spike (`devices.push_to_start_token`).
+    /// The latest push-to-start token, for the M4 spike (`devices.push_to_start_token`). Saved
+    /// in the App Group as it arrives, so a background launch has it straight away.
     private var pushToStartToken: String?
 
     init() {
@@ -88,6 +94,7 @@ final class LiveServices {
         if api.isConfigured {
             engine.configure(api: api)
         }
+        pushToStartToken = JoinWithoutOpening.savedToken()
         // The Live Activity's Pause, Resume and End buttons run their intents in this process;
         // the bridge hands them to the engine.
         SessionIntentBridge.shared.handler = { command in
@@ -117,7 +124,8 @@ final class LiveServices {
             pushToStartToken: pushToStartToken,
             laEnabled: liveActivities.areActivitiesEnabled,
             frequentPushes: liveActivities.frequentPushesEnabled,
-            tz: TimeZone.current.identifier
+            tz: TimeZone.current.identifier,
+            quietHours: QuietHours.load().deviceSetting
         )
         let account = social.account
         Task {
@@ -138,8 +146,118 @@ final class LiveServices {
     func watchPushToStartTokens() async {
         for await token in AppServices.liveActivities.pushToStartTokens() {
             pushToStartToken = token
+            JoinWithoutOpening.save(token: token)
             registerDevice()
         }
+    }
+
+    // MARK: - "Is locking in" alerts (M4)
+
+    /// Does what a tap on an alert, or on its Join 25 or Join 50, asks. Returns once a join has
+    /// finished, or in the background after `backgroundJoinLimit` at most, so the notification
+    /// centre can be told it's done.
+    func respond(to route: NotificationRoute) async {
+        let inbox = AppServices.notificationInbox
+        switch route {
+        case .none:
+            return
+        case .openSquad(let squadId):
+            AppServices.analytics.track(.notificationOpened)
+            inbox.pick(squadId)
+            // So Home knows the room is open, and says "Join in".
+            await social.refreshSquads()
+        case .join(let sessionId, let squadId, let minutes):
+            AppServices.analytics.track(.notificationJoin, counts: ["minutes": minutes])
+            if JoinWithoutOpening.isEnabled(), UIApplication.shared.applicationState != .active {
+                await joinWithoutOpening(sessionId: sessionId, squadId: squadId, minutes: minutes)
+            } else {
+                inbox.pick(squadId)
+                await join(sessionId: sessionId, squadId: squadId, minutes: minutes)
+            }
+        }
+    }
+
+    /// Join 25 or Join 50 that opened the app: joins the room, and the session screen comes up
+    /// with the session (`RootView`).
+    private func join(sessionId: String, squadId: String, minutes: Int) async {
+        do {
+            try await engine.joinSquadSession(sessionId: sessionId, squadId: squadId, minutes: minutes)
+        } catch is CancellationError {
+            return
+        } catch SquadSessionError.sessionInProgress {
+            // A session is already on screen: it stays.
+            return
+        } catch {
+            AppServices.notificationInbox.failure = error.squadMessage
+            return
+        }
+        // Joined before the app was quite in the foreground, so the Live Activity couldn't start
+        // yet. It can as soon as the app is active.
+        guard engine.liveActivityProblem == .notInForeground else { return }
+        for _ in 0..<20 where UIApplication.shared.applicationState != .active {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        engine.reconcile()
+    }
+
+    /// How long a background join may keep the notification centre waiting: iOS gives a
+    /// background button about 30 seconds.
+    static let backgroundJoinLimit: Duration = .seconds(20)
+
+    /// The push-to-start spike (docs/spikes/push-to-start.md): Join 25 or Join 50 without opening
+    /// the app. The join carries the push-to-start token, the server starts the Live Activity by
+    /// push, and the session engine takes up the activity iOS starts. If the server couldn't, the
+    /// activity starts the next time the app is in the foreground.
+    private func joinWithoutOpening(sessionId: String, squadId: String, minutes: Int) async {
+        let began = Date()
+        // Push-to-start can't show anything while Live Activities are switched off.
+        let token = AppServices.liveActivities.areActivitiesEnabled ? (pushToStartToken ?? JoinWithoutOpening.savedToken()) : nil
+        let pushToStart = token.map { PushToStart(token: $0, env: APNsEnvironment.current) }
+        if pushToStart == nil {
+            Log.push.info("No push-to-start token for a background join")
+        }
+        let engine = self.engine
+        let work = Task { @MainActor in
+            var outcome = JoinWithoutOpening.Attempt.Outcome.failed
+            do {
+                let pushed = try await engine.joinSquadSession(
+                    sessionId: sessionId,
+                    squadId: squadId,
+                    minutes: minutes,
+                    pushToStart: pushToStart
+                )
+                outcome = pushed ? .pushedToStart : .notPushed
+                if pushed {
+                    AppServices.analytics.track(.pushToStartJoin)
+                }
+            } catch {
+                Log.push.error("Couldn't join from the background")
+            }
+            LiveServices.record(outcome, since: began)
+        }
+        let finished = await AppServices.wait(for: work, atMost: Self.backgroundJoinLimit)
+        if !finished {
+            Log.push.error("A background join was still waiting when its time ran out")
+            Self.record(.timedOut, since: began)
+        }
+    }
+
+    /// Notes how a background join went, for the Developer menu.
+    private static func record(_ outcome: JoinWithoutOpening.Attempt.Outcome, since began: Date) {
+        let now = Date()
+        JoinWithoutOpening.record(JoinWithoutOpening.Attempt(
+            outcome: outcome,
+            at: now.timeIntervalSince1970,
+            seconds: now.timeIntervalSince(began)
+        ))
+    }
+}
+
+private extension QuietHours {
+    /// As `POST /devices` takes it.
+    var deviceSetting: DeviceQuietHours {
+        guard let window else { return .off }
+        return .window(start: window.start, end: window.end)
     }
 }
 
@@ -161,12 +279,18 @@ struct SocialModels {
     }
 }
 
-/// Only what SwiftUI has no hook for: the APNs device token.
+/// Only what SwiftUI has no hook for: the APNs device token, and the notification centre's
+/// delegate (alerts in the foreground, and taps on them).
 final class LockinAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        if SnapshotMode.current == nil {
+            // Before returning: a tap on an alert that launched the app is handed over next.
+            UNUserNotificationCenter.current().delegate = self
+            SquadAlerts.registerCategories()
+        }
         // No prompt: the token comes whether or not alerts are allowed. Without a server
         // there's nowhere to send it, and snapshots never touch the system.
         if SnapshotMode.current == nil, AppConfiguration.main.apiBaseURL != nil {
@@ -183,6 +307,43 @@ final class LockinAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: any Error) {
         // Expected on the simulator and in unsigned builds.
         Log.push.error("Couldn't register for remote notifications")
+    }
+}
+
+extension LockinAppDelegate: UNUserNotificationCenterDelegate {
+    /// An alert while the app is open shows as a banner, unless this phone is already in the
+    /// session it's about.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        let sessionId = LockInAlert(userInfo: notification.request.content.userInfo)?.sessionId
+        let isInIt = await LockinAppDelegate.isInSession(sessionId)
+        return isInIt ? [] : [.banner, .list, .sound]
+    }
+
+    /// A tap on an alert or one of its buttons. iOS waits for this to return before it suspends
+    /// the app again, which for a background Join is at most `LiveServices.backgroundJoinLimit`.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let route = NotificationRoute.route(
+            actionIdentifier: response.actionIdentifier,
+            userInfo: response.notification.request.content.userInfo
+        )
+        await LockinAppDelegate.respond(to: route)
+    }
+
+    @MainActor
+    private static func isInSession(_ sessionId: String?) -> Bool {
+        guard let sessionId, let engine = AppServices.live?.engine else { return false }
+        return engine.mode.sessionId == sessionId
+    }
+
+    @MainActor
+    private static func respond(to route: NotificationRoute) async {
+        await AppServices.live?.respond(to: route)
     }
 }
 

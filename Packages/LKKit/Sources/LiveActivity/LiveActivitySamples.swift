@@ -41,7 +41,9 @@ public enum LiveActivitySamples {
     }
 
     /// `squad-6`: Ava (you), Noor on a break, Kai paused, Mateo done, Sakura left, Jules slipped,
-    /// a teen fox and a cheer. Nobody but you is focusing, so the compact island shows your time.
+    /// a teen pet and a cheer. Nobody but you is focusing, so the compact island shows your time.
+    /// The pet is the fixture's "fox", from before the species were named (M5): this version
+    /// draws a species it doesn't know as a puff.
     ///
     /// - Parameter state: Your state. Anything but `.focusing` changes your times to suit it, and
     ///   the sample no longer mirrors the fixture.
@@ -70,7 +72,7 @@ public enum LiveActivitySamples {
     }
 
     /// `squad-4`: a free squad, everyone focusing, so the compact island reads "+3". Mateo's
-    /// 90 minutes needs the hours digit.
+    /// 90 minutes needs the hours digit. Their pet is a baby sprout having a happy day.
     public static func squadOfFour(now: Date = Date()) -> LiveActivitySample {
         let t = now.timeIntervalSince1970
         let focusing = MemberState.focusing.rawValue
@@ -86,7 +88,7 @@ public enum LiveActivitySamples {
                     Member(i: "Ka9Lm3Vx0c", n: "Kai", a: "b2.c4.e1.h2", s: focusing, b: t - 1_200, e: t + 300),
                     Member(i: "Mt5Rw1Zy8d", n: "Mateo", a: "b4.c1.e3.h1", s: focusing, b: t - 60, e: t + 5_340),
                 ],
-                p: LockinAttributes.ContentState.Pet(k: "fox.1", md: 3, x: 0.2)
+                p: LockinAttributes.ContentState.Pet(k: "sprout.1", md: 3, x: 0.2)
             )
         )
     }

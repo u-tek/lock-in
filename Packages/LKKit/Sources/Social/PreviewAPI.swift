@@ -197,11 +197,11 @@ public struct PreviewAPI: LockinAPI {
     // MARK: - Sessions
 
     /// Previews never run a squad session: the engine's own previews show one.
-    public func startSession(squadId: String?, minutes: Int) async throws -> JoinedSession {
+    public func startSession(squadId: String?, minutes: Int, pushToStart: PushToStart?) async throws -> JoinedSession {
         throw APIError.notConfigured
     }
 
-    public func joinSession(id: String, minutes: Int) async throws -> JoinedSession {
+    public func joinSession(id: String, minutes: Int, pushToStart: PushToStart?) async throws -> JoinedSession {
         throw APIError.notConfigured
     }
 

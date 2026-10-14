@@ -13,6 +13,7 @@ import {
 } from "../src/liveActivity.ts";
 import { CHEER_SHOWN_SECONDS, COALESCE_SECONDS, ENDED_ROOM_KEPT_SECONDS, MEMBER_MAX_SECONDS, PET_MOOD_HAPPY, PET_MOOD_LOW } from "../src/room.ts";
 import { type SignedIn, T0, type TestApp, read, testApp } from "./app.ts";
+import { JWT_IN_LOG } from "./helpers.ts";
 import { laToken } from "./rooms.ts";
 
 let app: TestApp;
@@ -40,7 +41,7 @@ afterEach(() => {
     for (const secret of app.issued) expect(line).not.toContain(secret);
     for (let seed = 1; seed < 10; seed++) expect(line).not.toContain(laToken(seed));
     expect(line).not.toMatch(/\b(ava|noor|kai|Ava|Noor|Kai|Library Goblins)\b/);
-    expect(line).not.toMatch(/eyJ/);
+    expect(line).not.toMatch(JWT_IN_LOG);
   }
 });
 

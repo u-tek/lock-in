@@ -1,5 +1,6 @@
 import Core
 import DesignSystem
+import Notifications
 import SwiftUI
 
 /// Tools for building and checking the app on a real phone: the owner tests TestFlight builds and
@@ -11,6 +12,10 @@ import SwiftUI
 /// build's facts as label and value.
 struct DeveloperMenu: View {
     private let build = BuildInfo.current
+    /// The push-to-start spike's switch (docs/spikes/push-to-start.md). Snapshots never read the
+    /// App Group, so it shows off there.
+    @State private var joinsWithoutOpening = SnapshotMode.current == nil && JoinWithoutOpening.isEnabled()
+    @State private var lastAttempt: JoinWithoutOpening.Attempt? = nil
 
     var body: some View {
         List {
@@ -25,6 +30,8 @@ struct DeveloperMenu: View {
                     MenuRow(title: "Design tokens", systemImage: "paintpalette.fill", color: .pink)
                 }
             }
+
+            pushToStartSpike
 
             Section {
                 LabeledContent("Version", value: build.version)
@@ -47,6 +54,49 @@ struct DeveloperMenu: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Developer")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if SnapshotMode.current == nil {
+                lastAttempt = JoinWithoutOpening.lastAttempt()
+            }
+        }
+    }
+
+    /// "Join without opening": Join 25 and Join 50 run in the background and the server starts
+    /// the Live Activity by push. Off by default until the spike says it's reliable.
+    private var pushToStartSpike: some View {
+        Section {
+            Toggle(isOn: $joinsWithoutOpening) {
+                MenuRow(title: "Join without opening", systemImage: "bolt.fill", color: .orange)
+            }
+            .onChange(of: joinsWithoutOpening) { _, isOn in
+                guard SnapshotMode.current == nil else { return }
+                JoinWithoutOpening.setEnabled(isOn)
+                SquadAlerts.registerCategories(joinsInBackground: isOn)
+            }
+            if let lastAttempt {
+                LabeledContent {
+                    Text(Self.describe(lastAttempt))
+                } label: {
+                    Text("Last background join")
+                    Text(Date(timeIntervalSince1970: lastAttempt.at).formatted(date: .abbreviated, time: .standard))
+                }
+            }
+        } header: {
+            Text("Push-to-start spike")
+        } footer: {
+            Text("Join 25 and Join 50 on a squad alert run without opening Lockin, and the server starts the Live Activity.")
+        }
+    }
+
+    /// "Pushed to start, 1.8 s".
+    private static func describe(_ attempt: JoinWithoutOpening.Attempt) -> String {
+        let outcome = switch attempt.outcome {
+        case .pushedToStart: "Pushed to start"
+        case .notPushed: "Not pushed"
+        case .failed: "Join failed"
+        case .timedOut: "Timed out"
+        }
+        return "\(outcome), \(attempt.seconds.formatted(.number.precision(.fractionLength(1)))) s"
     }
 }
 

@@ -159,6 +159,11 @@ enum SnapshotGallery {
             return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me)) { engine, plus, social in
                 SettingsScreen(engine: engine, plus: plus, social: social, onClose: {})
             })
+        case "settings.notifications":
+            // Squad alerts on, quiet hours 22:00 to 07:00 (M4).
+            return AnyView(NavigationStack {
+                NotificationSettingsScreen(snapshot: .authorised)
+            })
 
         // Friends (sheets, shown as screens)
         case "friends.signin":

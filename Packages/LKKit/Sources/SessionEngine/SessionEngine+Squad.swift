@@ -115,6 +115,67 @@ extension SessionEngine {
         analytics.track(.squadSessionJoined)
     }
 
+    /// Joins a squad's room by its id (`POST /sessions/:id/join`): Join 25 or Join 50 on an "is
+    /// locking in" alert (M4). Once the server has answered, the session runs as `startSquad`'s
+    /// does. Already in that room, it does nothing.
+    ///
+    /// A room that has closed since the alert went out (`session_ended`, `session_not_found`)
+    /// doesn't stop anyone locking in: the squad's open room is joined instead, or a new one
+    /// opened, as `startSquad` does.
+    ///
+    /// - Parameter pushToStart: the push-to-start spike's token, for a join from the background:
+    ///   the server starts the Live Activity by push, and the engine takes up the one iOS starts
+    ///   (`watchPushedActivities()`). If the server couldn't, the activity starts here instead,
+    ///   next time the app is in the foreground.
+    /// - Returns: whether the server push-started the Live Activity.
+    @discardableResult
+    public func joinSquadSession(
+        sessionId: String,
+        squadId: String,
+        minutes: Int,
+        pushToStart: PushToStart? = nil
+    ) async throws -> Bool {
+        if let session = stored.active, session.sessionId == sessionId {
+            return false
+        }
+        switch phase {
+        case .running, .paused:
+            throw SquadSessionError.sessionInProgress
+        case .idle, .finished:
+            break
+        }
+        guard !isStartingSquad else { throw SquadSessionError.sessionInProgress }
+        let planned = Self.clampedMinutes(minutes)
+        if isPreview {
+            startPreviewSquad(squadId: squadId, minutes: planned)
+            return false
+        }
+        guard let api else { throw APIError.notConfigured }
+        isStartingSquad = true
+        defer { isStartingSquad = false }
+        await flushPendingEnd()
+        let joined: JoinedSession
+        let recovered: Bool
+        do {
+            joined = try await api.joinSession(id: sessionId, minutes: planned, pushToStart: pushToStart)
+            recovered = false
+        } catch let error as APIError where error.code == .sessionEnded || error.code == .sessionNotFound {
+            Log.session.info("The alert's room has closed; locking in with the squad instead")
+            let started = try await join(squadId: squadId, minutes: planned, pushToStart: pushToStart, api: api)
+            joined = started.0
+            recovered = started.recovered
+        }
+        let pushed = pushToStart != nil && joined.pushedToStart == true
+        try adopt(
+            joined,
+            squadId: joined.session.squadId ?? squadId,
+            plannedMinutes: recovered ? nil : planned,
+            startsActivity: !pushed
+        )
+        analytics.track(.squadSessionJoined)
+        return pushed
+    }
+
     /// Cheers a squadmate in the room (`kind` 0–7, an index into the cheer emoji). The cheer
     /// reaches everyone, this phone included, with the room's next state. Throws `APIError`
     /// (`cheerTooSoon` with `retryAfter`, …) or `SquadSessionError.notInSquadSession`.
@@ -131,14 +192,19 @@ extension SessionEngine {
     /// timer this phone lost track of (a reinstall, or a crash at the wrong moment): when it's in
     /// this squad's room it's picked up again (joining while running answers with the same
     /// timer), otherwise the 409 stands, for the person to deal with.
-    private func join(squadId: String, minutes: Int, api: any LockinAPI) async throws -> (JoinedSession, recovered: Bool) {
+    private func join(
+        squadId: String,
+        minutes: Int,
+        pushToStart: PushToStart? = nil,
+        api: any LockinAPI
+    ) async throws -> (JoinedSession, recovered: Bool) {
         do {
-            let joined = try await api.startSession(squadId: squadId, minutes: minutes)
+            let joined = try await api.startSession(squadId: squadId, minutes: minutes, pushToStart: pushToStart)
             return (joined, false)
         } catch let error as APIError where error.code == .alreadyInSession {
             guard let sessionId = error.sessionId,
                   sessionId != stored.pendingEnd,
-                  let joined = try? await api.joinSession(id: sessionId, minutes: minutes),
+                  let joined = try? await api.joinSession(id: sessionId, minutes: minutes, pushToStart: pushToStart),
                   joined.session.squadId == squadId
             else { throw error }
             Log.session.info("Picked up a squad session the server was still running")
@@ -148,8 +214,9 @@ extension SessionEngine {
 
     /// Takes on the room the server put this phone in: the timer, the Live Activity, its push
     /// tokens and the live view. `plannedMinutes` is nil for a timer picked up again, whose
-    /// length is read off the room.
-    func adopt(_ joined: JoinedSession, squadId: String, plannedMinutes: Int?) throws {
+    /// length is read off the room. `startsActivity` is false when the server has started the
+    /// Live Activity by push (M4 spike): the engine takes up that one instead.
+    func adopt(_ joined: JoinedSession, squadId: String, plannedMinutes: Int?, startsActivity: Bool = true) throws {
         let attributes = joined.attributes
         let state = joined.contentState
         guard let mine = state.member(id: attributes.me), mine.isActive else {
@@ -177,7 +244,11 @@ extension SessionEngine {
         )
         liveActivityProblem = nil
         squadProblem = nil
-        startRoomActivity()
+        if startsActivity {
+            startRoomActivity()
+        } else {
+            takeUpPushedRoomActivity()
+        }
         save()
         phase = Self.phase(for: stored.active)
         mode = .squad(squadId: link.squadId, sessionId: link.sessionId)
@@ -522,6 +593,11 @@ extension SessionEngine {
             updateRoomActivity(with: link.state)
             return
         }
+        if let pushed = pushedRoomActivity(in: controller) {
+            // iOS started it already, from the server's push-to-start (M4 spike).
+            attachRoomActivity(pushed)
+            return
+        }
         do {
             let started = try controller.start(attributes: link.attributes, state: link.state, now: now())
             roomActivity = started
@@ -591,6 +667,79 @@ extension SessionEngine {
         } else {
             leaveRoom(dismissal: nil)
         }
+    }
+
+    // MARK: - Activities started by push (M4 spike)
+
+    /// After a join whose Live Activity the server push-started: takes up the activity if iOS
+    /// has already started it, else waits for `watchPushedActivities()` to see it arrive. Until
+    /// it does, coming to the foreground starts one here instead (`reconcile()` treats it as an
+    /// activity that couldn't start in the background), and a late arrival then ends.
+    func takeUpPushedRoomActivity() {
+        guard !isPreview, let link = stored.room else { return }
+        if let running = roomActivity, running.attributes.sid == link.sessionId {
+            updateRoomActivity(with: link.state)
+            return
+        }
+        if let controller = liveActivities, let pushed = pushedRoomActivity(in: controller) {
+            attachRoomActivity(pushed)
+            return
+        }
+        liveActivityProblem = .notInForeground
+    }
+
+    /// Watches, for as long as the engine lives, for Live Activities the system starts by push,
+    /// and takes up the room's. iOS wakes the app in the background for one, so its push token
+    /// reaches the server even when the app wasn't running.
+    func watchPushedActivities() {
+        guard !isPreview, liveActivities != nil, pushedActivityTask == nil else { return }
+        pushedActivityTask = Task { @MainActor [weak self] in
+            for await activity in LockinActivity.activityUpdates {
+                guard let self else { return }
+                self.takeUp(pushed: activity)
+            }
+        }
+    }
+
+    /// One activity the system started. The room's becomes the room's activity, with its push
+    /// tokens uploaded as for one started here; a second one for the same room (the push came
+    /// after the app started its own) ends. Anything else, such as the admin's push-to-start
+    /// test, is left alone.
+    func takeUp(pushed started: LockinActivity) {
+        guard started.activityState != .ended, started.activityState != .dismissed else { return }
+        guard let link = stored.room, started.attributes.sid == link.sessionId else { return }
+        if let current = roomActivity {
+            guard current.id != started.id, let controller = liveActivities else { return }
+            Log.liveActivity.info("Ended a second activity for the room")
+            enqueueActivityWork {
+                await controller.end(started, state: nil, dismissal: .immediate)
+            }
+            return
+        }
+        attachRoomActivity(started)
+        save()
+        startTokenUploads()
+        Log.liveActivity.info("Took up the room's activity, started by push")
+    }
+
+    /// A running activity for the room that the engine hasn't taken up yet.
+    private func pushedRoomActivity(in controller: LiveActivityController) -> LockinActivity? {
+        guard let link = stored.room else { return nil }
+        return controller.activities.first { candidate in
+            candidate.attributes.sid == link.sessionId && candidate.id != activity?.id && candidate.id != roomActivity?.id
+        }
+    }
+
+    /// Makes `started` the room's activity and brings it up to the room's latest state: the push
+    /// carried the state of the moment it was sent. The caller saves and starts the token
+    /// uploads.
+    private func attachRoomActivity(_ started: LockinActivity) {
+        guard var link = stored.room else { return }
+        roomActivity = started
+        link.activityID = started.id
+        stored.room = link
+        liveActivityProblem = nil
+        updateRoomActivity(with: link.state)
     }
 
     // MARK: - Push tokens

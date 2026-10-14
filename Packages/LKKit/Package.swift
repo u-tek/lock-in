@@ -21,6 +21,7 @@ let package = Package(
         .library(name: "API", targets: ["API"]),
         .library(name: "Social", targets: ["Social"]),
         .library(name: "DeepFocus", targets: ["DeepFocus"]),
+        .library(name: "Notifications", targets: ["Notifications"]),
     ],
     targets: [
         .target(name: "Core"),
@@ -57,6 +58,10 @@ let package = Package(
             dependencies: ["Core", "Model", "DesignSystem", "Creature"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // Notifications (M4): the "is locking in" alert's category and actions, reading its
+        // payload, quiet hours, and what a tap on it should do. App only; no session engine, so
+        // it stays a set of plain values the tests can pin down.
+        .target(name: "Notifications", dependencies: ["Core", "Model"]),
 
         .testTarget(name: "CoreTests", dependencies: ["Core"]),
         .testTarget(name: "ModelTests", dependencies: ["Model"]),
@@ -68,5 +73,6 @@ let package = Package(
         .testTarget(name: "APITests", dependencies: ["API", "Core", "Model"]),
         .testTarget(name: "SocialTests", dependencies: ["Social", "API", "Core", "Model"]),
         .testTarget(name: "DeepFocusTests", dependencies: ["DeepFocus", "Core", "Model"]),
+        .testTarget(name: "NotificationsTests", dependencies: ["Notifications", "Core", "Model"]),
     ]
 )

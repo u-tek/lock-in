@@ -67,10 +67,12 @@ public protocol LockinAPI: Sendable {
 
     // MARK: Sessions (M3)
 
-    /// `POST /sessions`: solo without a squad; with one, joins its open room or opens one.
-    func startSession(squadId: String?, minutes: Int) async throws -> JoinedSession
-    /// `POST /sessions/:id/join`.
-    func joinSession(id: String, minutes: Int) async throws -> JoinedSession
+    /// `POST /sessions`: solo without a squad; with one, joins its open room or opens one. With
+    /// `pushToStart` (the M4 spike), the server also starts the Live Activity on that token by
+    /// push and says so in `pushedToStart`.
+    func startSession(squadId: String?, minutes: Int, pushToStart: PushToStart?) async throws -> JoinedSession
+    /// `POST /sessions/:id/join`, with `pushToStart` as for `startSession`.
+    func joinSession(id: String, minutes: Int, pushToStart: PushToStart?) async throws -> JoinedSession
     /// `POST /sessions/:id/la-token`: the Live Activity's push token, as hex, and its APNs host.
     func uploadLiveActivityToken(sessionId: String, token: String, env: APNsEnvironment) async throws
     /// `POST /sessions/:id/pause`: the room's state afterwards.
@@ -90,4 +92,16 @@ public protocol LockinAPI: Sendable {
     /// the connection closes (throwing `APIError` unless it closed normally); stopping iterating
     /// closes the connection.
     func liveUpdates(sessionId: String) -> AsyncThrowingStream<LiveMessage, any Error>
+}
+
+extension LockinAPI {
+    /// `POST /sessions`, without push-to-start.
+    public func startSession(squadId: String?, minutes: Int) async throws -> JoinedSession {
+        try await startSession(squadId: squadId, minutes: minutes, pushToStart: nil)
+    }
+
+    /// `POST /sessions/:id/join`, without push-to-start.
+    public func joinSession(id: String, minutes: Int) async throws -> JoinedSession {
+        try await joinSession(id: id, minutes: minutes, pushToStart: nil)
+    }
 }

@@ -81,6 +81,24 @@ extension Sample {
             _ = try await client.joinSession(id: "r7Kq2xP9aL", minutes: 90)
         },
         .init(
+            name: "joinSessionWithPushToStart",
+            method: "POST",
+            path: "/sessions/r7Kq2xP9aL/join",
+            reply: .ok(Sample.joined),
+            body: #"{"minutes":25,"pushToStart":{"token":"c3d4e5f6","env":"production"}}"#
+        ) { client in
+            _ = try await client.joinSession(id: "r7Kq2xP9aL", minutes: 25, pushToStart: PushToStart(token: "c3d4e5f6", env: .production))
+        },
+        .init(
+            name: "startSessionWithPushToStart",
+            method: "POST",
+            path: "/sessions",
+            reply: .ok(Sample.joined),
+            body: #"{"squadId":"Sq7Lb2Kd9P","minutes":50,"pushToStart":{"token":"c3d4e5f6","env":"sandbox"}}"#
+        ) { client in
+            _ = try await client.startSession(squadId: "Sq7Lb2Kd9P", minutes: 50, pushToStart: PushToStart(token: "c3d4e5f6", env: .sandbox))
+        },
+        .init(
             name: "uploadLiveActivityToken",
             method: "POST",
             path: "/sessions/r7Kq2xP9aL/la-token",
@@ -219,6 +237,20 @@ extension Sample {
         #expect(solo.session.squadId == nil)
         #expect(solo.attributes.sq == nil)
         #expect(solo.attributes.isSolo)
+    }
+
+    @Test func aJoinSaysWhetherItPushedToStart() async throws {
+        // Only an answer to a request with `pushToStart` carries it (docs/milestones/M4.md).
+        let plain = try JSONDecoder().decode(JoinedSession.self, from: Data(Sample.joined.utf8))
+        #expect(plain.pushedToStart == nil)
+
+        for pushed in [true, false] {
+            let body = #"{"session":\#(Sample.session),"attributes":{"sid":"r7Kq2xP9aL","me":"u1Av4Nq8sT","sq":"Library Goblins"},"contentState":\#(Sample.contentState),"pushedToStart":\#(pushed)}"#
+            let server = StubServer { _ in .ok(body) }
+            let joined = try await server.client().joinSession(id: "r7Kq2xP9aL", minutes: 25, pushToStart: PushToStart(token: "c3d4", env: .production))
+            #expect(joined.pushedToStart == pushed)
+            #expect(joined.attributes.sid == "r7Kq2xP9aL")
+        }
     }
 
     @Test func memberActionsReturnTheRoomsState() async throws {

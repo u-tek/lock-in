@@ -1,6 +1,7 @@
 // POST /admin/push-test: the M0 APNs spike (SPEC.md §6). Sends a made-up squad to one Live
 // Activity so a TestFlight build on a real iPhone can show whether a deployed Worker reaches APNs.
-// Development only, behind ADMIN_TOKEN (README.md).
+// POST /admin/push-to-start-test: the M4 spike's twin, starting that squad's Live Activity on a phone
+// by push, without a squad. Development only, behind ADMIN_TOKEN (README.md).
 
 import {
   ApnsClient,
@@ -11,11 +12,13 @@ import {
   type ApnsPriority,
   type ApnsResult,
   isDeviceToken,
+  isGoneToken,
 } from "./apns.ts";
 import { SharedProviderToken } from "./apnsAuth.ts";
+import type { Database } from "./db.ts";
 import { DEMO_SCENARIOS, type DemoScenario, demoScenario } from "./demo.ts";
 import type { Env } from "./env.ts";
-import { HttpError, hasBearerToken, json, notFound, readJSON } from "./http.ts";
+import { HttpError, hasBearerToken, isRecord, json, notFound, readJSON } from "./http.ts";
 import {
   type ContentState,
   LiveActivityError,
@@ -23,8 +26,10 @@ import {
   buildLiveActivityPayload,
   isShortID,
   parseContentState,
+  payloadByteCount,
   staleDateFor,
 } from "./liveActivity.ts";
+import { pushToStartPayload } from "./pushToStart.ts";
 
 /** Shorter than this and the admin token counts as unset. */
 export const MIN_ADMIN_TOKEN_LENGTH = 32;
@@ -49,9 +54,7 @@ const PUSH_TEST_KEYS = ["token", "env", "me", "sid", "scenario", "priority", "co
  * ADMIN_TOKEN, or without the right bearer token: nothing to find by probing.
  */
 export async function pushTest(request: Request, env: Env, deps: ApnsDependencies): Promise<Response> {
-  const adminToken = env.ADMIN_TOKEN?.trim() ?? "";
-  if (env.ENVIRONMENT === "production" || adminToken.length < MIN_ADMIN_TOKEN_LENGTH) return notFound();
-  if (!(await hasBearerToken(request, adminToken))) return notFound();
+  if (!(await isAdmin(request, env))) return notFound();
 
   const input = parsePushTestRequest(await readJSON(request));
   const now = (deps.now ?? (() => Date.now() / 1000))();
@@ -104,6 +107,78 @@ export async function pushTest(request: Request, env: Env, deps: ApnsDependencie
   };
   // A refusal is still a well-formed answer, but not a success: 502 makes `curl --fail` notice.
   return json(body, result.ok ? 200 : 502);
+}
+
+/**
+ * POST /admin/push-to-start-test `{ token, env }`: push-to-starts the demo squad session (src/demo.ts)
+ * on that push-to-start token, as a squadmate's Join would (src/pushToStart.ts), for checking the
+ * spike from a phone that has no squad. The same guard and answers as /admin/push-test; a 410 or
+ * BadDeviceToken also clears the token from `devices`, as a real join does.
+ */
+export async function pushToStartTest(request: Request, env: Env, deps: ApnsDependencies, db: Database): Promise<Response> {
+  if (!(await isAdmin(request, env))) return notFound();
+
+  const body = await readJSON(request);
+  const bad = (message: string) => new HttpError(400, message);
+  if (!isRecord(body)) throw bad('Expected a JSON object like {"token": "<hex>", "env": "sandbox"}');
+  const unknown = Object.keys(body).filter((key) => key !== "token" && key !== "env");
+  if (unknown.length > 0) throw bad(`Unknown ${unknown.join(", ")}: the keys are token, env`);
+  if (!isDeviceToken(body.token)) throw bad("token must be the app's push-to-start token in hex, as the app's spike screen copies it");
+  if (body.env !== "sandbox" && body.env !== "production") {
+    throw bad('env must be "sandbox" (Xcode builds) or "production" (TestFlight and App Store builds)');
+  }
+  const token = body.token.toLowerCase();
+  const environment: ApnsEnvironment = body.env;
+
+  const now = (deps.now ?? (() => Date.now() / 1000))();
+  const demo = demoScenario("squad", { now });
+  let payload: ReturnType<typeof pushToStartPayload>;
+  try {
+    payload = pushToStartPayload(demo.attributes, demo.state, Math.floor(now));
+  } catch (error) {
+    if (error instanceof LiveActivityError) throw new HttpError(400, error.message);
+    throw error;
+  }
+  if (payload === null) throw new Error("The demo squad has no name");
+  const bytes = payloadByteCount(demo.attributes, demo.state);
+
+  const client = apnsClient(apnsCredentials(env), env, deps);
+  let result: ApnsResult;
+  try {
+    result = await client.sendLiveActivity({ deviceToken: token, environment, priority: 10, payload });
+  } catch (error) {
+    const message = redact(error instanceof Error ? error.message : String(error));
+    if (error instanceof ApnsConfigError) {
+      console.error(`push-to-start-test: ${message}`);
+      throw new HttpError(500, `${message}. Check the APNS_* secrets (server/README.md).`);
+    }
+    console.error(`push-to-start-test: couldn't reach APNs (${message})`);
+    return json({ error: `Couldn't reach APNs: ${message}`, environment, bytes, event: "start" }, 502);
+  }
+  if (!result.ok && isGoneToken(result)) await db.clearPushToStartToken(token);
+
+  console.log(`push-to-start-test: ${environment} start ${bytes} bytes -> APNs ${result.status}${result.reason ? ` ${result.reason}` : ""}`);
+  const answer = {
+    status: result.status,
+    apnsId: result.apnsId,
+    ...(result.reason !== undefined ? { reason: result.reason } : {}),
+    environment,
+    bytes,
+    event: "start",
+    attributes: payload.aps.attributes,
+    contentState: payload.aps["content-state"],
+  };
+  return json(answer, result.ok ? 200 : 502);
+}
+
+/**
+ * The admin routes exist only outside production, with an ADMIN_TOKEN of 32+ characters, for a
+ * request bearing it. Otherwise they answer 404 like any unknown path: nothing to find by probing.
+ */
+async function isAdmin(request: Request, env: Env): Promise<boolean> {
+  const adminToken = env.ADMIN_TOKEN?.trim() ?? "";
+  if (env.ENVIRONMENT === "production" || adminToken.length < MIN_ADMIN_TOKEN_LENGTH) return false;
+  return hasBearerToken(request, adminToken);
 }
 
 function parsePushTestRequest(body: unknown): PushTestRequest {

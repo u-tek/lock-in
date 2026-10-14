@@ -277,36 +277,37 @@ extension LiveActivityPresentation {
         case hidden
     }
 
-    /// The squad pet, as drawn until the real one arrives with its moods and stages (M5).
+    /// The squad pet: drawn by `PetView` from its code and mood, named, and its progress as a bar
+    /// (docs/milestones/M5.md).
     public struct Pet: Hashable, Sendable {
         public let code: PetCode
-        /// 0 (lowest) to 3 (happiest).
+        /// 0 (lowest) to 3 (happiest): `PetMood`.
         public let mood: Int
         /// Progress to the next stage, 0...1.
         public let progress: Double
-        /// "Fox · teen".
+        /// "Sprout · teen", or "Egg": the species is a surprise until it hatches, though the egg's
+        /// colours hint at it. A species this version can't draw keeps its own name here.
         public let title: String
         public let accessibilityLabel: String
 
         public init(_ pet: LockinAttributes.ContentState.Pet) {
             let code = pet.code
-            let species = code.species.prefix(1).uppercased() + String(code.species.dropFirst())
-            let stage: String
-            switch code.growth {
-            case .egg: stage = "egg"
-            case .baby: stage = "baby"
-            case .teen: stage = "teen"
-            case .adult: stage = "adult"
-            case .prestige: stage = "prestige \(code.prestigeLevel)"
-            }
-            // Rounded down, so it never says 100 before the pet grows.
-            let percent = Int((pet.progress * 100).rounded(.down))
+            let feeling = PetMood(level: pet.mood).name
 
             self.code = code
             mood = pet.mood
             progress = pet.progress
-            title = "\(species) · \(stage)"
-            accessibilityLabel = "Squad pet, \(code.species), \(stage), \(percent) percent of the way to the next stage"
+            if code.growth == .egg {
+                title = "Egg"
+                accessibilityLabel = "Squad pet, egg, \(feeling)"
+            } else {
+                let species = code.species.prefix(1).uppercased() + String(code.species.dropFirst())
+                // Rounded down, so it never says 100 before the pet grows.
+                let percent = Int((pet.progress * 100).rounded(.down))
+                title = "\(species) · \(code.stageName)"
+                accessibilityLabel = "Squad pet, \(code.species), \(code.stageName), \(feeling), "
+                    + "\(percent) percent of the way to the next stage"
+            }
         }
     }
 }

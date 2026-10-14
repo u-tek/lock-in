@@ -34,7 +34,6 @@ struct SettingsScreen: View {
     @State private var isDeleting = false
     @State private var failure: String? = nil
     @State private var versionTaps = 0
-    @Environment(\.openURL) private var openURL
 
     init(engine: SessionEngine, plus: PlusStore, social: SocialModels, onClose: @escaping () -> Void) {
         self.engine = engine
@@ -73,17 +72,11 @@ struct SettingsScreen: View {
                 }
 
                 Section {
-                    Button {
-                        if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
-                            openURL(url)
-                        }
+                    // Squad alerts and quiet hours (M4).
+                    NavigationLink {
+                        NotificationSettingsScreen()
                     } label: {
-                        Label {
-                            Text("Notifications")
-                                .foregroundStyle(LKColor.textPrimary)
-                        } icon: {
-                            LKIconTile(systemName: "bell.badge.fill", color: .red)
-                        }
+                        ToolRow(title: "Notifications", systemImage: "bell.badge.fill", color: .red)
                     }
                     Button {
                         editsLockling = true

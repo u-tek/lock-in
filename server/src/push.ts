@@ -20,7 +20,7 @@ const clients = new WeakMap<object, { bundleId: string; fetch: Dependencies["fet
 let warned = false;
 
 /** What's missing for the Worker to send pushes: secrets, the bundle ID or the ApnsAuth binding. */
-export function missingApnsSettings(env: Env): string[] {
+function missingApnsSettings(env: Env): string[] {
   return [
     env.APNS_BUNDLE_ID?.trim() ? undefined : "APNS_BUNDLE_ID",
     env.APNS_TEAM_ID?.trim() ? undefined : "APNS_TEAM_ID",
