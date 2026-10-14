@@ -39,20 +39,18 @@ export function landingPage(landing: Landing): string {
   if (landing.kind === "invite") {
     const code = escapeHTML(landing.code);
     title = landing.name === null ? "You're invited to lock in" : `${landing.name} wants to lock in with you`;
-    body = `
-      <h1>${escapeHTML(title)}</h1>
-      <p class="lede">Focus together. Your friends' timers sit right on your Lock Screen while you all work.</p>
-      <a class="button" href="lockin://j/${code}">Open in Lockin</a>
-      <div class="card">
-        <p class="step">New to Lockin? <a href="${escapeHTML(APP_STORE_URL)}">Get it on the App Store</a>, then add your friend with this code:</p>
-        <p class="code" aria-label="Friend code ${code.split("").join(" ")}">${code}</p>
-      </div>`;
+    body = `<h1>${escapeHTML(title)}</h1>
+  <p class="lede">Focus together. Your friends' timers sit right on your Lock Screen while you all work.</p>
+  <a class="button" href="lockin://j/${code}">Open in Lockin</a>
+  <div class="card">
+    <p class="step">New to Lockin? <a href="${escapeHTML(APP_STORE_URL)}">Get it on the App Store</a>, then add your friend with this code:</p>
+    <p class="code" aria-label="Friend code ${code.split("").join(" ")}">${code.slice(0, 4)} ${code.slice(4)}</p>
+  </div>`;
   } else {
     title = landing.kind === "expired" ? "This invite has expired" : "This invite link doesn't work";
-    body = `
-      <h1>${escapeHTML(title)}</h1>
-      <p class="lede">Ask your friend for a new link. Their code is on the Friends screen in Lockin.</p>
-      <a class="button secondary" href="${escapeHTML(APP_STORE_URL)}">Get Lockin on the App Store</a>`;
+    body = `<h1>${escapeHTML(title)}</h1>
+  <p class="lede">Ask your friend for a new link. Their code is on the Friends screen in Lockin.</p>
+  <a class="button secondary" href="${escapeHTML(APP_STORE_URL)}">Get Lockin on the App Store</a>`;
   }
   const description = "Lockin: focus with friends, live on your Lock Screen.";
   return `<!doctype html>
@@ -99,14 +97,14 @@ export function landingPage(landing: Landing): string {
   .step a { color: var(--accent); font-weight: 600; text-decoration: none; }
   .code {
     margin: 0; text-align: center; font: 700 34px/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    letter-spacing: 0.18em; padding-left: 0.18em; user-select: all; -webkit-user-select: all;
+    letter-spacing: 0.14em; padding-left: 0.14em; white-space: nowrap; user-select: all; -webkit-user-select: all;
   }
 </style>
 </head>
 <body>
 <main>
   <div class="brand"><span class="mark" aria-hidden="true"></span>Lockin</div>
-  ${body.trim()}
+  ${body}
 </main>
 </body>
 </html>

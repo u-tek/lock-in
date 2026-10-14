@@ -34,7 +34,8 @@ describe("GET /j/:code", () => {
     expect(text).toContain("<h1>Ava wants to lock in with you</h1>");
     expect(text).toContain(`<meta property="og:title" content="Ava wants to lock in with you">`);
     expect(text).toContain(`<a class="button" href="lockin://j/${code}">Open in Lockin</a>`);
-    expect(text).toContain(`<p class="code" aria-label="Friend code ${code.split("").join(" ")}">${code}</p>`);
+    // Split in two for reading, as the app shows it; the app drops the space when it's typed in.
+    expect(text).toContain(`<p class="code" aria-label="Friend code ${code.split("").join(" ")}">${code.slice(0, 4)} ${code.slice(4)}</p>`);
     expect(text).toContain(`href="${APP_STORE_URL}"`);
   });
 
@@ -45,8 +46,10 @@ describe("GET /j/:code", () => {
     expect(links).toEqual([`lockin://j/${code}`, APP_STORE_URL]);
   });
 
-  test("ignores the code's case", async () => {
-    expect((await page(`/j/${code.toLowerCase()}`)).text).toContain(`href="lockin://j/${code}"`);
+  test("ignores the code's case, spaces and dashes", async () => {
+    for (const typed of [code.toLowerCase(), `${code.slice(0, 4)}-${code.slice(4)}`, `${code.slice(0, 4)}%20${code.slice(4)}`]) {
+      expect((await page(`/j/${typed}`)).text, typed).toContain(`href="lockin://j/${code}"`);
+    }
   });
 
   test("escapes a hostile display name", async () => {

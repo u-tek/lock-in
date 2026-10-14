@@ -15,6 +15,7 @@ import {
   AppleRequestError,
   AppleTokenError,
   AppleUnavailableError,
+  type ExchangeResult,
   appleKeys,
   exchangeAuthorizationCode,
   revokeRefreshToken,
@@ -115,22 +116,21 @@ function appleTokenInvalid(): HttpError {
 async function keepRefreshToken(context: Context, user: UserRow, sub: string, code: string): Promise<void> {
   const config = siwaConfig(context.env);
   if (config === undefined || code.length > MAX_AUTHORIZATION_CODE_LENGTH) return;
+  let result: ExchangeResult;
   try {
-    const result = await exchangeAuthorizationCode(config, code, { fetch: context.fetch, now: () => context.now });
-    if (result.sub !== undefined && result.sub !== sub) {
-      console.warn("auth/apple: the authorisation code was for another Apple ID; not kept");
-      return;
-    }
-    await context.db.setAppleRefreshToken(user.id, result.refreshToken);
-    user.apple_refresh_token = result.refreshToken;
+    result = await exchangeAuthorizationCode(config, code, { fetch: context.fetch, now: () => context.now });
   } catch (error) {
-    if (error instanceof AppleRequestError) {
-      console.error(`auth/apple: token exchange failed (${error.message})`);
-    } else {
-      // Signing the client secret failed: the key, not Apple.
-      console.error("auth/apple: token exchange failed (SIWA_PRIVATE_KEY isn't a usable .p8 key)");
-    }
+    // Anything but Apple's answer comes from signing the client secret: the key, not Apple.
+    const reason = error instanceof AppleRequestError ? error.message : "SIWA_PRIVATE_KEY isn't a usable .p8 key";
+    console.error(`auth/apple: token exchange failed (${reason})`);
+    return;
   }
+  if (result.sub !== undefined && result.sub !== sub) {
+    console.warn("auth/apple: the authorisation code was for another Apple ID; not kept");
+    return;
+  }
+  await context.db.setAppleRefreshToken(user.id, result.refreshToken);
+  user.apple_refresh_token = result.refreshToken;
 }
 
 // GET /me

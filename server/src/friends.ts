@@ -50,9 +50,12 @@ export function publicFriend(row: FriendRow): Friend {
   return { id: row.id, handle: row.handle, displayName: row.display_name, avatarCode: row.avatar_code, since: row.since };
 }
 
+/** Spaces and the dashes people paste, which the app also drops from a typed code (Social). */
+const CODE_SEPARATORS = /[\s\-\u2010-\u2013]/g;
+
 /**
- * A code as typed or linked, in canonical form (uppercase), or undefined if it can't be one.
- * Matching ignores case, so `abcd2345` finds `ABCD2345`.
+ * A code as typed or linked, in canonical form (uppercase, no separators), or undefined if it
+ * can't be one. Matching ignores case, spaces and dashes, so `kq7m-2xpa` finds `KQ7M2XPA`.
  */
 export function canonicalFriendCode(raw: string): string | undefined {
   let decoded: string;
@@ -61,7 +64,7 @@ export function canonicalFriendCode(raw: string): string | undefined {
   } catch {
     return undefined;
   }
-  const code = decoded.trim().toUpperCase();
+  const code = decoded.toUpperCase().replace(CODE_SEPARATORS, "");
   return FRIEND_CODE.test(code) ? code : undefined;
 }
 

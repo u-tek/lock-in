@@ -131,9 +131,13 @@ describe("POST /friends/redeem/:code", () => {
     expect((await call(noor, "GET", "/friends")).body.friends.map((friend: { id: string }) => friend.id)).toEqual([ava.user.id]);
   });
 
-  test("ignores case, and the code works for more than one friend", async () => {
+  test("ignores case, spaces and dashes, and the code works for more than one friend", async () => {
     const code = await codeOf(ava);
     expect((await call(noor, "POST", `/friends/redeem/${code.toLowerCase()}`)).status).toBe(200);
+    await call(noor, "DELETE", `/friends/${ava.user.id}`);
+    expect((await call(noor, "POST", `/friends/redeem/${code.slice(0, 4)}-${code.slice(4)}`)).status).toBe(200);
+    await call(noor, "DELETE", `/friends/${ava.user.id}`);
+    expect((await call(noor, "POST", `/friends/redeem/%20${code.slice(0, 4)}%E2%80%93${code.slice(4)}%20`)).status).toBe(200);
     const kai = await app.user("kai");
     expect((await call(kai, "POST", `/friends/redeem/${code}`)).status).toBe(200);
     expect((await call(ava, "GET", "/friends")).body.friends).toHaveLength(2);
