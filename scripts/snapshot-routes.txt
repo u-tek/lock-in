@@ -21,6 +21,7 @@ session.cheer
 finished
 finished.first
 finished.squad
+finished.share
 friends.signin
 friends.username
 friends.empty
@@ -37,6 +38,11 @@ paywall
 settings
 settings.account
 settings.notifications
+widgets.pet
+widgets.lockin
+widgets.accessory
+share.story
+share.square
 developer
 spike
 lab.tokens

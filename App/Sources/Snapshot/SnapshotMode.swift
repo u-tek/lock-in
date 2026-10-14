@@ -3,6 +3,7 @@ import LiveActivity
 import Model
 import Paywall
 import SessionEngine
+import ShareCards
 import Social
 import SwiftUI
 import UIKit
@@ -146,6 +147,16 @@ enum SnapshotGallery {
             return AnyView(PreviewModels(phase: SnapshotData.finished(now: now), stats: SnapshotData.regular, squads: [SnapshotData.squad]) { engine, plus, social in
                 SessionCover(engine: engine, plus: plus, social: social, firstSquadFinish: true)
             })
+        case "finished.share":
+            // After a squad session: Share beside Done, with the squad's card behind it (M6).
+            return AnyView(FinishedScreen(
+                record: ShareSamples.record(now: now),
+                avatar: SampleLocklings.you,
+                offersFriends: false,
+                onFriends: {},
+                share: ShareSamples.squad,
+                onDone: {}
+            ))
         case "paywall":
             return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus, _ in
                 PaywallView(store: plus, avatar: engine.avatar, onClose: {})
@@ -270,6 +281,20 @@ enum SnapshotGallery {
                     focusesField: false
                 )
             })
+
+        // Widgets and share cards (M6)
+        case "widgets.pet":
+            return AnyView(WidgetGalleryScreen(panel: .pet, avatar: SampleLocklings.you, now: now))
+        case "widgets.lockin":
+            return AnyView(WidgetGalleryScreen(panel: .lockIn, avatar: SampleLocklings.you, now: now))
+        case "widgets.accessory":
+            return AnyView(WidgetGalleryScreen(panel: .accessory, avatar: SampleLocklings.you, now: now))
+        case "share.story":
+            // The squad's card, as Stories gets it.
+            return AnyView(ShareCardPreview(card: ShareSamples.squad, kind: .story))
+        case "share.square":
+            // Solo and signed out: no friend code yet.
+            return AnyView(ShareCardPreview(card: ShareSamples.solo, kind: .square))
 
         // Developer tools
         case "developer":

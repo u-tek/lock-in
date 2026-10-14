@@ -17,6 +17,8 @@ public struct SquadPetWidgetView: View {
     private let content: PetWidgetContent
     private let family: WidgetFamily
     private let isFullColor: Bool
+    /// Always-On (StandBy at night, a dimmed Lock Screen): the creatures are outlines already.
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
     public init(content: PetWidgetContent, family: WidgetFamily, isFullColor: Bool = true) {
         self.content = content
@@ -34,7 +36,7 @@ public struct SquadPetWidgetView: View {
             }
         }
         // Outlines out of full colour: one colour can't carry a gradient body and a dark face.
-        .environment(\.isLuminanceReduced, !isFullColor)
+        .environment(\.isLuminanceReduced, isLuminanceReduced || !isFullColor)
         .dynamicTypeSize(...DynamicTypeSize.xLarge)
     }
 
@@ -147,7 +149,9 @@ private struct SquadMedium: View {
                 }
                 Spacer(minLength: 0)
                 HStack(spacing: LKSpacing.m) {
-                    StreakLabel(days: squad.streak, isFullColor: isFullColor, compact: false)
+                    if squad.streak > 0 {
+                        StreakLabel(days: squad.streak, isFullColor: isFullColor, compact: false)
+                    }
                     if squad.lockedIn > 0 {
                         Label {
                             Text(WidgetWords.lockedIn(squad.lockedIn))
@@ -202,13 +206,24 @@ private struct SquadRectangular: View {
                 Text(squad.name)
                     .font(LKFont.headline)
                     .widgetAccentable()
-                Label {
-                    Text(WidgetWords.streak(squad.streak))
-                        .monospacedDigit()
-                } icon: {
-                    Image(systemName: "flame.fill")
+                // The streak, or with none yet, who's in now.
+                if squad.streak > 0 {
+                    Label {
+                        Text(WidgetWords.streak(squad.streak))
+                            .monospacedDigit()
+                    } icon: {
+                        Image(systemName: "flame.fill")
+                    }
+                    .font(LKFont.subheadline.weight(.medium))
+                } else if squad.lockedIn > 0 {
+                    Label {
+                        Text(WidgetWords.lockedIn(squad.lockedIn))
+                            .monospacedDigit()
+                    } icon: {
+                        Image(systemName: "lock.fill")
+                    }
+                    .font(LKFont.subheadline.weight(.medium))
                 }
-                .font(LKFont.subheadline.weight(.medium))
                 Text("\(WidgetWords.mood(squad.mood)) · \(WidgetWords.pet(squad.petCode))")
                     .font(LKFont.caption.weight(.medium))
                     .foregroundStyle(LKColor.textSecondary)
@@ -421,7 +436,9 @@ private struct TightLabelStyle: LabelStyle {
 private enum SquadWords {
     static func spoken(_ squad: WidgetData.Squad) -> Text {
         var parts = [squad.name, PetView.accessibilityLabel(code: squad.petCode, mood: squad.mood)]
-        parts.append("Streak: \(WidgetWords.streak(squad.streak))")
+        if squad.streak > 0 {
+            parts.append("Streak: \(WidgetWords.streak(squad.streak))")
+        }
         if squad.lockedIn > 0 {
             parts.append("\(WidgetWords.lockedIn(squad.lockedIn)) now")
         }

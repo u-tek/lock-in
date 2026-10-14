@@ -75,7 +75,7 @@ public enum WidgetSamples {
     public static let newSquad = WidgetData.Squad(
         id: "sqNightOw1",
         name: "Night Owls",
-        pet: "\(PetCode.defaultSpecies).0",
+        pet: "ember.0",
         mood: 1,
         progress: 0,
         streak: 0,
@@ -84,7 +84,7 @@ public enum WidgetSamples {
     )
 
     /// In a squad (or two), nothing running.
-    public static func squads(avatar: AvatarCode = avatar, now: Date = Date()) -> WidgetData {
+    public static func squads(avatar: AvatarCode = WidgetSamples.avatar, now: Date = Date()) -> WidgetData {
         WidgetData(
             avatar: avatar.code,
             todayMinutes: 45,
@@ -96,7 +96,7 @@ public enum WidgetSamples {
     }
 
     /// No squads: the solo fallback.
-    public static func solo(avatar: AvatarCode = avatar, now: Date = Date()) -> WidgetData {
+    public static func solo(avatar: AvatarCode = WidgetSamples.avatar, now: Date = Date()) -> WidgetData {
         WidgetData(
             avatar: avatar.code,
             todayMinutes: 45,
@@ -108,14 +108,14 @@ public enum WidgetSamples {
     }
 
     /// Ten minutes into 25, solo.
-    public static func running(avatar: AvatarCode = avatar, now: Date = Date()) -> WidgetData {
+    public static func running(avatar: AvatarCode = WidgetSamples.avatar, now: Date = Date()) -> WidgetData {
         var data = solo(avatar: avatar, now: now)
         data.session = WidgetData.Session(endsAt: now.addingTimeInterval(15 * 60).timeIntervalSince1970)
         return data
     }
 
     /// Paused with 17 minutes to go, in a squad's room.
-    public static func paused(avatar: AvatarCode = avatar, now: Date = Date()) -> WidgetData {
+    public static func paused(avatar: AvatarCode = WidgetSamples.avatar, now: Date = Date()) -> WidgetData {
         var data = squads(avatar: avatar, now: now)
         data.session = WidgetData.Session(
             endsAt: now.addingTimeInterval(17 * 60).timeIntervalSince1970,

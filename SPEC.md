@@ -269,6 +269,7 @@ Mirror the Screenshot Brain layout: XcodeGen `project.yml`, `Makefile`, one Swif
 | `Social` | Friends, squads, codes, QR, report/block | M2 |
 | `Progress` | Coins, XP, streak display, leaderboard | M5 |
 | `ShareCards` | `ImageRenderer` cards 9:16 and 1:1 | M6 |
+| `WidgetViews` | Home and Lock Screen widgets' views (linked by the widget extension and, for snapshots, the app) | M6 |
 | `Paywall` | RevenueCat, entitlements, Squad Boost | M7 |
 | `DeepFocus` | Family Controls picker, shields, slips | M8 |
 | `Notifications` | Categories/actions, local reminders | M4 |

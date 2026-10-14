@@ -80,7 +80,7 @@ struct WidgetGalleryScreen: View {
         GalleryRow("Medium") {
             HomeWidget(.systemMedium, content: PetWidgetContent(data: squads, squadID: nil))
         }
-        GalleryRow("No squad yet: your Lockling and your streak") {
+        GalleryRow("No squad yet; a squad on a tinted Home Screen") {
             HomeWidget(.systemSmall, content: PetWidgetContent(data: solo, squadID: nil))
             HomeWidget(.systemSmall, content: PetWidgetContent(data: squads, squadID: nil), isFullColor: false)
         }

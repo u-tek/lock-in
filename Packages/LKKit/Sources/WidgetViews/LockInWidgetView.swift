@@ -19,6 +19,8 @@ public struct LockInWidgetView: View {
     /// The entry's date: where a countdown starts from.
     private let now: Date
     private let isFullColor: Bool
+    /// Always-On (StandBy at night, a dimmed Lock Screen): the creatures are outlines already.
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
     public init(data: WidgetData, now: Date, isFullColor: Bool = true) {
         avatar = data.avatarCode
@@ -54,7 +56,7 @@ public struct LockInWidgetView: View {
                 }
             }
         }
-        .environment(\.isLuminanceReduced, !isFullColor)
+        .environment(\.isLuminanceReduced, isLuminanceReduced || !isFullColor)
         .dynamicTypeSize(...DynamicTypeSize.xLarge)
     }
 

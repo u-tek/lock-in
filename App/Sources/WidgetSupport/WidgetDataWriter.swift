@@ -107,16 +107,18 @@ extension WidgetData {
 extension WidgetData.Squad {
     /// A squad as `GET /squads` has it.
     ///
-    /// The pet's species and stage come from the server, its progress from its XP
-    /// (`PetRules.progress`). `GET /squads` doesn't carry the pet's mood or the squad's streak yet
-    /// (M5 adds them, docs/milestones/M5.md): until it does, the pet is content and the streak
-    /// 0, which the widget leaves unsaid rather than showing "No streak".
+    /// The pet's species and stage are the server's (an egg is stage 0, and may already carry its
+    /// species for its colour); its progress comes from its XP (`PetRules.progress`). The app's
+    /// `SquadPet` doesn't read the pet's mood or the squad's streak yet (M5 adds them to
+    /// `GET /squads`, docs/milestones/M5.md): until it does, the pet is content and the streak 0,
+    /// which the widgets leave unsaid rather than showing "No streak". Read them here when they
+    /// arrive.
     ///
     /// - Parameter lockedIn: How many are in the squad's open room, when it could be read. An open
     ///   room it couldn't read has at least one.
     init(_ squad: API.Squad, lockedIn: Int?) {
         let pet = squad.pet
-        let stage = pet.hasHatched ? max(1, pet.stage) : 0
+        let stage = max(0, pet.stage)
         // Read leniently, like a pushed `Pet.k`: a species this version can't draw still reads.
         let code = PetCode("\(pet.species ?? PetCode.defaultSpecies).\(stage)")
         self.init(
