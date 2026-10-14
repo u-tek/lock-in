@@ -22,6 +22,8 @@ final class WidgetDataWriter {
     /// What's in the file, so an unchanged state isn't written (or reloaded) again.
     private var written: WidgetData?
     private var subscription: AnyCancellable?
+    /// The streak and recap reminders, planned from what the widgets show (M6).
+    let reminders = ReminderScheduler()
 
     init(store: WidgetDataStore = .appGroup(), now: @escaping () -> Date = Date.init) {
         self.store = store
@@ -34,6 +36,7 @@ final class WidgetDataWriter {
     /// `@Published` sends a new value before the property holds it, so the data is built from the
     /// values sent, never read back from the models.
     func watch(engine: SessionEngine, social: SocialModels) {
+        reminders.watch(engine: engine, social: social)
         let session = Publishers.CombineLatest4(engine.$phase, engine.$stats, engine.$avatar, engine.$mode)
         let squads = Publishers.CombineLatest3(
             social.squads.$squads,
@@ -58,6 +61,9 @@ final class WidgetDataWriter {
     }
 
     private func write(_ data: WidgetData) {
+        // Then the reminders, written or not: the first state of a launch, or of a new day, can
+        // change them without changing the file.
+        defer { reminders.update(for: data) }
         if let written, written.hasSameContent(as: data) {
             return
         }

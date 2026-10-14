@@ -6,6 +6,8 @@
 // - `NotificationRoute`: what a tap on the alert, or on one of its buttons, asks the app to do.
 // - `QuietHours`: when squad alerts stay away (22:00–07:00 by default), kept in the App Group.
 // - `JoinWithoutOpening`: the push-to-start spike's developer switch and the token it needs.
+// - `ReminderPlanner` (M6): the two local reminders, "Streak at risk" and "Weekly recap", worked
+//   out from the widgets' data; `ReminderSettings` and `ReminderLog` (the day's limit) beside it.
 //
 // Plain values only: no session engine and no network, so every rule here is unit-tested. The
 // app target is the notification centre's delegate and does the joining.

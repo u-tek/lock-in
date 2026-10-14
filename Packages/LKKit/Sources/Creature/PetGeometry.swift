@@ -22,6 +22,8 @@ struct PetLayer {
 enum PetPaint: CaseIterable, Sendable {
     case body, bodyOutline, egg, speckle, part, partOutline, partDetail, core, petal, flowerCentre
     case shine, cheek, face, catchlight, tongue, tear, muted, glow, halo, sparkle
+    // The accessories (M7, Squad Boost: PetAccessories.swift).
+    case scarf, scarfShade, partyHat, hatTrim, crownPetal, crownLeaf, frames, lens, bow, bowKnot, starClip
 }
 
 /// Where everything in a squad pet sits, worked out from its species, stage, mood and size. Plain
@@ -54,6 +56,8 @@ struct PetGeometry {
     /// 0 until adult; 1 for the first prestige form, and so on.
     let prestigeLevel: Int
     let mood: PetMood
+    /// What it wears (Squad Boost), when this version can draw it. Never on an egg.
+    let accessory: PetAccessory?
     /// The stage's scale: 1 for an adult.
     let grow: CGFloat
     /// Where the pet stands: the bottom of its body.
@@ -88,6 +92,7 @@ struct PetGeometry {
         self.growth = growth
         prestigeLevel = code.prestigeLevel
         self.mood = PetMood(level: mood)
+        accessory = growth == .egg ? nil : code.wornAccessory
 
         // Small sizes grow less between stages, so a baby is still a face in the pet row. The
         // prestige form leaves room round itself for its halo.
@@ -190,9 +195,12 @@ struct PetGeometry {
         if isDetailed && !reduced && mood.rawValue >= PetMood.content.rawValue {
             layers.append(PetLayer(cheeks(), .cheek, opacity: 0.45))
         }
+        // A scarf goes under the face, so at small sizes, where it rides up, the mouth stays on top.
+        layers += accessoryLayers(.underFace, reduced: reduced)
         layers += eyeLayers(reduced: reduced)
         layers += mouthLayers(reduced: reduced)
         layers += moodLayers()
+        layers += accessoryLayers(.overFace, reduced: reduced)
         if growth == .prestige {
             layers += sparkleLayers(reduced: reduced)
         }
@@ -563,7 +571,7 @@ struct PetGeometry {
 
     // MARK: - Face
 
-    private struct Face {
+    struct Face {
         /// The eyes' centre line.
         let eyeY: CGFloat
         /// From the middle to each eye.
@@ -571,7 +579,7 @@ struct PetGeometry {
         let mouthY: CGFloat
     }
 
-    private var face: Face {
+    var face: Face {
         let placement = species.facePlacement
         let eyeY = bodyMinY + bodyHeight * placement.eyes
         let spread = isDetailed ? bodyWidth * placement.spread : max(bodyWidth * placement.spread * 1.1, 0.15)
@@ -633,9 +641,14 @@ struct PetGeometry {
         return layers
     }
 
+    /// The mouth's unit: its half-width, roughly.
+    var mouthUnit: CGFloat {
+        isDetailed ? 0.05 * (0.6 + 0.4 * grow) : 0.07
+    }
+
     private func mouthLayers(reduced: Bool) -> [PetLayer] {
         let y = face.mouthY
-        let m: CGFloat = isDetailed ? 0.05 * (0.6 + 0.4 * grow) : 0.07
+        let m = mouthUnit
         let line = len(featureLine)
         switch mood {
         case .happy:

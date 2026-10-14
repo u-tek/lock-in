@@ -53,8 +53,14 @@ public struct QuietHours: Codable, Hashable, Sendable {
     /// Whether `date` falls inside the window on `calendar`'s clock: from `start` up to, not
     /// including, `end`. Never when switched off.
     public func contains(date: Date, calendar: Calendar = .autoupdatingCurrent) -> Bool {
+        contains(minute: Self.minutes(of: date, calendar: calendar))
+    }
+
+    /// Whether `minute` after midnight (wrapped round the clock) falls inside the window. Never
+    /// when switched off.
+    public func contains(minute: Int) -> Bool {
         guard window != nil else { return false }
-        let minute = Self.minutes(of: date, calendar: calendar)
+        let minute = Self.normalised(minute)
         if crossesMidnight {
             return minute >= start || minute < end
         }

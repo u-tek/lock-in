@@ -21,7 +21,7 @@ public struct PetView: View {
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
     /// - Parameters:
-    ///   - code: Species and stage, as in `Pet.k`.
+    ///   - code: Species and stage, as in `Pet.k`, and the accessory it wears (Squad Boost).
     ///   - mood: 0 sad, 1 hungry, 2 content, 3 happy (`PetMood`); held to that range.
     ///   - size: The square it fills, in points.
     public init(code: PetCode, mood: Int, size: CGFloat) {
@@ -44,8 +44,9 @@ public struct PetView: View {
         .accessibilityLabel(Text(verbatim: Self.accessibilityLabel(code: code, mood: mood)))
     }
 
-    /// What VoiceOver says for the pet on its own: "Squad pet, teen sprout, happy". An egg doesn't
-    /// give its species away (docs/milestones/M5.md: it's revealed at hatching), and a species this
+    /// What VoiceOver says for the pet on its own: "Squad pet, teen sprout, happy", and what it
+    /// wears: "Squad pet, teen sprout, happy, wearing a party hat". An egg doesn't give its species
+    /// away (docs/milestones/M5.md: it's revealed at hatching) and wears nothing, and a species this
     /// version doesn't know is named as what's drawn, a puff. English only until the app has a
     /// string catalogue.
     public static func accessibilityLabel(code: PetCode, mood: Int) -> String {
@@ -54,7 +55,11 @@ public struct PetView: View {
             return "Squad pet, egg, \(feeling)"
         }
         let species = PetSpecies(name: code.species)
-        return "Squad pet, \(code.stageName) \(species.rawValue), \(feeling)"
+        let label = "Squad pet, \(code.stageName) \(species.rawValue), \(feeling)"
+        guard let accessory = code.wornAccessory else { return label }
+        // "Glasses" are a pair: no article.
+        let article = accessory == .glasses ? "" : "a "
+        return "\(label), wearing \(article)\(accessory.title.lowercased())"
     }
 }
 
@@ -99,7 +104,7 @@ struct PetPalette {
     func opacity(for paint: PetPaint) -> Double {
         guard reduced else { return 1 }
         switch paint {
-        case .bodyOutline, .partOutline, .face, .halo, .sparkle: return 1
+        case .bodyOutline, .partOutline, .face, .frames, .halo, .sparkle: return 1
         default: return 0.5
         }
     }
@@ -131,6 +136,19 @@ struct PetPalette {
         case .tongue: return AnyShapeStyle(Color.pink)
         case .tear: return AnyShapeStyle(Color.cyan)
         case .muted: return AnyShapeStyle(Color.gray)
+        // The accessories (Squad Boost): bright system colours, none of them the pets' own.
+        case .scarf: return AnyShapeStyle(Color.red)
+        case .scarfShade: return AnyShapeStyle(Color.red.mix(with: .black, by: 0.18))
+        case .partyHat: return AnyShapeStyle(Color.purple)
+        case .hatTrim: return AnyShapeStyle(Color.yellow)
+        case .crownPetal: return AnyShapeStyle(Color.pink.mix(with: .white, by: 0.3))
+        case .crownLeaf: return AnyShapeStyle(Color.green)
+        // Glasses are the face's colour, light in Always-On.
+        case .frames: return AnyShapeStyle(reduced ? Color.white.opacity(0.85) : Color.black.opacity(0.82))
+        case .lens: return AnyShapeStyle(Color.white)
+        case .bow: return AnyShapeStyle(Color.pink)
+        case .bowKnot: return AnyShapeStyle(Color.pink.mix(with: .black, by: 0.2))
+        case .starClip: return AnyShapeStyle(Color.yellow.mix(with: .orange, by: 0.3))
         }
     }
 }
