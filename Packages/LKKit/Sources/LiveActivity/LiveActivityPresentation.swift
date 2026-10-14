@@ -41,7 +41,8 @@ public struct LiveActivityPresentation: Hashable, Sendable {
     /// The squad name; for a solo session, what you're doing ("Locked in"). One line wherever
     /// it appears.
     public let headline: String
-    /// "2 of 6 locked in", or "Solo session".
+    /// "2 of 6 locked in" (focusing, of everyone in the content-state: a slipped member is still
+    /// in the session but isn't locked in), or "Solo session".
     public let statusLine: String
     /// The right-hand side of the compact island.
     public let compactTrailing: CompactTrailing
