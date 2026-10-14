@@ -117,8 +117,8 @@ public struct APIClient: LockinAPI {
         try await send(.get, ["squads"], as: SquadsEnvelope.self).squads
     }
 
-    public func createSquad(name: String) async throws -> Squad {
-        try await send(.post, ["squads"], body: SquadNameRequest(name: name), as: SquadEnvelope.self).squad
+    public func createSquad(name: String, tz: String?) async throws -> Squad {
+        try await send(.post, ["squads"], body: CreateSquadRequest(name: name, tz: tz), as: SquadEnvelope.self).squad
     }
 
     public func renameSquad(id: String, name: String) async throws -> Squad {
@@ -139,6 +139,32 @@ public struct APIClient: LockinAPI {
 
     public func leaveSquad(id: String) async throws {
         try await send(.delete, ["squads", id, "members", "me"])
+    }
+
+    public func squadLeaderboard(id: String, week: String?) async throws -> Leaderboard {
+        let query = week.map { [URLQueryItem(name: "week", value: $0)] } ?? []
+        return try await send(.get, ["squads", id, "leaderboard"], query: query, as: Leaderboard.self)
+    }
+
+    // MARK: - Coins and the shop
+
+    public func shop() async throws -> [ShopItem] {
+        try await send(.get, ["shop"], authenticated: false, as: ShopEnvelope.self).items
+    }
+
+    public func buy(itemId: String) async throws -> (coins: Int, owned: [String]) {
+        let response = try await send(.post, ["shop", "buy"], body: BuyRequest(itemId: itemId), as: PurchaseResponse.self)
+        return (response.coins, response.owned)
+    }
+
+    public func cosmetics() async throws -> [String] {
+        try await send(.get, ["me", "cosmetics"], as: OwnedEnvelope.self).owned
+    }
+
+    public func importCoins(coins: Int, owned: [String]) async throws -> (user: User, owned: [String]) {
+        let body = CoinsImportRequest(coins: coins, owned: owned)
+        let response = try await send(.post, ["me", "coins", "import"], body: body, as: CoinsImportResponse.self)
+        return (response.user, response.owned)
     }
 
     // MARK: - Sessions
@@ -201,6 +227,7 @@ public struct APIClient: LockinAPI {
     func request(
         _ method: Method,
         _ path: [String],
+        query: [URLQueryItem] = [],
         body: (any Encodable)? = nil,
         authenticated: Bool = true
     ) throws -> URLRequest {
@@ -208,6 +235,9 @@ public struct APIClient: LockinAPI {
         var url = baseURL
         for part in path {
             url = url.appending(component: part, directoryHint: .notDirectory)
+        }
+        if !query.isEmpty {
+            url.append(queryItems: query)
         }
         var request = URLRequest(url: url)
         request.httpMethod = method.rawValue
@@ -230,10 +260,11 @@ public struct APIClient: LockinAPI {
     private func send(
         _ method: Method,
         _ path: [String],
+        query: [URLQueryItem] = [],
         body: (any Encodable)? = nil,
         authenticated: Bool = true
     ) async throws -> Data {
-        let urlRequest = try self.request(method, path, body: body, authenticated: authenticated)
+        let urlRequest = try self.request(method, path, query: query, body: body, authenticated: authenticated)
         // Logged by the route's first part only: handles, codes and ids stay out of the log.
         let route = "\(method.rawValue) /\(path.first ?? "")"
         let result: (Data, URLResponse)
@@ -264,11 +295,12 @@ public struct APIClient: LockinAPI {
     private func send<Response: Decodable>(
         _ method: Method,
         _ path: [String],
+        query: [URLQueryItem] = [],
         body: (any Encodable)? = nil,
         authenticated: Bool = true,
         as type: Response.Type
     ) async throws -> Response {
-        let data = try await send(method, path, body: body, authenticated: authenticated)
+        let data = try await send(method, path, query: query, body: body, authenticated: authenticated)
         do {
             return try JSONDecoder().decode(Response.self, from: data)
         } catch {

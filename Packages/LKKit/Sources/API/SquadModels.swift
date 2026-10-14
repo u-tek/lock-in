@@ -22,6 +22,10 @@ public struct Squad: Codable, Hashable, Sendable, Identifiable {
     /// Your own mute switch for "X is locking in" (M4). Each member has their own.
     public var muted: Bool
     public var pet: SquadPet
+    /// Days in a row the squad has focused (M5). All zeros from a server older than M5.
+    public var streak: SquadStreak
+    /// The IANA time zone the squad's days and its Monday follow (M5); nil from an older server.
+    public var tz: String?
 
     public init(
         id: String,
@@ -30,7 +34,9 @@ public struct Squad: Codable, Hashable, Sendable, Identifiable {
         members: [SquadMember],
         openSessionId: String? = nil,
         muted: Bool = false,
-        pet: SquadPet = SquadPet()
+        pet: SquadPet = SquadPet(),
+        streak: SquadStreak = SquadStreak(),
+        tz: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -39,6 +45,23 @@ public struct Squad: Codable, Hashable, Sendable, Identifiable {
         self.openSessionId = openSessionId
         self.muted = muted
         self.pet = pet
+        self.streak = streak
+        self.tz = tz
+    }
+
+    /// M5's fields (`pet.mood`, `pet.progress`, `streak`, `tz`) may be missing, from a server that
+    /// predates them: they read as their defaults rather than failing the whole list.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        ownerId = try container.decodeIfPresent(String.self, forKey: .ownerId)
+        members = try container.decode([SquadMember].self, forKey: .members)
+        openSessionId = try container.decodeIfPresent(String.self, forKey: .openSessionId)
+        muted = try container.decode(Bool.self, forKey: .muted)
+        pet = try container.decodeIfPresent(SquadPet.self, forKey: .pet) ?? SquadPet()
+        streak = (try? container.decodeIfPresent(SquadStreak.self, forKey: .streak)) ?? SquadStreak()
+        tz = try? container.decodeIfPresent(String.self, forKey: .tz)
     }
 
     /// Someone is locked in with the squad right now.
@@ -89,20 +112,155 @@ public struct SquadMember: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-/// The squad's pet. `species` stays nil until the egg hatches (M5).
+/// The squad's pet (docs/milestones/M5.md): an egg (stage 0) until two members finish a session in
+/// the same room, then a baby, a teen, an adult and the prestige forms.
 public struct SquadPet: Codable, Hashable, Sendable {
+    /// Picked when the squad was made, so the egg is tinted with what's inside it. The app names it
+    /// only once the egg hatches. Nil from a server older than M5.
     public var species: String?
+    /// 0 egg, 1 baby, 2 teen, 3 adult, 4 and up prestige.
     public var stage: Int
+    /// The squad's focused minutes.
     public var xp: Int
+    /// 0 sad, 1 hungry, 2 content, 3 happy (`PetMood`), for today in the squad's time zone.
+    public var mood: Int
+    /// Towards the next stage, 0–1: 0 for an egg, 1 at the last stage (`PetRules.progress`).
+    public var progress: Double
 
-    public init(species: String? = nil, stage: Int = 0, xp: Int = 0) {
+    /// - Parameters:
+    ///   - mood: content unless said, as an older server's pet reads.
+    ///   - progress: worked out from `xp` and `stage` unless said.
+    public init(species: String? = nil, stage: Int = 0, xp: Int = 0, mood: Int = PetMood.content.rawValue, progress: Double? = nil) {
         self.species = species
         self.stage = stage
         self.xp = xp
+        self.mood = mood
+        self.progress = progress ?? PetRules.progress(xp: xp, stage: stage)
     }
 
+    /// `mood` and `progress` arrived with M5: missing (an older server), the pet is content and its
+    /// progress comes from its XP, as `init` has it.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let species = try container.decodeIfPresent(String.self, forKey: .species)
+        let stage = try container.decode(Int.self, forKey: .stage)
+        let xp = try container.decode(Int.self, forKey: .xp)
+        let mood: Int? = try? container.decodeIfPresent(Int.self, forKey: .mood)
+        let progress: Double? = try? container.decodeIfPresent(Double.self, forKey: .progress)
+        self.init(species: species, stage: stage, xp: xp, mood: mood ?? PetMood.content.rawValue, progress: progress)
+    }
+
+    /// Out of its egg: stage 1 or later.
     public var hasHatched: Bool {
-        species != nil
+        stage >= 1
+    }
+
+    /// Species and stage as `PetView` draws them, read leniently like a pushed `Pet.k`: a species
+    /// this version doesn't know (or none, from an older server) draws as the default.
+    public var code: PetCode {
+        PetCode("\(species ?? PetCode.defaultSpecies).\(max(0, stage))")
+    }
+
+    /// `mood` held to 0–3.
+    public var petMood: PetMood {
+        PetMood(level: mood)
+    }
+
+    /// `progress` held to 0–1.
+    public var clampedProgress: Double {
+        progress.isFinite ? min(max(progress, 0), 1) : 0
+    }
+
+    /// XP still to go to the next stage; nil for an egg (it hatches on a finish, not on XP) and at
+    /// the last stage.
+    public var xpToNextStage: Int? {
+        guard hasHatched, stage < PetRules.lastStage, stage + 1 < PetRules.stageXp.count else { return nil }
+        return max(0, PetRules.stageXp[stage + 1] - xp)
+    }
+}
+
+/// A squad's streak (docs/milestones/M5.md): a day counts when at least half the squad (rounded
+/// up) finished a session of 20 focused minutes or more, in the squad's time zone.
+public struct SquadStreak: Codable, Hashable, Sendable {
+    /// Days in a row; 0 once broken.
+    public var count: Int
+    /// Today counts already.
+    public var countedToday: Bool
+    /// Members who finished a 20-minute session today.
+    public var doneToday: Int
+    /// How many have to for today to count: half the squad, rounded up, at least 1.
+    public var needed: Int
+
+    public init(count: Int = 0, countedToday: Bool = false, doneToday: Int = 0, needed: Int = 1) {
+        self.count = count
+        self.countedToday = countedToday
+        self.doneToday = doneToday
+        self.needed = needed
+    }
+
+    /// Each field on its own, so one odd value never costs the squad.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        count = (try? container.decodeIfPresent(Int.self, forKey: .count)) ?? 0
+        countedToday = (try? container.decodeIfPresent(Bool.self, forKey: .countedToday)) ?? false
+        doneToday = (try? container.decodeIfPresent(Int.self, forKey: .doneToday)) ?? 0
+        needed = (try? container.decodeIfPresent(Int.self, forKey: .needed)) ?? 1
+    }
+}
+
+// MARK: - Leaderboard
+
+/// A squad's week (`GET /squads/:id/leaderboard`, docs/milestones/M5.md): every member's focused
+/// minutes and finished sessions from Monday 00:00 to the next Monday in the squad's time zone,
+/// most minutes first. Solo sessions count too.
+public struct Leaderboard: Codable, Hashable, Sendable {
+    /// The Monday, "YYYY-MM-DD".
+    public var weekStart: String
+    /// Unix seconds: Monday 00:00 in the squad's zone.
+    public var startsAt: Double
+    /// Unix seconds: the next Monday 00:00 (not included).
+    public var endsAt: Double
+    /// Every current member, 0s included, most minutes first; ties by name.
+    public var entries: [Entry]
+
+    public struct Entry: Codable, Hashable, Sendable, Identifiable {
+        public var userId: String
+        /// Whole focused minutes from every timer that stopped in the week.
+        public var minutes: Int
+        /// Sessions finished in the week.
+        public var sessions: Int
+
+        public init(userId: String, minutes: Int, sessions: Int) {
+            self.userId = userId
+            self.minutes = minutes
+            self.sessions = sessions
+        }
+
+        public var id: String { userId }
+    }
+
+    public init(weekStart: String, startsAt: Double, endsAt: Double, entries: [Entry]) {
+        self.weekStart = weekStart
+        self.startsAt = startsAt
+        self.endsAt = endsAt
+        self.entries = entries
+    }
+
+    public var startDate: Date {
+        UnixTime.date(startsAt)
+    }
+
+    public var endDate: Date {
+        UnixTime.date(endsAt)
+    }
+
+    public func entry(for userId: String) -> Entry? {
+        entries.first { $0.userId == userId }
+    }
+
+    /// The squad's minutes this week, everyone's together.
+    public var totalMinutes: Int {
+        entries.reduce(0) { $0 + max(0, $1.minutes) }
     }
 }
 
@@ -236,9 +394,16 @@ public enum LiveMessage: Hashable, Sendable {
 
 // MARK: - Request bodies
 
-/// `POST /squads`, `PATCH /squads/:id`.
+/// `PATCH /squads/:id`.
 struct SquadNameRequest: Encodable, Sendable {
     var name: String
+}
+
+/// `POST /squads`. `tz` (M5) is left out when nil: the server falls back to the creator's phone's
+/// zone, then UTC.
+struct CreateSquadRequest: Encodable, Sendable {
+    var name: String
+    var tz: String?
 }
 
 /// `PATCH /squads/:id/members/me`.

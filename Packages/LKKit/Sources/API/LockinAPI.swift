@@ -52,8 +52,9 @@ public protocol LockinAPI: Sendable {
 
     /// `GET /squads`, in the order you joined them.
     func squads() async throws -> [Squad]
-    /// `POST /squads`. 402 `plus_required` (`plusLimit` "squads") past the free limit.
-    func createSquad(name: String) async throws -> Squad
+    /// `POST /squads`, in the IANA time zone `tz` (M5: the squad's days and Monday follow it; nil
+    /// leaves it to the server). 402 `plus_required` (`plusLimit` "squads") past the free limit.
+    func createSquad(name: String, tz: String?) async throws -> Squad
     /// `PATCH /squads/:id`: the owner only.
     func renameSquad(id: String, name: String) async throws -> Squad
     /// `POST /squads/:id/invite`: your current code for the squad, or a new one once it expires.
@@ -64,6 +65,24 @@ public protocol LockinAPI: Sendable {
     func setSquadMuted(id: String, muted: Bool) async throws -> Squad
     /// `DELETE /squads/:id/members/me`. An owner leaving hands the squad on.
     func leaveSquad(id: String) async throws
+    /// `GET /squads/:id/leaderboard?week=YYYY-MM-DD` (M5): the week holding `week` (any day of
+    /// it), or this week in the squad's time zone when nil. 403 `not_member`, 422 `week_invalid`.
+    func squadLeaderboard(id: String, week: String?) async throws -> Leaderboard
+
+    // MARK: Coins and the shop (M5)
+
+    /// `GET /shop`: everything for sale. Needs no sign-in.
+    func shop() async throws -> [ShopItem]
+    /// `POST /shop/buy`: the balance after paying, and every item id you may now wear. 402
+    /// `not_enough_coins`, 402 `plus_required` (a Plus item without Plus), 409 `already_owned`,
+    /// 404 `item_not_found`.
+    func buy(itemId: String) async throws -> (coins: Int, owned: [String])
+    /// `GET /me/cosmetics`: every item id you may wear beyond the defaults, Plus items included
+    /// while Plus lasts.
+    func cosmetics() async throws -> [String]
+    /// `POST /me/coins/import`: this phone's signed-out coins and items, once per account. 409
+    /// `already_imported` the second time.
+    func importCoins(coins: Int, owned: [String]) async throws -> (user: User, owned: [String])
 
     // MARK: Sessions (M3)
 

@@ -313,7 +313,8 @@ extension SessionEngine {
             return
         }
         switch mine.state {
-        case .focusing, .onBreak, .paused:
+        case .focusing, .onBreak, .paused, .slipped:
+            // A slip doesn't stop the timer: it shows for 5 minutes while it runs (decision 0009).
             if ended {
                 // A room that's over can't still be running this timer: finish it by the clock.
                 finishSquadTimer(session, completed: timeIsUp, at: time)
@@ -329,7 +330,7 @@ extension SessionEngine {
             }
         case .done:
             finishSquadTimer(session, completed: true, at: time)
-        case .left, .slipped:
+        case .left:
             finishSquadTimer(session, completed: false, at: time)
         }
     }
@@ -424,7 +425,8 @@ extension SessionEngine {
             case .slip: state = try await api.slipSession(id: sessionId)
             }
             squadProblem = nil
-            // The room ends as soon as nobody's timer is running.
+            // The room ends as soon as nobody's timer is running. A slip's answer shows this
+            // member slipped with the timer still running, so `follow` keeps it going.
             let ended = !state.m.contains(where: { $0.isActive })
             applyRoom(state, ended: ended, sessionId: sessionId)
         } catch is CancellationError {

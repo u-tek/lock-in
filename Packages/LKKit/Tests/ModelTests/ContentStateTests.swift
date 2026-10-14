@@ -74,7 +74,8 @@ private func member(_ id: String, _ state: MemberState, end: Double, pausedAt: D
 
     @Test func stateNumbersMatchTheSpec() {
         #expect(MemberState.allCases.map(\.rawValue) == [0, 1, 2, 3, 4, 5])
-        #expect(MemberState.allCases.filter(\.isActive) == [.focusing, .onBreak, .paused])
+        // A slip doesn't stop the timer (docs/decisions/0009), so slipped is still active.
+        #expect(MemberState.allCases.filter(\.isActive) == [.focusing, .onBreak, .paused, .slipped])
     }
 
     @Test func settingTheStateWritesTheNumber() {
@@ -104,18 +105,18 @@ private func member(_ id: String, _ state: MemberState, end: Double, pausedAt: D
 @Suite struct ContentStateTests {
     @Test func staleFiveMinutesAfterTheLastRunningTimer() throws {
         // Ava ends at …1500, Noor (on a break) at …2700, Kai is paused with 780 s left (…1380 if
-        // resumed now). Mateo is done, Sakura left and Jules slipped: they don't count, even
-        // though Jules's end (…3060) is the latest.
+        // resumed now), and Jules slipped with the timer still running, ending at …3060, the
+        // latest. Mateo is done and Sakura left: they don't count.
         let state = try Fixture.contentState("squad-6")
-        #expect(state.staleDate(now: now) == Date(timeIntervalSince1970: 1_791_902_700 + 300))
+        #expect(state.staleDate(now: now) == Date(timeIntervalSince1970: 1_791_903_060 + 300))
     }
 
     @Test func squadStaleDatesMatchTheServer() throws {
         // The same squad-6 moments the server's `staleDateFor` is tested at, in whole seconds
         // because the server rounds APNs dates up. Both sides must give these numbers.
         let state = try Fixture.contentState("squad-6")
-        // At the cheer: Noor's break (…2700) ends last; Jules slipped, so …3060 doesn't count.
-        #expect(state.staleDate(now: Date(timeIntervalSince1970: 1_791_900_650)) == Date(timeIntervalSince1970: 1_791_903_000))
+        // At the cheer: Jules, slipped but still running, ends last (…3060).
+        #expect(state.staleDate(now: Date(timeIntervalSince1970: 1_791_900_650)) == Date(timeIntervalSince1970: 1_791_903_360))
         // Later: Kai's 780 paused seconds, counted from now, end last.
         #expect(state.staleDate(now: Date(timeIntervalSince1970: 1_791_903_000)) == Date(timeIntervalSince1970: 1_791_904_080))
     }
@@ -136,9 +137,20 @@ private func member(_ id: String, _ state: MemberState, end: Double, pausedAt: D
         let state = State(v: 9, m: [
             member("ava", .done, end: 1_000),
             member("noor", .left, end: 3_000),
-            member("kai", .slipped, end: 2_000),
+            member("kai", .done, end: 2_000),
         ])
         #expect(state.staleDate(now: now) == Date(timeIntervalSince1970: 3_300))
+    }
+
+    @Test func aSlippedMemberStillHoldsTheActivityOpen() {
+        // Slipped keeps its timer running (docs/decisions/0009): its end counts, and the done and
+        // left members' later end doesn't.
+        let state = State(v: 9, m: [
+            member("ava", .done, end: 1_000),
+            member("noor", .left, end: 3_000),
+            member("kai", .slipped, end: 2_000),
+        ])
+        #expect(state.staleDate(now: now) == Date(timeIntervalSince1970: 2_300))
     }
 
     @Test func emptyStatesGoStaleFromNow() {

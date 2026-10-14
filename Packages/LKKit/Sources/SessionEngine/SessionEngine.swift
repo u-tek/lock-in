@@ -333,15 +333,12 @@ public final class SessionEngine: ObservableObject {
         finish(session, with: record)
     }
 
-    /// Breaks focus on purpose: Deep Focus (M8) calls this when a shielded app is opened. In a
-    /// squad, the room shows it (state 5, "slipped"); solo, it ends the session early.
+    /// A shielded app was opened ("Open anyway" in Deep Focus, M8). In a squad, the room shows it
+    /// (state 5, "slipped") for 5 minutes while the timer keeps running (docs/decisions/0009).
+    /// Solo, it does nothing: there's no squad to show it to, and the timer carries on.
     public func slip() {
-        guard let session = stored.active else { return }
-        if session.isSquad {
-            enqueueSquadAction(.slip)
-        } else {
-            end()
-        }
+        guard let session = stored.active, session.isSquad else { return }
+        enqueueSquadAction(.slip)
     }
 
     /// Back to idle once the finish has been celebrated. A squad session's screen closes with it:
