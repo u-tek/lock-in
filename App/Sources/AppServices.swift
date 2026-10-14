@@ -80,7 +80,16 @@ final class LiveServices {
         let account = AccountStore(api: api)
         let friends = FriendsStore(api: api, account: account)
         friends.analytics = AppServices.analytics
-        social = SocialModels(account: account, friends: friends)
+        social = SocialModels(
+            account: account,
+            friends: friends,
+            squads: SquadsStore(api: api),
+            rooms: SquadRooms(api: api)
+        )
+        // Squad sessions go through the server; without one the engine runs solo only.
+        if api.isConfigured {
+            engine.configure(api: api)
+        }
         // The Live Activity's Pause, Resume and End buttons run their intents in this process;
         // the bridge hands them to the engine.
         SessionIntentBridge.shared.handler = { command in
@@ -135,10 +144,22 @@ final class LiveServices {
     }
 }
 
-/// The account and friends stores, handed down together.
+/// The account, friends and squads, handed down together.
 struct SocialModels {
     let account: AccountStore
     let friends: FriendsStore
+    let squads: SquadsStore
+    /// How many are locked in in each squad's open room, for Home's picker.
+    let rooms: SquadRooms
+
+    /// Fetches the squads, then peeks into the ones with an open room. Signed out (or without a
+    /// handle yet) there are no squads to fetch.
+    @MainActor
+    func refreshSquads() async {
+        guard account.state.isSignedIn else { return }
+        await squads.refresh()
+        await rooms.refresh(squads.squads)
+    }
 }
 
 /// Only what SwiftUI has no hook for: the APNs device token.
