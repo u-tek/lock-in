@@ -9,6 +9,7 @@ enum AppRoute: Hashable {
     case developer
     case apnsSpike
     case liveActivityLab
+    case petLab
     case designTokens
 
     @MainActor @ViewBuilder
@@ -17,6 +18,7 @@ enum AppRoute: Hashable {
         case .developer: DeveloperMenu()
         case .apnsSpike: APNsSpikeScreen()
         case .liveActivityLab: LiveActivityLabScreen()
+        case .petLab: PetLabScreen()
         case .designTokens: DesignTokensScreen()
         }
     }

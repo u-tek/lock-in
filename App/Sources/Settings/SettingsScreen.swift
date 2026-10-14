@@ -232,6 +232,9 @@ struct SettingsScreen: View {
             NavigationLink(value: AppRoute.liveActivityLab) {
                 ToolRow(title: "Live Activity Lab", systemImage: "testtube.2", color: .purple)
             }
+            NavigationLink(value: AppRoute.petLab) {
+                ToolRow(title: "Pet Lab", systemImage: "pawprint.fill", color: .orange)
+            }
             NavigationLink(value: AppRoute.designTokens) {
                 ToolRow(title: "Design tokens", systemImage: "paintpalette.fill", color: .pink)
             }

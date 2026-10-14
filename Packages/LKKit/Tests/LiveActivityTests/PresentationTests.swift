@@ -50,7 +50,7 @@ private func range(_ member: WireMember) -> ClosedRange<Date> {
 
         #expect(presentation.headline == "Library Goblins")
         #expect(presentation.statusLine == "1 of 6 locked in")
-        #expect(presentation.pet?.title == "Fox · teen")
+        #expect(presentation.pet?.title == "Sprout · teen")
     }
 
     @Test func membersAreCappedForEachPresentation() {

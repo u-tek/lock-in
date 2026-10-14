@@ -139,7 +139,7 @@ import Testing
         #expect(api.pushToStarts == [token])
         #expect(engine.phase != .idle)
         // Waiting for the activity iOS starts; the foreground starts one here if it never comes.
-        #expect(engine.roomActivity == nil)
+        #expect(engine.stored.room?.activityID == nil)
         #expect(engine.liveActivityProblem == .notInForeground)
         #expect(engine.stored.room?.sessionId == SquadData.sessionId)
     }

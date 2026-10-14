@@ -74,7 +74,7 @@ public struct LockinAttributes: Codable, Hashable, Sendable {
         }
 
         public struct Pet: Codable, Hashable, Sendable {
-            /// Species and stage code, e.g. "fox.2" (see `PetCode`).
+            /// Species and stage code, e.g. "sprout.2" (see `PetCode`).
             public var k: String
             /// Mood, 0–3.
             public var md: Int

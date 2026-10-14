@@ -164,7 +164,7 @@ struct LockinAttributes: ActivityAttributes {
             var q: Double? // paused at (Unix seconds)
         }
         struct Pet: Codable, Hashable {
-            var k: String  // species/stage code, e.g. "fox.2"
+            var k: String  // species/stage code, e.g. "sprout.2"
             var md: Int    // mood 0–3
             var x: Double  // progress to next stage, 0–1
         }

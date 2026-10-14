@@ -59,14 +59,14 @@ private func withScratchDefaults(_ body: (UserDefaults) throws -> Void) rethrows
     @Test func offMeansNever() {
         var quiet = QuietHours.default
         quiet.isEnabled = false
-        #expect(quiet.window == nil)
+        #expect(quiet.window?.start == nil)
         #expect(!quiet.contains(date: at(23, 0), calendar: sydney))
         #expect(!quiet.contains(date: at(3, 0), calendar: sydney))
     }
 
     @Test func fromAndToAtTheSameMinuteIsNoWindow() {
         let empty = QuietHours(start: 600, end: 600)
-        #expect(empty.window == nil)
+        #expect(empty.window?.start == nil)
         #expect(!empty.contains(date: at(10, 0), calendar: sydney))
         #expect(!empty.contains(date: at(22, 0), calendar: sydney))
     }

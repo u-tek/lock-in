@@ -41,9 +41,8 @@ public enum LiveActivitySamples {
     }
 
     /// `squad-6`: Ava (you), Noor on a break, Kai paused, Mateo done, Sakura left, Jules slipped,
-    /// a teen pet and a cheer. Nobody but you is focusing, so the compact island shows your time.
-    /// The pet is the fixture's "fox", from before the species were named (M5): this version
-    /// draws a species it doesn't know as a puff.
+    /// a teen sprout and a cheer. Nobody but you is focusing, so the compact island shows your
+    /// time.
     ///
     /// - Parameter state: Your state. Anything but `.focusing` changes your times to suit it, and
     ///   the sample no longer mirrors the fixture.
@@ -65,7 +64,7 @@ public enum LiveActivitySamples {
             state: LockinAttributes.ContentState(
                 v: 42,
                 m: members,
-                p: LockinAttributes.ContentState.Pet(k: "fox.2", md: 2, x: 0.64),
+                p: LockinAttributes.ContentState.Pet(k: "sprout.2", md: 2, x: 0.64),
                 c: LockinAttributes.ContentState.Cheer(f: "Nr2Kx7pQ1m", t: avaID, k: 3, at: t + 50)
             )
         )

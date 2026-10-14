@@ -5,7 +5,8 @@
 # store.* routes are App Store screenshots (iPhone 16 Pro Max only, into design/appstore). M6:
 # the scripts already handle them; none exist yet.
 # A lab page is taller than one screenshot, so each part is a route of its own too
-# (DesignTokensScreen.Panel, LiveActivityLabScreen.Panel); the page's own route shows its top.
+# (DesignTokensScreen.Panel, LiveActivityLabScreen.Panel, PetLabScreen.Panel); the page's own route
+# shows its top.
 onboarding.welcome
 onboarding.lockling
 onboarding.notifications
@@ -53,3 +54,10 @@ lab.liveactivity.watch
 lab.liveactivity.largest
 lab.liveactivity.matrix
 lab.liveactivity.matrix.expanded
+lab.pets
+lab.pets.overview
+lab.pets.puff
+lab.pets.sprout
+lab.pets.ember
+lab.pets.pebble
+lab.pets.liveactivity

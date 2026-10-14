@@ -292,9 +292,13 @@ enum SnapshotGallery {
             return AnyView(NavigationStack {
                 LiveActivityLabScreen(now: now)
             })
+        case "lab.pets":
+            return AnyView(NavigationStack {
+                PetLabScreen()
+            })
         default:
             // One part of a lab page, for when the whole page is taller than a screenshot:
-            // lab.tokens.<part>, lab.liveactivity.<part>.
+            // lab.tokens.<part>, lab.liveactivity.<part>, lab.pets.<part>.
             if let part = suffix(of: route, after: "lab.tokens."), let panel = DesignTokensScreen.Panel(rawValue: part) {
                 return AnyView(NavigationStack {
                     DesignTokensScreen(panels: [panel])
@@ -303,6 +307,11 @@ enum SnapshotGallery {
             if let part = suffix(of: route, after: "lab.liveactivity."), let panel = LiveActivityLabScreen.Panel(rawValue: part) {
                 return AnyView(NavigationStack {
                     LiveActivityLabScreen(now: now, panels: [panel])
+                })
+            }
+            if let part = suffix(of: route, after: "lab.pets."), let panel = PetLabScreen.Panel(rawValue: part) {
+                return AnyView(NavigationStack {
+                    PetLabScreen(panels: [panel])
                 })
             }
             return nil

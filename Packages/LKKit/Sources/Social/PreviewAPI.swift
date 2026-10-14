@@ -84,7 +84,7 @@ public struct PreviewAPI: LockinAPI {
         ],
         openSessionId: "rmPreview1",
         muted: true,
-        pet: SquadPet(species: "fox", stage: 1, xp: 240)
+        pet: SquadPet(species: "puff", stage: 1, xp: 240)
     )
 
     public var hasSession: Bool {

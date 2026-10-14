@@ -2,6 +2,7 @@ import Core
 import DesignSystem
 import Notifications
 import SwiftUI
+import UIKit
 
 /// Tools for building and checking the app on a real phone: the owner tests TestFlight builds and
 /// has no Xcode to read logs from, so what a build knows about itself is shown here. Reached from
@@ -16,6 +17,8 @@ struct DeveloperMenu: View {
     /// App Group, so it shows off there.
     @State private var joinsWithoutOpening = SnapshotMode.current == nil && JoinWithoutOpening.isEnabled()
     @State private var lastAttempt: JoinWithoutOpening.Attempt? = nil
+    @State private var pushToStartToken: String? = nil
+    @State private var copiedToken = false
 
     var body: some View {
         List {
@@ -25,6 +28,9 @@ struct DeveloperMenu: View {
                 }
                 NavigationLink(value: AppRoute.liveActivityLab) {
                     MenuRow(title: "Live Activity Lab", systemImage: "testtube.2", color: .purple)
+                }
+                NavigationLink(value: AppRoute.petLab) {
+                    MenuRow(title: "Pet Lab", systemImage: "pawprint.fill", color: .orange)
                 }
                 NavigationLink(value: AppRoute.designTokens) {
                     MenuRow(title: "Design tokens", systemImage: "paintpalette.fill", color: .pink)
@@ -57,6 +63,7 @@ struct DeveloperMenu: View {
         .onAppear {
             if SnapshotMode.current == nil {
                 lastAttempt = JoinWithoutOpening.lastAttempt()
+                pushToStartToken = JoinWithoutOpening.savedToken()
             }
         }
     }
@@ -80,6 +87,15 @@ struct DeveloperMenu: View {
                     Text("Last background join")
                     Text(Date(timeIntervalSince1970: lastAttempt.at).formatted(date: .abbreviated, time: .standard))
                 }
+            }
+            if let pushToStartToken {
+                // `{ token, env }`: the body of POST /admin/push-to-start-test.
+                Button(copiedToken ? "Copied" : "Copy push-to-start token") {
+                    UIPasteboard.general.string = #"{"token":"\#(pushToStartToken)","env":"\#(APNsEnvironment.current.rawValue)"}"#
+                    copiedToken = true
+                }
+            } else {
+                LabeledContent("Push-to-start token", value: "None yet")
             }
         } header: {
             Text("Push-to-start spike")
