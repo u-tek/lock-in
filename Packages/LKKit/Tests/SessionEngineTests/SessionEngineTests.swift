@@ -223,6 +223,19 @@ import Testing
         #expect(record.coinsEarned == 0)
     }
 
+    @Test func aSoloSlipLeavesTheTimerRunning() {
+        // Decision 0009: a slip never ends the timer, and solo there's no squad to show it to.
+        let engine = makeEngine(clock: clock)
+        engine.start(minutes: 25)
+        clock.advance(minutes: 10)
+        engine.slip()
+        #expect(engine.phase == .running(
+            startedAt: referenceDate,
+            endsAt: referenceDate.addingTimeInterval(25 * 60),
+            plannedMinutes: 25
+        ))
+    }
+
     @Test func endingOrPausingAfterTheTimeRanOutCompletes() throws {
         let ended = makeEngine(clock: clock)
         ended.start(minutes: 25)

@@ -73,7 +73,7 @@ import Testing
         let (api, _, squads, events) = await signedIn { $0.squads = [TestData.owls] }
         await squads.refresh()
         let made = try await squads.create(name: "  Library Goblins ")
-        #expect(api.calls.last == .createSquad("Library Goblins"))
+        #expect(api.calls.last == .createSquad("Library Goblins", tz: TimeZone.current.identifier))
         #expect(made.name == "Library Goblins")
         #expect(made.ownerId == TestData.ava.id)
         #expect(squads.squads.map(\.id) == [TestData.owls.id, made.id])

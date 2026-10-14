@@ -20,6 +20,8 @@ public final class SquadsStore: ObservableObject {
     @Published public var problem: String? = nil
     /// The list has loaded at least once since signing in.
     @Published public private(set) var hasLoaded = false
+    /// This week's leaderboard of each squad whose page has been opened, by squad id (M5).
+    @Published public private(set) var leaderboards: [String: Leaderboard] = [:]
 
     /// Squads made and invites redeemed: counts only.
     public var analytics: Analytics = .disabled
@@ -39,9 +41,10 @@ public final class SquadsStore: ObservableObject {
 
     /// Squads with nothing behind them, for snapshots and previews. Its actions answer from
     /// `PreviewAPI`, so they never fail.
-    public static func preview(squads: [Squad]) -> SquadsStore {
-        let store = SquadsStore(api: PreviewAPI(squads: squads))
+    public static func preview(squads: [Squad], leaderboards: [String: Leaderboard] = [:]) -> SquadsStore {
+        let store = SquadsStore(api: PreviewAPI(squads: squads, leaderboards: leaderboards))
         store.squads = squads
+        store.leaderboards = leaderboards
         store.hasLoaded = true
         return store
     }
@@ -73,12 +76,14 @@ public final class SquadsStore: ObservableObject {
 
     // MARK: - Squads
 
-    /// Makes a squad, with you in it. Throws `APIError`: `nameInvalid` / `nameNotAllowed` (checked
-    /// here first, so a bad name fails without asking), `plusRequired` with `plusLimit` "squads".
+    /// Makes a squad, with you in it, living by this phone's time zone (M5: its days and its
+    /// Monday). Throws `APIError`: `nameInvalid` / `nameNotAllowed` (checked here first, so a bad
+    /// name fails without asking), `plusRequired` with `plusLimit` "squads".
     @discardableResult
-    public func create(name: String) async throws -> Squad {
+    public func create(name: String, timeZone: TimeZone = .current) async throws -> Squad {
         let trimmed = try Self.checkedName(name)
-        let squad = try await call { try await api.createSquad(name: trimmed) }
+        let zone = timeZone.identifier
+        let squad = try await call { try await api.createSquad(name: trimmed, tz: zone) }
         upsert(squad)
         analytics.track(.squadCreated)
         return squad
@@ -143,6 +148,37 @@ public final class SquadsStore: ObservableObject {
         analytics.track(.inviteShared)
     }
 
+    // MARK: - Leaderboard (M5)
+
+    /// This week's leaderboard for `squad`, now in `leaderboards`. A failure keeps the last one
+    /// (the page shows the members without their minutes until one loads) and returns false.
+    @discardableResult
+    public func loadLeaderboard(for squad: Squad) async -> Bool {
+        guard canAsk else { return false }
+        do {
+            let board = try await call { try await api.squadLeaderboard(id: squad.id, week: nil) }
+            leaderboards[squad.id] = board
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// The squad's members as this week's leaderboard ranks them: most minutes first, with the
+    /// minutes; members the leaderboard doesn't have yet (none loaded, or someone just joined) come
+    /// last, in joining order, with nil.
+    public func ranking(of squad: Squad) -> [(member: SquadMember, entry: Leaderboard.Entry?)] {
+        let entries = leaderboards[squad.id]?.entries ?? []
+        var ranked: [(member: SquadMember, entry: Leaderboard.Entry?)] = entries.compactMap { entry in
+            squad.member(id: entry.userId).map { (member: $0, entry: entry) }
+        }
+        let listed = Set(ranked.map { $0.member.id })
+        for member in squad.members where !listed.contains(member.id) {
+            ranked.append((member: member, entry: nil))
+        }
+        return ranked
+    }
+
     // MARK: - Plumbing
 
     /// Signed in with a handle (when the store has the account), and the API has a session.
@@ -167,6 +203,7 @@ public final class SquadsStore: ObservableObject {
         squads = []
         hasLoaded = false
         problem = nil
+        leaderboards = [:]
     }
 
     /// A failed refresh or mute: a 401 signs out, anything else shows as `problem`.

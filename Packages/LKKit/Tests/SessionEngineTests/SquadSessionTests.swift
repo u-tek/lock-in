@@ -253,15 +253,33 @@ private func at(minutes: Double) -> Date {
         #expect(engine.mode.isSquad)
     }
 
-    @Test func slippingIsAPartialFinishButTheRoomStays() async throws {
+    @Test func slippingKeepsTheTimerRunning() async throws {
+        // Decision 0009: a slip shows for 5 minutes while the timer carries on.
         let (api, engine) = try await started()
         clock.advance(minutes: 10)
         api.send(.state(status: "open", contentState: SquadData.room(v: 2, SquadData.mine(.slipped))))
-        await waitUntil { engine.phase.record != nil }
-        let record = try #require(engine.phase.record)
-        #expect(!record.completed)
-        #expect(record.focusedSeconds == 10 * 60)
+        await waitUntil { engine.room?.v == 2 }
+        #expect(engine.phase == .running(startedAt: referenceDate, endsAt: at(minutes: 25), plannedMinutes: 25))
+        #expect(engine.phase.record == nil)
+        #expect(engine.room?.member(id: SquadData.me)?.state == .slipped)
         #expect(engine.stored.room != nil)
+        #expect(engine.liveTask != nil)
+
+        // Back to focusing five minutes later, still running.
+        clock.advance(minutes: 5)
+        api.send(.state(status: "open", contentState: SquadData.room(v: 3, SquadData.mine())))
+        await waitUntil { engine.room?.v == 3 }
+        #expect(engine.phase == .running(startedAt: referenceDate, endsAt: at(minutes: 25), plannedMinutes: 25))
+    }
+
+    @Test func aSlippedTimerStillFinishesWhenTheRoomEnds() async throws {
+        let (api, engine) = try await started()
+        clock.advance(minutes: 25)
+        api.send(.state(status: "ended", contentState: SquadData.room(v: 4, SquadData.mine(.slipped), noor: SquadData.noorMember(.left))))
+        await waitUntil { engine.phase.record != nil }
+        // The room is over, so this timer is too: by the clock, it ran out.
+        #expect(engine.phase.record?.completed == true)
+        #expect(engine.stored.room == nil)
     }
 
     @Test func anEndedRoomClosesEverything() async throws {
@@ -442,7 +460,10 @@ private func at(minutes: Double) -> Date {
         engine.slip()
         await engine.squadWork?.value
         #expect(api.calls.last == .slip(SquadData.sessionId))
-        #expect(engine.phase.record?.completed == false)
+        // The room's answer shows the slip; the timer keeps going (decision 0009).
+        #expect(engine.phase.record == nil)
+        #expect(engine.phase == .running(startedAt: referenceDate, endsAt: at(minutes: 25), plannedMinutes: 25))
+        #expect(engine.room?.member(id: SquadData.me)?.state == .slipped)
     }
 
     @Test func theLockScreenButtonsWorkInASquad() async throws {

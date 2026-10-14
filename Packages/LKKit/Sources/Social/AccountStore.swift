@@ -338,6 +338,19 @@ public final class AccountStore: ObservableObject {
         save(user)
     }
 
+    /// The account as another store got it (`GET /me` for the balance, the coin import): taken
+    /// only if it's still the signed-in account.
+    func noteUser(_ user: User) {
+        adopt(user)
+    }
+
+    /// The balance after a purchase (`POST /shop/buy` answers with the coins only).
+    func noteCoins(_ coins: Int) {
+        guard var user = state.user, user.coins != coins else { return }
+        user.coins = coins
+        adopt(user)
+    }
+
     /// A user from any other response: only if it's still the signed-in account. A reply that
     /// lands after signing out mustn't sign back in.
     private func adopt(_ user: User) {

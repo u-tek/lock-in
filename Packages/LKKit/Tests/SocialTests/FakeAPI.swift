@@ -24,12 +24,17 @@ final class FakeAPI: LockinAPI, @unchecked Sendable {
         case report(String, ReportReason, String?)
         case signOutSession
         case squads
-        case createSquad(String)
+        case createSquad(String, tz: String?)
         case renameSquad(String, String)
         case squadInvite(String)
         case joinSquad(String)
         case setSquadMuted(String, Bool)
         case leaveSquad(String)
+        case squadLeaderboard(String, week: String?)
+        case shop
+        case buy(String)
+        case cosmetics
+        case importCoins(coins: Int, owned: [String])
     }
 
     /// What the fake answers with. Change it with `set(_:)`.
@@ -46,8 +51,14 @@ final class FakeAPI: LockinAPI, @unchecked Sendable {
         /// What `POST /squads/join/:code` joins.
         var joins = TestData.goblins
         var squadCode = TestData.squadCode
-        /// Errors by route name ("me", "friends", "redeem", "joinSquad", …), thrown every time
-        /// until removed.
+        /// Each squad's week, by squad id (M5).
+        var leaderboards: [String: Leaderboard] = [:]
+        /// What the account owns beyond the defaults (M5), in catalogue order.
+        var owned: [String] = []
+        /// The account has had its coin import (M5): the next one is 409 `already_imported`.
+        var imported = false
+        /// Errors by route name ("me", "friends", "redeem", "joinSquad", "buy", …), thrown every
+        /// time until removed.
         var failures: [String: APIError] = [:]
     }
 
@@ -162,8 +173,8 @@ final class FakeAPI: LockinAPI, @unchecked Sendable {
         try answer(.squads, route: "squads") { $0.squads }
     }
 
-    func createSquad(name: String) async throws -> Squad {
-        try answer(.createSquad(name), route: "createSquad") { answers in
+    func createSquad(name: String, tz: String?) async throws -> Squad {
+        try answer(.createSquad(name, tz: tz), route: "createSquad") { answers in
             let squad = Squad(
                 id: "SqNew00001",
                 name: name,
@@ -206,6 +217,63 @@ final class FakeAPI: LockinAPI, @unchecked Sendable {
         try answer(.leaveSquad(id), route: "leaveSquad") { answers in
             answers.squads.removeAll { $0.id == id }
         }
+    }
+
+    func squadLeaderboard(id: String, week: String?) async throws -> Leaderboard {
+        try answer(.squadLeaderboard(id, week: week), route: "squadLeaderboard") { answers in
+            guard let board = answers.leaderboards[id] else {
+                throw APIError.server(status: 403, code: .notMember, message: nil)
+            }
+            return board
+        }
+    }
+
+    // MARK: Coins and the shop: the server's rules (server/src/shop.ts, accounts.ts), without Plus.
+
+    func shop() async throws -> [ShopItem] {
+        try answer(.shop, route: "shop", authenticated: false) { _ in ShopCatalogue.items }
+    }
+
+    func buy(itemId: String) async throws -> (coins: Int, owned: [String]) {
+        try answer(.buy(itemId), route: "buy") { answers in
+            guard let item = ShopCatalogue.item(id: itemId) else {
+                throw APIError.server(status: 404, code: .itemNotFound, message: nil)
+            }
+            if item.plus {
+                throw APIError.server(status: 402, code: .plusRequired, message: nil)
+            }
+            if answers.owned.contains(itemId) {
+                throw APIError.server(status: 409, code: .alreadyOwned, message: nil)
+            }
+            guard answers.user.coins >= item.price else {
+                throw APIError.server(status: 402, code: .notEnoughCoins, message: nil)
+            }
+            answers.user.coins -= item.price
+            answers.owned = Self.inCatalogueOrder(answers.owned + [itemId])
+            return (coins: answers.user.coins, owned: answers.owned)
+        }
+    }
+
+    func cosmetics() async throws -> [String] {
+        try answer(.cosmetics, route: "cosmetics") { $0.owned }
+    }
+
+    func importCoins(coins: Int, owned: [String]) async throws -> (user: User, owned: [String]) {
+        try answer(.importCoins(coins: coins, owned: owned), route: "importCoins") { answers in
+            if answers.imported {
+                throw APIError.server(status: 409, code: .alreadyImported, message: nil)
+            }
+            answers.imported = true
+            answers.user.coins += min(coins, 5_000)
+            let free = owned.filter { ShopCatalogue.item(id: $0)?.plus == false }
+            answers.owned = Self.inCatalogueOrder(answers.owned + free)
+            return (user: answers.user, owned: answers.owned)
+        }
+    }
+
+    private static func inCatalogueOrder(_ ids: [String]) -> [String] {
+        let wanted = Set(ids)
+        return ShopCatalogue.items.map(\.id).filter { wanted.contains($0) }
     }
 
     // MARK: Sessions: the session engine's tests cover these.
@@ -254,7 +322,7 @@ final class FakeAPI: LockinAPI, @unchecked Sendable {
         _ call: Call,
         route: String,
         authenticated: Bool = true,
-        _ respond: (inout Answers) -> Value
+        _ respond: (inout Answers) throws -> Value
     ) throws -> Value {
         try lock.withLock {
             recorded.append(call)
@@ -267,7 +335,7 @@ final class FakeAPI: LockinAPI, @unchecked Sendable {
                 }
                 throw failure
             }
-            return respond(&answers)
+            return try respond(&answers)
         }
     }
 }

@@ -329,7 +329,8 @@ struct BlockedEnvelope: Decodable {
 }
 
 /// Every error response: `{ "error": "<sentence for people>", "code": "<machine code>" }`, plus
-/// `limit`, `sessionId` or `retryAfter` on the few that carry one (docs/milestones/M3.md).
+/// `limit`, `sessionId`, `retryAfter` or `itemId` on the few that carry one
+/// (docs/milestones/M3.md, M5.md).
 ///
 /// Every field is read on its own, so an odd one never costs the code.
 struct ErrorBody: Decodable {
@@ -338,9 +339,10 @@ struct ErrorBody: Decodable {
     var limit: String?
     var sessionId: String?
     var retryAfter: Double?
+    var itemId: String?
 
     private enum CodingKeys: String, CodingKey {
-        case error, code, limit, sessionId, retryAfter
+        case error, code, limit, sessionId, retryAfter, itemId
     }
 
     init(from decoder: any Decoder) throws {
@@ -350,6 +352,7 @@ struct ErrorBody: Decodable {
         limit = try? container.decodeIfPresent(String.self, forKey: .limit)
         sessionId = try? container.decodeIfPresent(String.self, forKey: .sessionId)
         retryAfter = try? container.decodeIfPresent(Double.self, forKey: .retryAfter)
+        itemId = try? container.decodeIfPresent(String.self, forKey: .itemId)
     }
 }
 

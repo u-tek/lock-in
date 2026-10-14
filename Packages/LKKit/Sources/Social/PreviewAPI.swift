@@ -15,6 +15,10 @@ public struct PreviewAPI: LockinAPI {
     public var redeems: Friend
     /// Your squads (M3).
     public var squadsList: [Squad]
+    /// Each squad's week, by squad id (M5). A squad without one has everyone on 0.
+    public var leaderboards: [String: Leaderboard]
+    /// What the account owns beyond the defaults (M5).
+    public var owned: [String]
 
     public init(
         isConfigured: Bool = true,
@@ -23,7 +27,9 @@ public struct PreviewAPI: LockinAPI {
         code: FriendCode = PreviewAPI.sampleCode,
         blocked: [Friend] = [],
         redeems: Friend = PreviewAPI.sampleFriend,
-        squads: [Squad] = []
+        squads: [Squad] = [],
+        leaderboards: [String: Leaderboard] = [:],
+        owned: [String] = []
     ) {
         self.isConfigured = isConfigured
         self.user = user
@@ -32,6 +38,8 @@ public struct PreviewAPI: LockinAPI {
         blockedList = blocked
         self.redeems = redeems
         squadsList = squads
+        self.leaderboards = leaderboards
+        self.owned = owned
     }
 
     public static let sampleUser = User(
@@ -57,7 +65,8 @@ public struct PreviewAPI: LockinAPI {
         since: 1_791_900_000
     )
 
-    /// A squad of four, owned by the sample user, with nobody locked in.
+    /// A squad of four, owned by the sample user, with nobody locked in: its sprout is a teen, it's
+    /// focused six days running and today counts.
     public static let sampleSquad = Squad(
         id: "sqPreview1",
         name: "Library Goblins",
@@ -70,7 +79,22 @@ public struct PreviewAPI: LockinAPI {
         ],
         openSessionId: nil,
         muted: false,
-        pet: SquadPet(species: nil, stage: 0, xp: 0)
+        pet: SquadPet(species: "sprout", stage: 2, xp: 1_450, mood: PetMood.happy.rawValue),
+        streak: SquadStreak(count: 6, countedToday: true, doneToday: 2, needed: 2),
+        tz: "Europe/London"
+    )
+
+    /// The sample squad's week: Noor ahead, Kai yet to start.
+    public static let sampleLeaderboard = Leaderboard(
+        weekStart: "2026-10-12",
+        startsAt: 1_791_759_600,
+        endsAt: 1_792_364_400,
+        entries: [
+            Leaderboard.Entry(userId: "uPreview03", minutes: 310, sessions: 8),
+            Leaderboard.Entry(userId: sampleUser.id, minutes: 245, sessions: 7),
+            Leaderboard.Entry(userId: "uPreview02", minutes: 180, sessions: 5),
+            Leaderboard.Entry(userId: "uPreview04", minutes: 0, sessions: 0),
+        ]
     )
 
     /// A second squad, someone else's, with a session open right now and its pet hatched.
@@ -84,7 +108,9 @@ public struct PreviewAPI: LockinAPI {
         ],
         openSessionId: "rmPreview1",
         muted: true,
-        pet: SquadPet(species: "puff", stage: 1, xp: 240)
+        pet: SquadPet(species: "puff", stage: 1, xp: 240, mood: PetMood.content.rawValue),
+        streak: SquadStreak(count: 2, countedToday: false, doneToday: 0, needed: 1),
+        tz: "Europe/London"
     )
 
     public var hasSession: Bool {
@@ -158,12 +184,14 @@ public struct PreviewAPI: LockinAPI {
         squadsList
     }
 
-    public func createSquad(name: String) async throws -> Squad {
+    public func createSquad(name: String, tz: String?) async throws -> Squad {
         Squad(
             id: "sqPreview9",
             name: name,
             ownerId: (user ?? Self.sampleUser).id,
-            members: [Self.member(user ?? Self.sampleUser)]
+            members: [Self.member(user ?? Self.sampleUser)],
+            pet: SquadPet(species: "ember", stage: 0, xp: 0, mood: PetMood.hungry.rawValue),
+            tz: tz
         )
     }
 
@@ -193,6 +221,44 @@ public struct PreviewAPI: LockinAPI {
     }
 
     public func leaveSquad(id: String) async throws {}
+
+    public func squadLeaderboard(id: String, week: String?) async throws -> Leaderboard {
+        if let board = leaderboards[id] {
+            return board
+        }
+        let members = squadsList.first { $0.id == id }?.members ?? []
+        return Leaderboard(
+            weekStart: Self.sampleLeaderboard.weekStart,
+            startsAt: Self.sampleLeaderboard.startsAt,
+            endsAt: Self.sampleLeaderboard.endsAt,
+            entries: members.map { Leaderboard.Entry(userId: $0.id, minutes: 0, sessions: 0) }
+        )
+    }
+
+    // MARK: - Coins and the shop
+
+    public func shop() async throws -> [ShopItem] {
+        ShopCatalogue.items
+    }
+
+    /// Pays from the sample account's coins. Nothing is kept: the next answer starts over.
+    public func buy(itemId: String) async throws -> (coins: Int, owned: [String]) {
+        guard let item = ShopCatalogue.item(id: itemId) else {
+            throw APIError.server(status: 404, code: .itemNotFound, message: nil)
+        }
+        let coins = (user ?? Self.sampleUser).coins
+        guard !item.plus else { throw APIError.server(status: 402, code: .plusRequired, message: nil) }
+        guard coins >= item.price else { throw APIError.server(status: 402, code: .notEnoughCoins, message: nil) }
+        return (coins - item.price, owned + [itemId])
+    }
+
+    public func cosmetics() async throws -> [String] {
+        owned
+    }
+
+    public func importCoins(coins: Int, owned: [String]) async throws -> (user: User, owned: [String]) {
+        (user ?? Self.sampleUser, self.owned)
+    }
 
     // MARK: - Sessions
 

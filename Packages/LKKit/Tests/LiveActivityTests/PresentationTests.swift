@@ -193,6 +193,27 @@ private func range(_ member: WireMember) -> ClosedRange<Date> {
         }
     }
 
+    @Test func aSlippedSquadmateIsInTheSessionButNotLockedIn() throws {
+        // Decision 0009: slipped keeps its timer, but it isn't "locked in" and isn't in the "+N".
+        let presentation = squad([wire("me", .focusing), wire("ava", .slipped), wire("kai", .focusing)])
+        #expect(presentation.othersFocusing == 1)
+        #expect(presentation.focusingCount == 2)
+        #expect(presentation.statusLine == "2 of 3 locked in")
+        #expect(presentation.compactTrailing == .squadmates(1))
+
+        let alone = squad([wire("me", .focusing), wire("ava", .slipped)])
+        #expect(alone.statusLine == "1 of 2 locked in")
+        let me = try #require(alone.primary)
+        #expect(alone.compactTrailing == .countdown(me.countdown, tone: me.tone))
+    }
+
+    @Test func mySlipKeepsMyTimeInTheIsland() throws {
+        let mine = wire("me", .slipped)
+        let presentation = squad([mine, wire("ava", .onBreak)])
+        #expect(presentation.compactTrailing == .countdown(.running(range(mine)), tone: .slipped))
+        #expect(presentation.compactTrailingAccessibilityLabel == "me, you, slipped")
+    }
+
     @Test func soloFinishedShowsAWord() {
         let presentation = solo(wire("me", .done, end: t))
         #expect(presentation.compactTrailing.staticText == "Done")
@@ -200,12 +221,17 @@ private func range(_ member: WireMember) -> ClosedRange<Date> {
 }
 
 @Suite struct CountdownTests {
-    @Test func focusingAndBreaksRunOnTheDevice() {
+    @Test func focusingBreaksAndSlipsRunOnTheDevice() {
         let ava = wire("ava", .focusing)
         let noor = wire("noor", .onBreak, end: t + 300)
-        let presentation = squad([ava, noor], me: "ava")
+        // A slip doesn't stop the timer (decision 0009): it ticks on, in the slipped tone.
+        let jules = wire("jules", .slipped, end: t + 2_460)
+        let presentation = squad([ava, noor, jules], me: "ava")
         #expect(presentation.members[0].countdown == .running(range(ava)))
         #expect(presentation.members[1].countdown == .running(range(noor)))
+        #expect(presentation.members[2].countdown == .running(range(jules)))
+        #expect(presentation.members[2].tone == .slipped)
+        #expect(presentation.members[2].countdown.staticText == nil)
         #expect(presentation.members[0].countdown.staticText == nil)
         #expect(presentation.members[0].countdown.frozenRemaining == nil)
     }
@@ -243,7 +269,6 @@ private func range(_ member: WireMember) -> ClosedRange<Date> {
     @Test(arguments: [
         (MemberState.done, "Done"),
         (MemberState.left, "Left"),
-        (MemberState.slipped, "Slipped"),
     ])
     func finishedMembersShowAWordNotATimer(state: MemberState, word: String) throws {
         let presentation = squad([wire("me", .focusing), wire("ava", state)])
@@ -340,7 +365,8 @@ private func range(_ member: WireMember) -> ClosedRange<Date> {
         (MemberState.paused, LiveActivityPresentation.SessionControls.resumeAndEnd),
         (MemberState.done, LiveActivityPresentation.SessionControls.hidden),
         (MemberState.left, LiveActivityPresentation.SessionControls.hidden),
-        (MemberState.slipped, LiveActivityPresentation.SessionControls.hidden),
+        // A slip doesn't stop the timer, so it can still be paused and ended (decision 0009).
+        (MemberState.slipped, LiveActivityPresentation.SessionControls.pauseAndEnd),
     ])
     func soloSessionsCanBePausedResumedAndEnded(state: MemberState, controls: LiveActivityPresentation.SessionControls) {
         #expect(LiveActivitySamples.solo(now: now, me: state).presentation.sessionControls == controls)
@@ -405,10 +431,14 @@ private func range(_ member: WireMember) -> ClosedRange<Date> {
         #expect(presentation.sessionProgress == .fixed(600.0 / 1_500.0))
     }
 
+    @Test func slippedSessionsKeepFilling() {
+        let me = wire("me", .slipped)
+        #expect(solo(me).sessionProgress == .live(range(me)))
+    }
+
     @Test(arguments: [
         (MemberState.done, LiveActivityPresentation.SessionProgress.fixed(1)),
         (MemberState.left, LiveActivityPresentation.SessionProgress.hidden),
-        (MemberState.slipped, LiveActivityPresentation.SessionProgress.hidden),
     ])
     func finishedSessions(state: MemberState, progress: LiveActivityPresentation.SessionProgress) {
         #expect(solo(wire("me", state)).sessionProgress == progress)

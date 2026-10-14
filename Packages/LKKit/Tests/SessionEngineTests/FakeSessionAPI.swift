@@ -197,12 +197,17 @@ final class FakeSessionAPI: LockinAPI, @unchecked Sendable {
     func unblock(userId: String) async throws { throw APIError.notConfigured }
     func report(userId: String, reason: ReportReason, note: String?) async throws { throw APIError.notConfigured }
     func squads() async throws -> [Squad] { throw APIError.notConfigured }
-    func createSquad(name: String) async throws -> Squad { throw APIError.notConfigured }
+    func createSquad(name: String, tz: String?) async throws -> Squad { throw APIError.notConfigured }
     func renameSquad(id: String, name: String) async throws -> Squad { throw APIError.notConfigured }
     func squadInvite(id: String) async throws -> FriendCode { throw APIError.notConfigured }
     func joinSquad(code: String) async throws -> Squad { throw APIError.notConfigured }
     func setSquadMuted(id: String, muted: Bool) async throws -> Squad { throw APIError.notConfigured }
     func leaveSquad(id: String) async throws { throw APIError.notConfigured }
+    func squadLeaderboard(id: String, week: String?) async throws -> Leaderboard { throw APIError.notConfigured }
+    func shop() async throws -> [ShopItem] { throw APIError.notConfigured }
+    func buy(itemId: String) async throws -> (coins: Int, owned: [String]) { throw APIError.notConfigured }
+    func cosmetics() async throws -> [String] { throw APIError.notConfigured }
+    func importCoins(coins: Int, owned: [String]) async throws -> (user: User, owned: [String]) { throw APIError.notConfigured }
 }
 
 /// A squad room of two: Noor (the host, 50 minutes) and this phone's Ava, who joins at

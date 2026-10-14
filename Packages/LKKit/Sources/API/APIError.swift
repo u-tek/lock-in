@@ -43,6 +43,24 @@ public enum APIErrorCode: Hashable, Sendable {
     case minutesInvalid
     /// 503: the room couldn't be opened after a few tries.
     case tryAgain
+    // Pet, streaks and the shop (M5)
+    /// 402 from `POST /shop/buy`: the item costs more than the balance.
+    case notEnoughCoins
+    /// 409 from `POST /shop/buy`: bought already, or a Plus item while Plus is on.
+    case alreadyOwned
+    /// 404 from `POST /shop/buy`: no such item.
+    case itemNotFound
+    /// 409 from `POST /me/coins/import`: this account has had its import.
+    case alreadyImported
+    /// 422 from `POST /me/coins/import`: not `{ coins, owned }`.
+    case importInvalid
+    /// 403 from `PATCH /me`: the Lockling wears a part the account doesn't own;
+    /// `APIError.itemId` says which.
+    case itemNotOwned
+    /// 422 from `GET /squads/:id/leaderboard`: `week` isn't a date.
+    case weekInvalid
+    /// 422 from `POST /squads`: `tz` isn't an IANA zone.
+    case tzInvalid
     case other(String)
 
     /// Every code in the contract, for tests.
@@ -52,7 +70,8 @@ public enum APIErrorCode: Hashable, Sendable {
         .codeExpired, .ownCode, .alreadyFriends, .blocked, .userNotFound, .reportInvalid,
         .plusRequired, .notOwner, .notMember, .friendCode, .alreadyMember, .alreadyInSession,
         .sessionEnded, .sessionNotFound, .roomFull, .badState, .tokenInvalid, .cheerInvalid,
-        .cheerTooSoon, .minutesInvalid, .tryAgain,
+        .cheerTooSoon, .minutesInvalid, .tryAgain, .notEnoughCoins, .alreadyOwned, .itemNotFound,
+        .alreadyImported, .importInvalid, .itemNotOwned, .weekInvalid, .tzInvalid,
     ]
 
     public init(rawValue: String) {
@@ -92,6 +111,14 @@ public enum APIErrorCode: Hashable, Sendable {
         case .cheerTooSoon: "cheer_too_soon"
         case .minutesInvalid: "minutes_invalid"
         case .tryAgain: "try_again"
+        case .notEnoughCoins: "not_enough_coins"
+        case .alreadyOwned: "already_owned"
+        case .itemNotFound: "item_not_found"
+        case .alreadyImported: "already_imported"
+        case .importInvalid: "import_invalid"
+        case .itemNotOwned: "item_not_owned"
+        case .weekInvalid: "week_invalid"
+        case .tzInvalid: "tz_invalid"
         case .other(let raw): raw
         }
     }
@@ -105,11 +132,14 @@ public struct APIErrorDetails: Hashable, Sendable {
     public var sessionId: String?
     /// 429: seconds to wait before trying again.
     public var retryAfter: Double?
+    /// 403 `item_not_owned` (M5): the first part of the Lockling the account doesn't own.
+    public var itemId: String?
 
-    public init(limit: String? = nil, sessionId: String? = nil, retryAfter: Double? = nil) {
+    public init(limit: String? = nil, sessionId: String? = nil, retryAfter: Double? = nil, itemId: String? = nil) {
         self.limit = limit
         self.sessionId = sessionId
         self.retryAfter = retryAfter
+        self.itemId = itemId
     }
 
     public static let empty = APIErrorDetails()
@@ -157,6 +187,11 @@ public enum APIError: Error, Hashable, Sendable {
         details.retryAfter
     }
 
+    /// 403 `item_not_owned`: the item the account doesn't own.
+    public var itemId: String? {
+        details.itemId
+    }
+
     /// The session is gone (expired, revoked, or the account deleted elsewhere): the token has
     /// been cleared and the app should show itself signed out. A rejected Apple token on sign-in
     /// is a different 401: there was no session to lose.
@@ -190,7 +225,12 @@ public enum APIError: Error, Hashable, Sendable {
         } else {
             code = .other("http_\(status)")
         }
-        let details = APIErrorDetails(limit: decoded?.limit, sessionId: decoded?.sessionId, retryAfter: decoded?.retryAfter)
+        let details = APIErrorDetails(
+            limit: decoded?.limit,
+            sessionId: decoded?.sessionId,
+            retryAfter: decoded?.retryAfter,
+            itemId: decoded?.itemId
+        )
         self = .server(status: status, code: code, message: decoded?.error, details: details)
     }
 }
@@ -245,6 +285,14 @@ extension APIError: LocalizedError {
             case .cheerTooSoon: return "One cheer every 10 seconds. Try again in a moment."
             case .minutesInvalid: return "Sessions are 1 to 240 minutes."
             case .tryAgain: return "Couldn't start the session. Please try again."
+            case .notEnoughCoins: return "Not enough coins yet. Lock in to earn more."
+            case .alreadyOwned: return "You already have this."
+            case .itemNotFound: return "That isn't in the shop any more."
+            case .alreadyImported: return "Your coins are already on your account."
+            case .importInvalid: return "Your coins couldn't be brought over."
+            case .itemNotOwned: return "Your Lockling is wearing something you don't own yet."
+            case .weekInvalid: return "That week couldn't be shown."
+            case .tzInvalid: return "Your time zone couldn't be read."
             case .other:
                 if status == 429 { return "That's a lot of tries. Please wait a moment." }
                 return message ?? "Something went wrong. Please try again."

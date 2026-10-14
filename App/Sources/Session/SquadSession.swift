@@ -182,16 +182,17 @@ private struct SquadmateCell: View {
         .accessibilityHint(member.state == .left ? Text("") : Text("Cheer them on"))
     }
 
-    /// Their countdown while they're in it (frozen while paused); otherwise how it ended.
+    /// Their countdown while they're in it (frozen while paused; still running, in pink, after a
+    /// slip: docs/decisions/0009); otherwise how it ended.
     @ViewBuilder
     private var status: some View {
         switch member.state {
-        case .focusing, .onBreak, .paused:
+        case .focusing, .onBreak, .paused, .slipped:
             Text(timerInterval: member.timerRange, pauseTime: member.state == .paused ? member.pausedDate : nil, countsDown: true)
                 .font(LKFont.timerSquadmate)
                 .foregroundStyle(tone.color)
                 .multilineTextAlignment(.center)
-        case .done, .left, .slipped:
+        case .done, .left:
             Text(tone.title)
                 .font(LKFont.subheadline.weight(.semibold))
                 .foregroundStyle(tone.color)

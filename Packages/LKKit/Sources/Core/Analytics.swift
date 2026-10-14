@@ -35,6 +35,11 @@ public enum AnalyticsEvent: String, CaseIterable, Sendable {
     /// by push.
     case pushToStartJoin = "notifications.pushToStartJoin"
 
+    // Deep Focus (M8)
+    /// "Open anyway" on a shield, seen when the app next runs: once per batch it collects.
+    /// Counts: `slips` (in the batch), `squad` (1 if one went to the squad's room, else 0).
+    case deepFocusSlip = "deepFocus.slip"
+
     // Retention: D1/D7/D30 are worked out from the days this arrives on.
     case appOpened = "app.opened"
 

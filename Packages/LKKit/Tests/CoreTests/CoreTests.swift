@@ -92,6 +92,10 @@ import Testing
         }
     }
 
+    @Test func deepFocusSlipsAreCounted() {
+        #expect(AnalyticsEvent.deepFocusSlip.rawValue == "deepFocus.slip")
+    }
+
     @Test func disabledAndDebugSinksAcceptEveryEvent() {
         for event in AnalyticsEvent.allCases {
             Analytics.disabled.track(event, counts: ["n": 1])

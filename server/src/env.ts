@@ -41,4 +41,18 @@ export interface Env {
   SIWA_KEY_ID?: string;
   /** The contents of the Sign in with Apple key's .p8 file. */
   SIWA_PRIVATE_KEY?: string;
+
+  /**
+   * The App Review code (docs/launch/app-review-notes.md §3): 8 characters of the friend-code
+   * alphabet (no 0, O, 1 or I). `POST /squads/join/<it>` makes a fresh Review Squad with Demo Buddy.
+   * Set it as a secret, so it isn't committed; change it for each submission.
+   */
+  DEMO_BUDDY_CODE?: string;
+  /** "true" turns Demo Buddy on; anything else (or unset) is the kill switch. */
+  DEMO_BUDDY_ENABLED?: string;
+
+  /** M7: the exact `Authorization` value RevenueCat's webhook sends. Unset, the webhook answers 503. */
+  REVENUECAT_WEBHOOK_AUTH?: string;
+  /** M7: RevenueCat's secret API key (sk_…), for POST /me/plus/refresh. Unset, that answers 503. */
+  REVENUECAT_SECRET_KEY?: string;
 }

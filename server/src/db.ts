@@ -10,6 +10,7 @@
 // never by a read followed by a write.
 
 import type { ApnsEnvironment } from "./apns.ts";
+import { addDays } from "./days.ts";
 import { PET_RULES } from "./pet.ts";
 
 /** A `users` row as stored. Never sent as is: `publicUser` picks what the app sees. */
@@ -26,6 +27,10 @@ export interface UserRow {
   apple_refresh_token: string | null;
   /** 1 once POST /me/coins/import has run (M5). */
   coins_imported: number;
+  /** 1 for an account the server runs itself: Demo Buddy (migrations/0006_demo_buddy.sql). */
+  is_bot: number;
+  /** RevenueCat's time (ms) of the last purchase event applied to `plus_until` (M7). */
+  plus_event_ms: number | null;
 }
 
 /** Another user as a friend (or a blocked person): `since` is when the friendship (or block) began. */
@@ -112,6 +117,10 @@ export interface SquadRow {
   hatched_at: number | null;
   /** The latest slip or early leave in one of its rooms, Unix seconds (M5). */
   last_sad_at: number | null;
+  /** 1 for a Review Squad, made with the review code: Demo Buddy is in it (migrations/0006_demo_buddy.sql). */
+  review: number;
+  /** The pet accessory picked while boosted (`pet.<n>`), M7; shown only while the squad is boosted. */
+  pet_accessory: number | null;
 }
 
 /** A squad as one of its members sees it: their own mute switch and when they joined. */
@@ -127,6 +136,8 @@ export interface SquadMemberRow {
   display_name: string | null;
   avatar_code: string;
   joined_at: number;
+  /** 1 for Demo Buddy. */
+  is_bot: number;
 }
 
 export interface SessionRow {
@@ -192,6 +203,40 @@ export interface StreakDayWrite {
   /** `day` as Unix seconds, `[start, end)`. */
   start: number;
   end: number;
+  /**
+   * M7: when set, a one-day gap before `yesterday` is filled with a Plus member's freeze first, at
+   * this time (Unix seconds), so the day can carry the streak on (`freezeStatements`).
+   */
+  freezeAt?: number;
+}
+
+/** M7: a missed day a Plus member's freeze may fill. Days are 'YYYY-MM-DD' in the squad's zone. */
+export interface FreezeCheck {
+  squadId: string;
+  /** The squad's today. */
+  day: string;
+  /** Unix seconds: when, and whose Plus counts (`plus_until` after it). */
+  now: number;
+}
+
+/** What a squad's streak freezes look like to one member (M7). */
+export interface FreezeRow {
+  /** Frozen days of the squad on or after the day asked for, oldest first. */
+  days: string[];
+  /** Freezes the member used in the month asked for, in any squad. */
+  used: number;
+}
+
+/** A RevenueCat event's effect on one user's `plus_until` (M7, src/plus.ts). */
+export interface PlusWrite {
+  userId: string;
+  /**
+   * `set`: plus_until becomes `until`. `subscription`: the same, except a lifetime Plus stays (a
+   * subscription event can't take away what a one-time purchase gave). `raise`: plus_until becomes
+   * `until` only if that's later (a transfer in). `clear`: no Plus (a transfer out).
+   */
+  mode: "set" | "subscription" | "raise" | "clear";
+  until: number | null;
 }
 
 /** One `participants` row, written whole by its room (src/room.ts). Times are REAL Unix seconds. */
@@ -260,6 +305,25 @@ const STAGE_SQL = `CASE WHEN hatched_at IS NULL THEN 0 ${PET_RULES.stageXp
   .map(({ xp, stage }) => `WHEN pet_xp >= ${xp} THEN ${stage}`)
   .join(" ")} ELSE 1 END`;
 
+// "Someone other than the user bound here is in the squad `$squad`": a person, not a bot. Bots
+// (Demo Buddy) never keep a squad alive or take it over.
+const OTHER_PEOPLE = `SELECT 1 FROM squad_members m JOIN users u ON u.id = m.user_id
+  WHERE m.squad_id = $squad AND m.user_id <> ? AND u.is_bot = 0`;
+
+// The squads that count against a user's limit (bound: the user): Review Squads don't.
+const COUNTED_SQUADS = `SELECT count(*) FROM squad_members cm JOIN squads cs ON cs.id = cm.squad_id
+  WHERE cm.user_id = ? AND cs.review = 0`;
+
+// The squad's people (bound: the squad), for "half the squad": bots aren't counted.
+const SQUAD_PEOPLE = `SELECT count(*) FROM squad_members pm JOIN users pu ON pu.id = pm.user_id
+  WHERE pm.squad_id = ? AND pu.is_bot = 0`;
+
+/** A lifetime purchase's `plus_until`: the last second of year 9999 (M7). */
+export const LIFETIME_PLUS_UNTIL = 253_402_300_799;
+
+/** Streak freezes per Plus member per calendar month (M7, SPEC.md §2). */
+export const STREAK_FREEZES_PER_MONTH = 2;
+
 // Skipped rather than failing the whole batch when the user has just deleted their account.
 const EVENT_INSERT = `INSERT INTO events (session_id, user_id, type, at, meta_json)
   SELECT ?, ?, ?, ?, ? WHERE ? IS NULL OR EXISTS (SELECT 1 FROM users WHERE id = ?)`;
@@ -323,14 +387,15 @@ export class Database {
    *
    * Their squads are handed on first, in the same transaction, as if they'd left each one: a squad
    * they own goes to its longest-standing other member, and a squad with nobody else in it is
-   * deleted with its codes.
+   * deleted with its codes. Bots don't count: a Review Squad goes with its last person.
    */
   async deleteUser(id: string): Promise<void> {
     await this.d1.batch([
       this.d1
         .prepare(
           `UPDATE squads SET owner_id = (
-             SELECT m.user_id FROM squad_members m WHERE m.squad_id = squads.id AND m.user_id <> ?
+             SELECT m.user_id FROM squad_members m JOIN users u ON u.id = m.user_id
+             WHERE m.squad_id = squads.id AND m.user_id <> ? AND u.is_bot = 0
              ORDER BY m.joined_at, m.user_id LIMIT 1)
            WHERE owner_id = ?`,
         )
@@ -339,13 +404,13 @@ export class Database {
         .prepare(
           `DELETE FROM invite_codes WHERE kind = 'squad'
              AND target_id IN (SELECT squad_id FROM squad_members WHERE user_id = ?)
-             AND NOT EXISTS (SELECT 1 FROM squad_members m WHERE m.squad_id = invite_codes.target_id AND m.user_id <> ?)`,
+             AND NOT EXISTS (${OTHER_PEOPLE.replace("$squad", "invite_codes.target_id")})`,
         )
         .bind(id, id),
       this.d1
         .prepare(
           `DELETE FROM squads WHERE id IN (SELECT squad_id FROM squad_members WHERE user_id = ?)
-             AND NOT EXISTS (SELECT 1 FROM squad_members m WHERE m.squad_id = squads.id AND m.user_id <> ?)`,
+             AND NOT EXISTS (${OTHER_PEOPLE.replace("$squad", "squads.id")})`,
         )
         .bind(id, id),
       this.d1.prepare("DELETE FROM users WHERE id = ?").bind(id),
@@ -567,13 +632,13 @@ export class Database {
     return row !== null;
   }
 
-  /** The squad's members, longest-standing first. */
+  /** The squad's members, longest-standing first (a bot after people who joined with it). */
   async membersOfSquad(squadId: string): Promise<SquadMemberRow[]> {
     const { results } = await this.d1
       .prepare(
-        `SELECT m.squad_id, u.id, u.handle, u.display_name, u.avatar_code, m.joined_at
+        `SELECT m.squad_id, u.id, u.handle, u.display_name, u.avatar_code, m.joined_at, u.is_bot
          FROM squad_members m JOIN users u ON u.id = m.user_id
-         WHERE m.squad_id = ? ORDER BY m.joined_at, u.id`,
+         WHERE m.squad_id = ? ORDER BY m.joined_at, u.is_bot, u.id`,
       )
       .bind(squadId)
       .all<SquadMemberRow>();
@@ -584,10 +649,10 @@ export class Database {
   async membersOfSquadsOf(userId: string): Promise<SquadMemberRow[]> {
     const { results } = await this.d1
       .prepare(
-        `SELECT m.squad_id, u.id, u.handle, u.display_name, u.avatar_code, m.joined_at
+        `SELECT m.squad_id, u.id, u.handle, u.display_name, u.avatar_code, m.joined_at, u.is_bot
          FROM squad_members m JOIN users u ON u.id = m.user_id
          WHERE m.squad_id IN (SELECT squad_id FROM squad_members WHERE user_id = ?)
-         ORDER BY m.joined_at, u.id`,
+         ORDER BY m.joined_at, u.is_bot, u.id`,
       )
       .bind(userId)
       .all<SquadMemberRow>();
@@ -606,9 +671,9 @@ export class Database {
     return new Map(results.map((row) => [row.squad_id, row.id]));
   }
 
-  /** How many squads the user is in, owned or not. */
+  /** How many squads the user is in, owned or not, against their limit: Review Squads don't count. */
   async squadCount(userId: string): Promise<number> {
-    return (await this.d1.prepare("SELECT count(*) AS n FROM squad_members WHERE user_id = ?").bind(userId).first<number>("n")) ?? 0;
+    return (await this.d1.prepare(`SELECT (${COUNTED_SQUADS}) AS n`).bind(userId).first<number>("n")) ?? 0;
   }
 
   async squadSize(squadId: string): Promise<number> {
@@ -626,7 +691,7 @@ export class Database {
       this.d1
         .prepare(
           `INSERT INTO squads (id, name, owner_id, created_at, pet_species, tz)
-           SELECT ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM squad_members WHERE user_id = ?) < ?`,
+           SELECT ?, ?, ?, ?, ?, ? WHERE (${COUNTED_SQUADS}) < ?`,
         )
         .bind(squad.id, squad.name, squad.ownerId, squad.now, squad.species, squad.tz, squad.ownerId, squad.maxSquads),
       this.d1
@@ -649,43 +714,45 @@ export class Database {
   }
 
   /**
-   * Adds the user to the squad unless they're in `maxSquads` squads already or it has `maxMembers`
-   * members: false then. One statement, so the limits hold however many people join at once.
-   * Already a member throws D1's unique error on `squad_members.squad_id`.
+   * Adds the user to the squad unless they're in `maxSquads` squads already (a Review Squad never
+   * counts, joining one or already in one) or it has `maxMembers` members: false then. One
+   * statement, so the limits hold however many people join at once. Already a member throws D1's
+   * unique error on `squad_members.squad_id`.
    */
   async joinSquad(join: { squadId: string; userId: string; now: number; maxSquads: number; maxMembers: number }): Promise<boolean> {
     const result = await this.d1
       .prepare(
         `INSERT INTO squad_members (squad_id, user_id, joined_at)
          SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM squads WHERE id = ?)
-           AND (SELECT count(*) FROM squad_members WHERE user_id = ?) < ?
+           AND ((SELECT review FROM squads WHERE id = ?) = 1 OR (${COUNTED_SQUADS}) < ?)
            AND (SELECT count(*) FROM squad_members WHERE squad_id = ?) < ?`,
       )
-      .bind(join.squadId, join.userId, join.now, join.squadId, join.userId, join.maxSquads, join.squadId, join.maxMembers)
+      .bind(join.squadId, join.userId, join.now, join.squadId, join.squadId, join.userId, join.maxSquads, join.squadId, join.maxMembers)
       .run();
     return result.meta.changes > 0;
   }
 
   /**
    * Takes the user out of the squad, in one transaction: the squad codes they made for it stop
-   * working; if they owned it, it goes to the longest-standing member left; if nobody is left, the
-   * squad and its codes are deleted. Not a member: nothing changes.
+   * working; if they owned it, it goes to the longest-standing person left; if no person is left
+   * (a bot doesn't count: Demo Buddy in a Review Squad), the squad and its codes are deleted. Not a
+   * member: nothing changes.
    */
   async leaveSquad(squadId: string, userId: string): Promise<void> {
+    const people = `SELECT 1 FROM squad_members m JOIN users u ON u.id = m.user_id WHERE m.squad_id = ? AND u.is_bot = 0`;
     await this.d1.batch([
       this.d1.prepare("DELETE FROM squad_members WHERE squad_id = ? AND user_id = ?").bind(squadId, userId),
       this.d1.prepare("DELETE FROM invite_codes WHERE kind = 'squad' AND target_id = ? AND created_by = ?").bind(squadId, userId),
       this.d1
         .prepare(
           `UPDATE squads SET owner_id = (
-             SELECT user_id FROM squad_members WHERE squad_id = ? ORDER BY joined_at, user_id LIMIT 1)
+             SELECT m.user_id FROM squad_members m JOIN users u ON u.id = m.user_id
+             WHERE m.squad_id = ? AND u.is_bot = 0 ORDER BY m.joined_at, m.user_id LIMIT 1)
            WHERE id = ? AND (owner_id = ? OR owner_id IS NULL)`,
         )
         .bind(squadId, squadId, userId),
-      this.d1
-        .prepare("DELETE FROM invite_codes WHERE kind = 'squad' AND target_id = ? AND NOT EXISTS (SELECT 1 FROM squad_members WHERE squad_id = ?)")
-        .bind(squadId, squadId),
-      this.d1.prepare("DELETE FROM squads WHERE id = ? AND NOT EXISTS (SELECT 1 FROM squad_members WHERE squad_id = ?)").bind(squadId, squadId),
+      this.d1.prepare(`DELETE FROM invite_codes WHERE kind = 'squad' AND target_id = ? AND NOT EXISTS (${people})`).bind(squadId, squadId),
+      this.d1.prepare(`DELETE FROM squads WHERE id = ? AND NOT EXISTS (${people})`).bind(squadId, squadId),
     ]);
   }
 
@@ -759,15 +826,20 @@ export class Database {
   /**
    * A new room and its host, in one transaction. Throws D1's unique error on `sessions.squad_id`
    * when the squad already has an open room, and on `participants.user_id` when the host already
-   * has an open session.
+   * has an open session. Demo Buddy hosting has no `participants` row (null): its timers live in
+   * the room only.
    */
-  async insertRoom(session: { id: string; squadId: string | null; hostId: string; createdAt: number }, host: ParticipantWrite, event: EventWrite): Promise<void> {
+  async insertRoom(
+    session: { id: string; squadId: string | null; hostId: string; createdAt: number },
+    host: ParticipantWrite | null,
+    event: EventWrite | null,
+  ): Promise<void> {
     await this.d1.batch([
       this.d1
         .prepare("INSERT INTO sessions (id, squad_id, host_id, status, created_at) VALUES (?, ?, ?, 'open', ?)")
         .bind(session.id, session.squadId, session.hostId, session.createdAt),
-      this.participantUpsert(host),
-      this.eventInsert(event),
+      ...(host === null ? [] : [this.participantUpsert(host)]),
+      ...(event === null ? [] : [this.eventInsert(event)]),
     ]);
   }
 
@@ -796,6 +868,8 @@ export class Database {
     /** The room's squad: its stage follows its XP and hatching. */
     stageOf?: string;
     streakDays?: StreakDayWrite[];
+    /** A slip in the room's squad at this time (Unix seconds): the pet's sad spell starts (M5, gentle slips). */
+    sad?: { squadId: string; at: number };
   }): Promise<void> {
     const statements = sync.participants.map((p) =>
       this.d1
@@ -813,7 +887,16 @@ export class Database {
       statements.push(this.d1.prepare("UPDATE squads SET hatched_at = ? WHERE id = ? AND hatched_at IS NULL").bind(Math.floor(sync.hatch.at), sync.hatch.squadId));
     }
     if (sync.stageOf !== undefined) statements.push(this.d1.prepare(`UPDATE squads SET pet_stage = ${STAGE_SQL} WHERE id = ?`).bind(sync.stageOf));
-    for (const day of sync.streakDays ?? []) statements.push(this.streakStatement(day));
+    if (sync.sad !== undefined) {
+      statements.push(
+        this.d1.prepare("UPDATE squads SET last_sad_at = max(coalesce(last_sad_at, 0), ?) WHERE id = ?").bind(Math.floor(sync.sad.at), sync.sad.squadId),
+      );
+    }
+    // Oldest day first, each one's freeze (M7) before it: a freeze fills the day before it only.
+    for (const day of [...(sync.streakDays ?? [])].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0))) {
+      if (day.freezeAt !== undefined) statements.push(...this.freezeStatements({ squadId: day.squadId, day: day.day, now: day.freezeAt }));
+      statements.push(this.streakStatement(day));
+    }
     if (statements.length > 0) await this.d1.batch(statements);
   }
 
@@ -825,13 +908,17 @@ export class Database {
     return this.squadById(squadId);
   }
 
-  /** The squad's size, and how many members finished a session (and one long enough to count) in `[start, end)`. */
+  /**
+   * The squad's size, and how many members finished a session (and one long enough to count) in
+   * `[start, end)`. People only: a bot (Demo Buddy) isn't counted in any of them.
+   */
   async squadDay(squadId: string, start: number, end: number): Promise<SquadDayRow> {
     const finishedIn = `SELECT count(DISTINCT f.user_id) FROM focus_log f JOIN squad_members m ON m.user_id = f.user_id
+       JOIN users u ON u.id = f.user_id AND u.is_bot = 0
        WHERE m.squad_id = ? AND f.completed = 1 AND f.ended_at >= ? AND f.ended_at < ?`;
     const row = await this.d1
       .prepare(
-        `SELECT (SELECT count(*) FROM squad_members WHERE squad_id = ?) AS size,
+        `SELECT (${SQUAD_PEOPLE}) AS size,
            (${finishedIn}) AS finished,
            (${finishedIn} AND f.focused_sec >= ?) AS counting`,
       )
@@ -868,7 +955,10 @@ export class Database {
     return this.d1.prepare("SELECT tz FROM devices WHERE user_id = ? ORDER BY updated_at DESC, id LIMIT 1").bind(userId).first<string>("tz");
   }
 
-  /** Every member's whole focused minutes and finished sessions with timers that stopped in `[start, end)`. */
+  /**
+   * Every member's whole focused minutes and finished sessions with timers that stopped in
+   * `[start, end)`. People only: a bot (Demo Buddy) is never on a leaderboard.
+   */
   async leaderboard(squadId: string, start: number, end: number): Promise<LeaderboardRow[]> {
     const { results } = await this.d1
       .prepare(
@@ -876,7 +966,7 @@ export class Database {
            coalesce(sum(f.focused_sec / 60), 0) AS minutes, coalesce(sum(f.completed), 0) AS sessions
          FROM squad_members m JOIN users u ON u.id = m.user_id
          LEFT JOIN focus_log f ON f.user_id = m.user_id AND f.ended_at >= ? AND f.ended_at < ?
-         WHERE m.squad_id = ? GROUP BY u.id`,
+         WHERE m.squad_id = ? AND u.is_bot = 0 GROUP BY u.id`,
       )
       .bind(start, end, squadId)
       .all<LeaderboardRow>();
@@ -918,6 +1008,129 @@ export class Database {
       ...items.map((itemId) => this.d1.prepare("INSERT OR IGNORE INTO cosmetics (user_id, item_id, acquired_at) VALUES (?, ?, ?)").bind(userId, itemId, now)),
     ]);
     return (updated?.results[0] as UserRow | undefined) ?? null;
+  }
+
+  // Demo Buddy and Review Squads (src/reviewSquad.ts, docs/launch/app-review-notes.md §3)
+
+  /**
+   * Records one redemption of the review code unless `limit` happened since `since`: false then.
+   * One statement, so redemptions racing can't get past the limit. Trims the log to `trimBefore`.
+   */
+  async reserveReviewRedemption(now: number, since: number, limit: number, trimBefore: number): Promise<boolean> {
+    const [, inserted] = await this.d1.batch([
+      this.d1.prepare("DELETE FROM review_redemptions WHERE at < ?").bind(trimBefore),
+      this.d1
+        .prepare("INSERT INTO review_redemptions (at) SELECT ? WHERE (SELECT count(*) FROM review_redemptions WHERE at > ?) < ?")
+        .bind(now, since, limit),
+    ]);
+    return (inserted?.meta.changes ?? 0) > 0;
+  }
+
+  /** The oldest redemption after `since`: when the limit lets the next one through. */
+  oldestReviewRedemption(since: number): Promise<number | null> {
+    return this.d1.prepare("SELECT min(at) AS at FROM review_redemptions WHERE at > ?").bind(since).first<number>("at");
+  }
+
+  /**
+   * A Review Squad: the redeemer owns it, and they and the bot are its members, in one transaction.
+   * It doesn't count against the redeemer's squad limit. A taken id throws D1's unique error on
+   * `squads.id`.
+   */
+  async insertReviewSquad(squad: { id: string; name: string; ownerId: string; botId: string; now: number; species: string; tz: string }): Promise<void> {
+    const member = "INSERT INTO squad_members (squad_id, user_id, joined_at) VALUES (?, ?, ?)";
+    await this.d1.batch([
+      this.d1
+        .prepare("INSERT INTO squads (id, name, owner_id, created_at, pet_species, tz, review) VALUES (?, ?, ?, ?, ?, ?, 1)")
+        .bind(squad.id, squad.name, squad.ownerId, squad.now, squad.species, squad.tz),
+      this.d1.prepare(member).bind(squad.id, squad.ownerId, squad.now),
+      this.d1.prepare(member).bind(squad.id, squad.botId, squad.now),
+    ]);
+  }
+
+  // Lockin Plus (M7, src/plus.ts)
+
+  /** Squad Boost: whether any member of the squad has Plus at `now`. */
+  async squadBoosted(squadId: string, now: number): Promise<boolean> {
+    const row = await this.d1
+      .prepare("SELECT 1 AS yes FROM squad_members m JOIN users u ON u.id = m.user_id WHERE m.squad_id = ? AND u.plus_until > ? LIMIT 1")
+      .bind(squadId, now)
+      .first();
+    return row !== null;
+  }
+
+  async setPetAccessory(squadId: string, accessory: number | null): Promise<void> {
+    await this.d1.prepare("UPDATE squads SET pet_accessory = ? WHERE id = ?").bind(accessory, squadId).run();
+  }
+
+  /** Fills a one-day gap with a freeze if one may (`freezeStatements`). Returns the squad after. */
+  async freezeStreakGap(check: FreezeCheck): Promise<SquadRow | null> {
+    await this.d1.batch(this.freezeStatements(check));
+    return this.squadById(check.squadId);
+  }
+
+  /** The squad's frozen days from `sinceDay` on, and how many freezes `userId` used in `month` ('YYYY-MM'). */
+  async streakFreezes(squadId: string, sinceDay: string, userId: string, month: string): Promise<FreezeRow> {
+    const [days, used] = await this.d1.batch([
+      this.d1.prepare("SELECT day FROM streak_freezes WHERE squad_id = ? AND day >= ? ORDER BY day").bind(squadId, sinceDay),
+      this.d1.prepare("SELECT count(*) AS n FROM streak_freezes WHERE user_id = ? AND substr(day, 1, 7) = ?").bind(userId, month),
+    ]);
+    return {
+      days: ((days?.results ?? []) as Array<{ day: string }>).map((row) => row.day),
+      used: Number((used?.results[0] as { n?: number } | undefined)?.n ?? 0),
+    };
+  }
+
+  /** People (not bots) among `ids`. */
+  async peopleAmong(ids: string[]): Promise<UserRow[]> {
+    if (ids.length === 0) return [];
+    const { results } = await this.d1
+      .prepare(`SELECT * FROM users WHERE is_bot = 0 AND id IN (${ids.map(() => "?").join(", ")})`)
+      .bind(...ids)
+      .all<UserRow>();
+    return results;
+  }
+
+  async revenueCatEventSeen(eventId: string): Promise<boolean> {
+    return (await this.d1.prepare("SELECT 1 AS yes FROM revenuecat_events WHERE id = ?").bind(eventId).first()) !== null;
+  }
+
+  /**
+   * Applies one RevenueCat event, in one transaction: each write to `plus_until`, then the event's
+   * row. Every write applies only while that row doesn't exist (so the same event twice counts
+   * once, however it races) and only to a user whose last applied event isn't newer than this one
+   * (`eventMs`), so events arriving out of order can't undo a later one. Trims the event log to
+   * `trimBefore`.
+   */
+  async applyRevenueCatEvent(event: { id: string; type: string; eventMs: number; receivedAt: number; trimBefore: number; writes: PlusWrite[] }): Promise<void> {
+    const unseen = "NOT EXISTS (SELECT 1 FROM revenuecat_events WHERE id = ?)";
+    const inOrder = "(plus_event_ms IS NULL OR plus_event_ms <= ?)";
+    const statements = event.writes.map((write) => {
+      const value =
+        write.mode === "clear"
+          ? "NULL"
+          : write.mode === "raise"
+            ? "max(coalesce(plus_until, 0), ?)"
+            : write.mode === "subscription"
+              ? `CASE WHEN plus_until = ${LIFETIME_PLUS_UNTIL} THEN plus_until ELSE ? END`
+              : "?";
+      const binds: Array<number | string | null> = write.mode === "clear" ? [] : [write.until];
+      return this.d1
+        .prepare(`UPDATE users SET plus_until = ${value}, plus_event_ms = ? WHERE id = ? AND is_bot = 0 AND ${inOrder} AND ${unseen}`)
+        .bind(...binds, event.eventMs, write.userId, event.eventMs, event.id);
+    });
+    statements.push(
+      this.d1.prepare("DELETE FROM revenuecat_events WHERE received_at < ?").bind(event.trimBefore),
+      this.d1.prepare("INSERT OR IGNORE INTO revenuecat_events (id, type, received_at) VALUES (?, ?, ?)").bind(event.id, event.type, event.receivedAt),
+    );
+    await this.d1.batch(statements);
+  }
+
+  /** What RevenueCat's REST API says (POST /me/plus/refresh): authoritative as of `atMs`. Returns the user after. */
+  setPlusUntil(userId: string, until: number | null, atMs: number): Promise<UserRow | null> {
+    return this.d1
+      .prepare("UPDATE users SET plus_until = ?, plus_event_ms = max(coalesce(plus_event_ms, 0), ?) WHERE id = ? RETURNING *")
+      .bind(until, atMs, userId)
+      .first<UserRow>();
   }
 
   // "X is locking in" (M4, src/alerts.ts)
@@ -1042,10 +1255,45 @@ export class Database {
            streak_last_day = ?
          WHERE id = ? AND (streak_last_day IS NULL OR streak_last_day < ?)
            AND (SELECT count(DISTINCT f.user_id) FROM focus_log f JOIN squad_members m ON m.user_id = f.user_id
+                JOIN users u ON u.id = f.user_id AND u.is_bot = 0
                 WHERE m.squad_id = squads.id AND f.completed = 1 AND f.focused_sec >= ? AND f.ended_at >= ? AND f.ended_at < ?)
-             >= max(1, (SELECT count(*) FROM squad_members WHERE squad_id = squads.id) * ?)`,
+             >= max(1, (${SQUAD_PEOPLE.replace("pm.squad_id = ?", "pm.squad_id = squads.id")}) * ?)`,
       )
       .bind(write.yesterday, write.day, write.squadId, write.day, PET_RULES.streakMinMinutes * 60, write.start, write.end, PET_RULES.streakShare);
+  }
+
+  /**
+   * M7: fills a one-day gap in the squad's streak with a Plus member's freeze. When the squad's last
+   * counted day is the day before yesterday (of `check.day`), yesterday is frozen: a row in
+   * `streak_freezes` naming the member whose freeze it was, and yesterday becomes the last counted
+   * day, so the streak lives on with its count unchanged. The member is a person with Plus at
+   * `check.now` who has used fewer than STREAK_FREEZES_PER_MONTH in yesterday's calendar month (in
+   * any squad); the one with the most left, then the longest-standing. At most one gap per check,
+   * and each check and write is one statement, so two checks racing can't freeze twice or overspend.
+   */
+  private freezeStatements(check: FreezeCheck): D1PreparedStatement[] {
+    const gap = addDays(check.day, -1);
+    const before = addDays(check.day, -2);
+    const month = gap.slice(0, 7);
+    const used = "(SELECT count(*) FROM streak_freezes f WHERE f.user_id = m.user_id AND substr(f.day, 1, 7) = ?)";
+    return [
+      this.d1
+        .prepare(
+          `INSERT OR IGNORE INTO streak_freezes (squad_id, day, user_id, used_at)
+           SELECT m.squad_id, ?, m.user_id, ?
+           FROM squad_members m JOIN users u ON u.id = m.user_id JOIN squads s ON s.id = m.squad_id
+           WHERE m.squad_id = ? AND s.streak_last_day = ? AND s.streak_count > 0 AND u.is_bot = 0 AND u.plus_until > ?
+             AND ${used} < ?
+           ORDER BY ${used}, m.joined_at, m.user_id LIMIT 1`,
+        )
+        .bind(gap, Math.floor(check.now), check.squadId, before, Math.floor(check.now), month, STREAK_FREEZES_PER_MONTH, month),
+      this.d1
+        .prepare(
+          `UPDATE squads SET streak_last_day = ?
+           WHERE id = ? AND streak_last_day = ? AND EXISTS (SELECT 1 FROM streak_freezes WHERE squad_id = squads.id AND day = ?)`,
+        )
+        .bind(gap, check.squadId, before, gap),
+    ];
   }
 
   private participantUpsert(p: ParticipantWrite): D1PreparedStatement {
