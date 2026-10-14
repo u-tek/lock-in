@@ -91,7 +91,13 @@ targets:
       - package: LKKit
         product: DesignSystem
       - package: LKKit
+        product: Creature
+      - package: LKKit
         product: LiveActivity
+      - package: LKKit
+        product: SessionEngine
+      - package: LKKit
+        product: Paywall
       - target: LockinWidgets
 
   # The Live Activity (every presentation), and later the Home/Lock Screen widgets and the
@@ -129,6 +135,8 @@ targets:
         product: Model
       - package: LKKit
         product: DesignSystem
+      - package: LKKit
+        product: Creature
       - package: LKKit
         product: LiveActivity
 
