@@ -1,15 +1,19 @@
+import LiveActivity
+import Paywall
+import SessionEngine
 import SwiftUI
 import UIKit
 
 /// Shows screens in a fixed state for the UI snapshot exporter (`UITests/SnapshotExportTests`).
 ///
-/// Launch argument: `-LKSnapshots home@light,home@dark,spike@dark,...`. The app shows the first,
+/// Launch argument: `-LKSnapshots home@light,home@dark,session@dark,...`. The app shows the first,
 /// then steps to the next each time the exporter posts the `next` Darwin notification, so one
 /// launch covers every screen. Arguments in this form land in the `UserDefaults` argument domain,
 /// so they never persist.
 ///
-/// Nothing in snapshot mode touches ActivityKit or the App Group: the spike screen gets a fixed
-/// state, and orphaned activities are left alone.
+/// Nothing in snapshot mode touches ActivityKit, StoreKit, the App Group or a permission prompt:
+/// app screens get preview models, the spike screen gets a fixed state, and orphaned activities
+/// are left alone.
 struct SnapshotMode: Sendable {
     enum Appearance: String, Sendable {
         case light
@@ -57,17 +61,67 @@ struct SnapshotMode: Sendable {
 
 /// Every screen the exporter can open, by route name. `scripts/snapshot-routes.txt` lists the
 /// ones CI exports; `lab.*` routes render on the iPhone 16 Pro only.
+///
+/// App screens get preview models (`SessionEngine.preview`, `PlusStore.preview`): no store, no
+/// ActivityKit, no StoreKit, and no permission prompts. Sheets and covers are shown as screens of
+/// their own.
 @MainActor
 enum SnapshotGallery {
     static func view(for route: String, now: Date) -> AnyView? {
         switch route {
+        // First run
+        case "onboarding.welcome":
+            return onboarding(.welcome, now: now)
+        case "onboarding.lockling":
+            return onboarding(.lockling, now: now)
+        case "onboarding.notifications":
+            return onboarding(.notifications, now: now)
+        case "onboarding.ready":
+            return onboarding(.ready, now: now)
+
+        // The app
         case "home":
-            return AnyView(NavigationStack {
-                HomeScreen(showsDeveloperTools: true, previewDate: now)
-                    .navigationDestination(for: AppRoute.self) { route in
-                        route.destination
-                    }
+            return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus in
+                HomeScreen(engine: engine, plus: plus)
             })
+        case "session":
+            // The first session, so the "lock your phone" hint shows.
+            return AnyView(PreviewModels(phase: SnapshotData.running(now: now), stats: SnapshotData.newcomer) { engine, plus in
+                SessionCover(engine: engine, plus: plus)
+            })
+        case "session.paused":
+            return AnyView(PreviewModels(phase: SnapshotData.paused(now: now), stats: SnapshotData.regular) { engine, plus in
+                SessionCover(engine: engine, plus: plus)
+            })
+        case "session.disabled":
+            // Live Activities switched off in Settings: the session runs, and says how to fix it.
+            return AnyView(PreviewModels(
+                phase: SnapshotData.running(now: now),
+                stats: SnapshotData.regular,
+                liveActivityProblem: .disabled
+            ) { engine, plus in
+                SessionCover(engine: engine, plus: plus)
+            })
+        case "finished":
+            return AnyView(PreviewModels(phase: SnapshotData.finished(now: now), stats: SnapshotData.regular) { engine, plus in
+                SessionCover(engine: engine, plus: plus)
+            })
+        case "finished.first":
+            return AnyView(PreviewModels(phase: SnapshotData.finished(now: now), stats: SnapshotData.firstFinish) { engine, plus in
+                SessionCover(engine: engine, plus: plus)
+            })
+        case "paywall":
+            return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus in
+                PaywallView(store: plus, avatar: engine.avatar, onClose: {})
+            })
+        case "settings":
+            return AnyView(PreviewModels(stats: SnapshotData.regular) { engine, plus in
+                SettingsScreen(engine: engine, plus: plus, onClose: {})
+            })
+        case "squads":
+            return AnyView(SquadsTeaser(now: now))
+
+        // Developer tools
         case "developer":
             return AnyView(NavigationStack {
                 DeveloperMenu()
@@ -105,8 +159,91 @@ enum SnapshotGallery {
         }
     }
 
+    private static func onboarding(_ step: OnboardingFlow.Step, now: Date) -> AnyView {
+        AnyView(PreviewModels(stats: SnapshotData.newcomer) { engine, plus in
+            OnboardingFlow(engine: engine, plus: plus, step: step, now: now, onFinish: {})
+        })
+    }
+
     private static func suffix(of route: String, after prefix: String) -> String? {
         route.hasPrefix(prefix) ? String(route.dropFirst(prefix.count)) : nil
+    }
+}
+
+/// The made-up user the app screens are shot with.
+@MainActor
+private enum SnapshotData {
+    /// Before the first session.
+    static var newcomer: FocusStats {
+        FocusStats(todayMinutes: 0, streakDays: 0, coins: 0, completedSessions: 0)
+    }
+
+    /// Straight after the first session: the friends card shows.
+    static var firstFinish: FocusStats {
+        FocusStats(todayMinutes: 25, streakDays: 1, coins: 30, completedSessions: 1)
+    }
+
+    /// A few days in.
+    static var regular: FocusStats {
+        FocusStats(todayMinutes: 45, streakDays: 3, coins: 120, completedSessions: 7)
+    }
+
+    /// Ten minutes into 25, as the Live Activity samples are.
+    static func running(now: Date) -> SessionEngine.Phase {
+        .running(startedAt: now.addingTimeInterval(-600), endsAt: now.addingTimeInterval(900), plannedMinutes: 25)
+    }
+
+    /// Paused two minutes ago with 17 minutes to go.
+    static func paused(now: Date) -> SessionEngine.Phase {
+        .paused(
+            startedAt: now.addingTimeInterval(-600),
+            endsAt: now.addingTimeInterval(900),
+            pausedAt: now.addingTimeInterval(-120),
+            plannedMinutes: 25
+        )
+    }
+
+    /// 25 minutes, done: 25 coins and 5 for finishing.
+    static func finished(now: Date) -> SessionEngine.Phase {
+        .finished(
+            SessionRecord(
+                id: "snapshot",
+                startedAt: now.addingTimeInterval(-1_500),
+                endedAt: now,
+                plannedMinutes: 25,
+                focusedSeconds: 1_500,
+                completed: true,
+                coinsEarned: 30
+            )
+        )
+    }
+}
+
+/// Owns one shot's preview models, so a redraw never makes new ones.
+private struct PreviewModels<Content: View>: View {
+    @StateObject private var engine: SessionEngine
+    @StateObject private var plus: PlusStore
+    private let content: (SessionEngine, PlusStore) -> Content
+
+    init(
+        phase: SessionEngine.Phase = .idle,
+        stats: FocusStats,
+        liveActivityProblem: LiveActivityError? = nil,
+        isPlus: Bool = false,
+        @ViewBuilder content: @escaping (SessionEngine, PlusStore) -> Content
+    ) {
+        _engine = StateObject(wrappedValue: SessionEngine.preview(
+            phase: phase,
+            stats: stats,
+            avatar: SampleLocklings.you,
+            liveActivityProblem: liveActivityProblem
+        ))
+        _plus = StateObject(wrappedValue: PlusStore.preview(isPlus: isPlus))
+        self.content = content
+    }
+
+    var body: some View {
+        content(engine, plus)
     }
 }
 

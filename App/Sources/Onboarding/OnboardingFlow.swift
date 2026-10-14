@@ -64,7 +64,7 @@ struct OnboardingFlow: View {
                     showsPaywall = true
                 }
             case .notifications:
-                NotificationsPage(friend: SampleLocklings.friends[1].avatar)
+                NotificationsPage(friend: SampleLocklings.friends[0].avatar)
             case .ready:
                 ReadyPage(avatar: draft)
             }
@@ -209,11 +209,11 @@ enum OnboardingState {
     }
 }
 
-/// The system's notification prompt.
+/// The system's notification prompt. Not on the main actor: the notification centre isn't
+/// `Sendable`, so it's made and used in one place, away from the views.
 enum NotificationPermission {
-    /// Asks once; afterwards the system answers without asking. Off the main actor because the
-    /// notification centre isn't `Sendable`.
-    nonisolated static func request() async -> Bool {
+    /// Asks once; afterwards the system answers without asking.
+    static func request() async -> Bool {
         let center = UNUserNotificationCenter.current()
         do {
             return try await center.requestAuthorization(options: [.alert, .sound, .badge])

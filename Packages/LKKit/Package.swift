@@ -41,14 +41,14 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         // Lockin Plus: plans, entitlements and the purchase flow, on StoreKit 2. App only.
-        .target(name: "Paywall", dependencies: ["Core", "DesignSystem", "Creature"]),
+        .target(name: "Paywall", dependencies: ["Core", "Model", "DesignSystem", "Creature"]),
 
         .testTarget(name: "CoreTests", dependencies: ["Core"]),
         .testTarget(name: "ModelTests", dependencies: ["Model"]),
         .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"]),
         .testTarget(name: "CreatureTests", dependencies: ["Creature", "Model"]),
         .testTarget(name: "LiveActivityTests", dependencies: ["LiveActivity", "Model"]),
-        .testTarget(name: "SessionEngineTests", dependencies: ["SessionEngine", "Model"]),
-        .testTarget(name: "PaywallTests", dependencies: ["Paywall"]),
+        .testTarget(name: "SessionEngineTests", dependencies: ["SessionEngine", "Core", "Model", "LiveActivity"]),
+        .testTarget(name: "PaywallTests", dependencies: ["Paywall", "Creature", "Model"]),
     ]
 )

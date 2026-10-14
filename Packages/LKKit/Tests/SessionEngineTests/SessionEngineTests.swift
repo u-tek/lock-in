@@ -31,7 +31,7 @@ import Testing
         #expect(engine.completionTask != nil)
     }
 
-    @Test(arguments: [(-5, 1), (0, 1), (1, 1), (25, 25), (240, 240), (241, 240), (10_000, 240)])
+    @Test(arguments: zip([-5, 0, 1, 25, 240, 241, 10_000], [1, 1, 1, 25, 240, 240, 240]))
     func minutesAreHeldToOneToFourHours(asked: Int, planned: Int) {
         let engine = makeEngine(clock: clock)
         engine.start(minutes: asked)
@@ -232,8 +232,10 @@ import Testing
 
         ended.end()
         paused.pause()
-        #expect(try #require(ended.phase.record).completed)
-        #expect(try #require(paused.phase.record).completed)
+        let endedRecord = try #require(ended.phase.record)
+        let pausedRecord = try #require(paused.phase.record)
+        #expect(endedRecord.completed)
+        #expect(pausedRecord.completed)
     }
 
     @Test func dismissingTheFinishReturnsToIdleAndANewSessionCanStart() {
@@ -267,7 +269,8 @@ import Testing
             return
         }
         await engine.handle(.end)
-        #expect(try #require(engine.phase.record).focusedSeconds == 5 * 60)
+        let record = try #require(engine.phase.record)
+        #expect(record.focusedSeconds == 5 * 60)
     }
 
     @Test func aCommandAfterTheTimeRanOutFinishesTheSession() async throws {
@@ -275,7 +278,8 @@ import Testing
         engine.start(minutes: 25)
         clock.advance(minutes: 30)
         await engine.handle(.pause)
-        #expect(try #require(engine.phase.record).completed)
+        let record = try #require(engine.phase.record)
+        #expect(record.completed)
     }
 }
 
@@ -438,7 +442,8 @@ import Testing
         engine.start(minutes: 25)
         clock.advance(minutes: 25)
         engine.reconcile()
-        #expect(try #require(engine.phase.record).completed)
+        let record = try #require(engine.phase.record)
+        #expect(record.completed)
         // Finished at 00:15: it counts for the new day.
         #expect(engine.stats.todayMinutes == 25)
         #expect(engine.stats.streakDays == 1)

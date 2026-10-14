@@ -4,7 +4,8 @@ import SwiftUI
 
 /// Tools for building and checking the app on a real phone: the owner tests TestFlight builds and
 /// has no Xcode to read logs from, so what a build knows about itself is shown here. Reached from
-/// Home while `LK_DEVELOPER_TOOLS` is YES (off for the App Store: M9).
+/// Settings by tapping the version five times, while `LK_DEVELOPER_TOOLS` is YES (off for the App
+/// Store: M9).
 ///
 /// Laid out like a page of Settings: rows with coloured icon tiles that push the tools, then the
 /// build's facts as label and value.
@@ -23,8 +24,6 @@ struct DeveloperMenu: View {
                 NavigationLink(value: AppRoute.designTokens) {
                     MenuRow(title: "Design tokens", systemImage: "paintpalette.fill", color: .pink)
                 }
-            } footer: {
-                Text("The spike starts a Live Activity and copies its push token. The Lab shows every presentation with made-up squads; the tokens page shows the colours, type and components.")
             }
 
             Section {

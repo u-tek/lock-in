@@ -69,7 +69,7 @@ final class EventRecorder: @unchecked Sendable {
 /// A record that ended at `end`, focused for `minutes`.
 func record(endingAt end: Date, minutes: Int, completed: Bool = true) -> SessionRecord {
     SessionRecord(
-        id: UUID().uuidString,
+        id: "r\(Int(end.timeIntervalSince1970))",
         startedAt: end.addingTimeInterval(-TimeInterval(minutes * 60)),
         endedAt: end,
         plannedMinutes: minutes,

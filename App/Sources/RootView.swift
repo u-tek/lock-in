@@ -1,22 +1,49 @@
 import Core
 import DesignSystem
+import Paywall
+import SessionEngine
 import SwiftUI
 
-/// Home, with the Developer menu and its tools pushed on top. M1 puts onboarding and the session
-/// screen here.
-///
-/// One navigation stack, as in Settings: Home has the large title, and the screens pushed on it
-/// have inline ones.
+/// Onboarding until it's done, then Home. Whenever a session exists, it covers either.
 struct RootView: View {
-    @State private var path: [AppRoute] = []
-    private let configuration = AppConfiguration.main
+    @ObservedObject var engine: SessionEngine
+    @ObservedObject var plus: PlusStore
+
+    @State private var hasOnboarded: Bool
+    @State private var showsSession = false
+    @Environment(\.scenePhase) private var scenePhase
+
+    init(engine: SessionEngine, plus: PlusStore) {
+        self.engine = engine
+        self.plus = plus
+        // Someone with finished sessions has been through it, even if the flag went missing
+        // (a reinstall that kept the App Group, say).
+        _hasOnboarded = State(initialValue: OnboardingState.isComplete() || engine.stats.completedSessions > 0)
+    }
 
     var body: some View {
-        NavigationStack(path: $path) {
-            HomeScreen(showsDeveloperTools: configuration.developerToolsEnabled)
-                .navigationDestination(for: AppRoute.self) { route in
-                    route.destination
+        ZStack {
+            if hasOnboarded {
+                HomeScreen(engine: engine, plus: plus)
+                    .transition(.opacity)
+            } else {
+                OnboardingFlow(engine: engine, plus: plus) {
+                    OnboardingState.markComplete()
+                    hasOnboarded = true
                 }
+                .transition(.opacity)
+            }
+        }
+        .fullScreenCover(isPresented: $showsSession) {
+            SessionCover(engine: engine, plus: plus)
+        }
+        .onChange(of: engine.phase, initial: true) { _, phase in
+            showsSession = phase != .idle
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                engine.reconcile()
+            }
         }
         .onOpenURL { url in
             open(url)
@@ -30,10 +57,9 @@ struct RootView: View {
         }
         switch link {
         case .session:
-            // In M0 the only Live Activities come from the APNs spike, so tapping one goes back
-            // to the screen that started it. M1: the session screen.
-            guard configuration.developerToolsEnabled else { return }
-            path = [.developer, .apnsSpike]
+            // Tapping the Live Activity: the session cover is already up while a session runs.
+            // Catch up in case it finished while the app was away.
+            engine.reconcile()
         }
     }
 }

@@ -414,13 +414,15 @@ final class APNsSpikeModel: ObservableObject {
 
     // MARK: - Helpers
 
-    /// Follows an activity started earlier in this launch, so leaving the screen and coming back
-    /// (or tapping the activity) doesn't lose it. Activities from earlier launches are being
-    /// ended, so they're skipped.
+    /// Follows a spike activity started earlier in this launch, so leaving the screen and coming
+    /// back doesn't lose it. Activities from earlier launches are being ended, so they're skipped,
+    /// and so is a solo session's activity: that one is the session engine's.
     private func adoptRunningActivity() {
         guard let controller, activity == nil else { return }
         let orphans = AppServices.orphanIDs
-        guard let running = controller.activities.first(where: { !orphans.contains($0.id) }) else { return }
+        guard let running = controller.activities.first(where: {
+            !orphans.contains($0.id) && $0.attributes.sq == Self.squadName
+        }) else { return }
         adopt(running)
     }
 

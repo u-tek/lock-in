@@ -4,10 +4,16 @@ import SwiftUI
 
 @main
 struct LockinApp: App {
+    /// Nil in snapshot mode, which never touches ActivityKit, StoreKit, the App Group or the
+    /// notification prompt: its screens make preview models of their own.
+    private let services: LiveServices?
+
     init() {
-        // Snapshot mode never touches ActivityKit.
         if SnapshotMode.current == nil {
             AppServices.noteOrphanedActivities()
+            services = LiveServices()
+        } else {
+            services = nil
         }
     }
 
@@ -16,10 +22,13 @@ struct LockinApp: App {
             Group {
                 if let snapshot = SnapshotMode.current {
                     SnapshotHost(mode: snapshot)
-                } else {
-                    RootView()
+                } else if let services {
+                    RootView(engine: services.engine, plus: services.plus)
                         .task {
-                            await AppServices.endOrphanedActivities()
+                            await services.endOrphanedActivities()
+                        }
+                        .task {
+                            await services.plus.load()
                         }
                 }
             }

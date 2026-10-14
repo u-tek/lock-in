@@ -19,18 +19,15 @@ struct HomeScreen: View {
 
     @ObservedObject var engine: SessionEngine
     @ObservedObject var plus: PlusStore
-    /// When the squads teaser's made-up timers were read.
-    let now: Date
 
     @State private var minutes: Int
     @State private var sheet: Sheet?
     @State private var pokes = 0
     @State private var lockIns = 0
 
-    init(engine: SessionEngine, plus: PlusStore, minutes: Int = SessionPreset.twentyFive.minutes, now: Date = Date()) {
+    init(engine: SessionEngine, plus: PlusStore, minutes: Int = SessionPreset.twentyFive.minutes) {
         self.engine = engine
         self.plus = plus
-        self.now = now
         _minutes = State(initialValue: minutes)
     }
 
@@ -71,6 +68,7 @@ struct HomeScreen: View {
                     self.sheet = nil
                 }
             case .squads:
+                // The made-up friends' timers count from when it opens.
                 SquadsTeaser(now: Date())
             case .customLength:
                 CustomLengthSheet(minutes: $minutes)

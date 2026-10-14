@@ -3,11 +3,11 @@ import LiveActivity
 import Model
 import SwiftUI
 
-// The system's chrome around each Live Activity presentation, so the app can show the
-// LiveActivity module's views roughly as the system would: Home's preview and the Live Activity
-// Lab. Only the views inside are real. The island's cut-out, the Lock Screen's wallpaper and the
-// activity's default background, StandBy's black and Always-On's dimming are the system's, and are
-// checked on a phone through TestFlight (docs/decisions/0001-live-activity-views-in-package.md).
+// The system's chrome around each Live Activity presentation, so the Live Activity Lab can show
+// the LiveActivity module's views roughly as the system would. Only the views inside are real.
+// The island's cut-out, the Lock Screen's wallpaper and the activity's default background,
+// StandBy's black and Always-On's dimming are the system's, and are checked on a phone through
+// TestFlight (docs/decisions/0001-live-activity-views-in-package.md).
 
 /// Approximate sizes on an iPhone 16 Pro.
 enum ActivityFrameMetrics {
@@ -212,10 +212,11 @@ private struct ActivityBackdropView: View {
     }
 }
 
-/// A stand-in for a Lock Screen wallpaper: a soft mesh of system colours in the tint's family,
-/// like the gradients iOS ships. Paler in light mode and deeper in dark, as the system dims the
-/// wallpaper behind a dark Lock Screen, so the translucent card reads the way it would on a phone.
-/// Only system colours, so it follows the appearance like everything else.
+/// A stand-in for a Lock Screen wallpaper (the Lab's stages, and the phone in the onboarding
+/// pitch): a soft mesh of system colours in the tint's family, like the gradients iOS ships.
+/// Paler in light mode and deeper in dark, as the system dims the wallpaper behind a dark Lock
+/// Screen, so the translucent card reads the way it would on a phone. Only system colours, so it
+/// follows the appearance like everything else.
 struct LockScreenWallpaper: View {
     /// Always-On: nearly black, with a hint of the colour left.
     let isDimmed: Bool

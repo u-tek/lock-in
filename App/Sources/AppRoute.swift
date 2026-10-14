@@ -2,7 +2,8 @@ import Core
 import Foundation
 import SwiftUI
 
-/// Screens pushed onto Home's navigation stack.
+/// The developer tools, pushed onto the Settings sheet's navigation stack once the version row
+/// has been tapped five times (`SettingsScreen`).
 enum AppRoute: Hashable {
     case developer
     case apnsSpike

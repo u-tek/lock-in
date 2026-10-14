@@ -74,7 +74,7 @@ public final class SessionEngine: ObservableObject {
         self.now = now
         self.isPreview = false
         self.stored = stored
-        _phase = Published(initialValue: Self.phase(for: stored.active))
+        _phase = Published(initialValue: SessionEngine.phase(for: stored.active))
         _stats = Published(initialValue: .zero)
         _avatar = Published(initialValue: AvatarCode(stored.avatar))
         _liveActivityProblem = Published(initialValue: nil)
@@ -167,7 +167,7 @@ public final class SessionEngine: ObservableObject {
         liveActivityProblem = nil
         startActivity()
         save()
-        phase = Self.phase(for: stored.active)
+        phase = SessionEngine.phase(for: stored.active)
         scheduleCompletion()
         Log.session.info("Started a \(planned, privacy: .public)-minute session")
     }
@@ -282,7 +282,7 @@ public final class SessionEngine: ObservableObject {
     private func apply(_ session: ActiveSession) {
         stored.active = session
         save()
-        phase = Self.phase(for: session)
+        phase = SessionEngine.phase(for: session)
         scheduleCompletion()
     }
 
@@ -423,13 +423,19 @@ public final class SessionEngine: ObservableObject {
         }
     }
 
-    /// Live Activities were off when the session started and are on again now.
+    /// Tries the session's Live Activity again when what stopped it may have changed: Live
+    /// Activities switched back on in Settings, or the app back in the foreground.
     private func restartActivityIfAllowed() {
-        guard activity == nil,
-              liveActivityProblem == .disabled,
-              let controller = liveActivities,
-              controller.areActivitiesEnabled
-        else { return }
+        guard activity == nil, let controller = liveActivities, let problem = liveActivityProblem else { return }
+        switch problem {
+        case .disabled:
+            guard controller.areActivitiesEnabled else { return }
+        case .notInForeground:
+            break
+        case .unsupported, .tooMany, .tooLarge, .failed:
+            // Trying again won't change these.
+            return
+        }
         startActivity()
         save()
     }

@@ -1,10 +1,24 @@
 # Routes exported by scripts/export-snapshots.sh, one per line (see SnapshotGallery in the app).
+# App screens first, in the order someone meets them; then the developer tools (hidden in the app
+# behind Settings › Version, tapped five times).
 # lab.* routes are design-lab pages (iPhone 16 Pro only, into design/lab).
 # store.* routes are App Store screenshots (iPhone 16 Pro Max only, into design/appstore). M6:
 # the scripts already handle them; none exist yet.
 # A lab page is taller than one screenshot, so each part is a route of its own too
 # (DesignTokensScreen.Panel, LiveActivityLabScreen.Panel); the page's own route shows its top.
+onboarding.welcome
+onboarding.lockling
+onboarding.notifications
+onboarding.ready
 home
+session
+session.paused
+session.disabled
+finished
+finished.first
+paywall
+settings
+squads
 developer
 spike
 lab.tokens
