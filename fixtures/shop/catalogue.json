@@ -19,6 +19,12 @@
     { "id": "hat.2", "part": "hat", "option": 2, "price": 0, "plus": true },
     { "id": "hat.3", "part": "hat", "option": 3, "price": 100, "plus": false },
     { "id": "hat.4", "part": "hat", "option": 4, "price": 120, "plus": false },
-    { "id": "hat.5", "part": "hat", "option": 5, "price": 0, "plus": true }
+    { "id": "hat.5", "part": "hat", "option": 5, "price": 0, "plus": true },
+    { "id": "pet.1", "part": "pet", "option": 1, "price": 0, "plus": true },
+    { "id": "pet.2", "part": "pet", "option": 2, "price": 0, "plus": true },
+    { "id": "pet.3", "part": "pet", "option": 3, "price": 0, "plus": true },
+    { "id": "pet.4", "part": "pet", "option": 4, "price": 0, "plus": true },
+    { "id": "pet.5", "part": "pet", "option": 5, "price": 0, "plus": true },
+    { "id": "pet.6", "part": "pet", "option": 6, "price": 0, "plus": true }
   ]
 }

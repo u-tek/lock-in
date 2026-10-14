@@ -182,7 +182,11 @@ import Testing
         let before = api.calls.count
         await shop.importIfNeeded()
         await shop.refresh()
-        #expect(!api.calls.dropFirst(before).contains { if case .importCoins = $0 { true } else { false } })
+        let imports = api.calls.dropFirst(before).filter { call in
+            if case .importCoins = call { return true }
+            return false
+        }
+        #expect(imports.isEmpty)
     }
 
     @Test func alreadyImportedCountsAsDone() async {

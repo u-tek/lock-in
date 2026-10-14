@@ -1099,9 +1099,9 @@ export class Database {
    * row. Every write applies only while that row doesn't exist (so the same event twice counts
    * once, however it races) and only to a user whose last applied event isn't newer than this one
    * (`eventMs`), so events arriving out of order can't undo a later one. Trims the event log to
-   * `trimBefore`.
+   * `trimBefore`. Returns how many users' rows it changed.
    */
-  async applyRevenueCatEvent(event: { id: string; type: string; eventMs: number; receivedAt: number; trimBefore: number; writes: PlusWrite[] }): Promise<void> {
+  async applyRevenueCatEvent(event: { id: string; type: string; eventMs: number; receivedAt: number; trimBefore: number; writes: PlusWrite[] }): Promise<number> {
     const unseen = "NOT EXISTS (SELECT 1 FROM revenuecat_events WHERE id = ?)";
     const inOrder = "(plus_event_ms IS NULL OR plus_event_ms <= ?)";
     const statements = event.writes.map((write) => {
@@ -1122,7 +1122,8 @@ export class Database {
       this.d1.prepare("DELETE FROM revenuecat_events WHERE received_at < ?").bind(event.trimBefore),
       this.d1.prepare("INSERT OR IGNORE INTO revenuecat_events (id, type, received_at) VALUES (?, ?, ?)").bind(event.id, event.type, event.receivedAt),
     );
-    await this.d1.batch(statements);
+    const results = await this.d1.batch(statements);
+    return results.slice(0, event.writes.length).reduce((sum, result) => sum + (result?.meta.changes ?? 0), 0);
   }
 
   /** What RevenueCat's REST API says (POST /me/plus/refresh): authoritative as of `atMs`. Returns the user after. */

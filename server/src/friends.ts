@@ -122,7 +122,8 @@ export async function redeemFriendCode(context: AuthedContext, rawCode: string):
   }
   // No foreign key on target_id (migrations/0001_init.sql), so check they're still here.
   const target = await db.userById(invite.target_id);
-  if (target === null) throw notFound();
+  // A bot (Demo Buddy) is nobody's friend: it never makes a code, and one naming it is refused.
+  if (target === null || target.is_bot === 1) throw notFound();
   if (await db.isBlockedEitherWay(user.id, target.id)) throw apiError(403, "blocked", "You can't add this person.");
   if (await db.areFriends(user.id, target.id)) throw apiError(409, "already_friends", "You're already friends.");
 

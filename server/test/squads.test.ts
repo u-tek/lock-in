@@ -49,7 +49,14 @@ async function squadWith(owner: SignedIn, ...members: SignedIn[]): Promise<strin
   return id;
 }
 
-const memberView = (who: SignedIn, joinedAt: number) => ({ id: who.user.id, handle: who.user.handle, displayName: who.user.displayName, avatarCode: "b0.c0.e0.h0", joinedAt });
+const memberView = (who: SignedIn, joinedAt: number) => ({
+  id: who.user.id,
+  handle: who.user.handle,
+  displayName: who.user.displayName,
+  avatarCode: "b0.c0.e0.h0",
+  joinedAt,
+  isBot: false,
+});
 
 describe("POST /squads", () => {
   test("creates a squad with you as owner and only member", async () => {
@@ -64,9 +71,11 @@ describe("POST /squads", () => {
         openSessionId: null,
         muted: false,
         // M5: an egg (its species kept back until it hatches), hungry, and no streak yet.
-        pet: { species: expect.any(String), stage: 0, xp: 0, mood: 1, progress: 0 },
-        streak: { count: 0, countedToday: false, doneToday: 0, needed: 1 },
+        pet: { species: expect.any(String), stage: 0, xp: 0, mood: 1, progress: 0, accessory: null },
+        // M7: no frozen days, and no freezes without Plus.
+        streak: { count: 0, countedToday: false, doneToday: 0, needed: 1, frozenDays: [], freezes: 0 },
         tz: "UTC",
+        boosted: false,
       },
     });
     // The species is picked now, so the egg has its colour.
@@ -121,9 +130,11 @@ describe("GET /squads", () => {
       members: [memberView(ava, T0), memberView(noor, T0 + 1), memberView(kai, T0 + 2)],
       openSessionId: null,
       muted: false,
-      pet: { species: expect.any(String), stage: 0, xp: 0, mood: 1, progress: 0 },
-      streak: { count: 0, countedToday: false, doneToday: 0, needed: 2 },
+      pet: { species: expect.any(String), stage: 0, xp: 0, mood: 1, progress: 0, accessory: null },
+      // Noor has Plus: the squad is boosted (M7), and she has her two freezes.
+      streak: { count: 0, countedToday: false, doneToday: 0, needed: 2, frozenDays: [], freezes: 2 },
       tz: "UTC",
+      boosted: true,
     });
     expect(body.squads[1].members.map((member: { id: string }) => member.id)).toEqual([noor.user.id]);
 

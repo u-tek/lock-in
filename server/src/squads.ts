@@ -9,12 +9,17 @@
 //   PATCH  /squads/:id/members/me      { muted } -> { squad }
 //   DELETE /squads/:id/members/me      -> 204 (an owner leaving hands the squad on; the last one out deletes it)
 //   GET    /squads/:id/leaderboard?week=YYYY-MM-DD -> the week's minutes per member (M5)
+//   PATCH  /squads/:id/pet             { accessory: n | null } -> { squad }   (M7, Squad Boost)
 //
 // A squad you're not in looks the same as one that doesn't exist: 403 `not_member`.
 //
 // M5: every squad has a pet (an egg until two members finish together), a streak and a time zone
 // (src/progress.ts). The egg's species is picked when the squad is made, and its zone is the
 // creator's.
+//
+// M7: a squad with a Plus member is boosted: its pet can wear an accessory any member picks. The
+// streak shows the days freezes filled and the caller's freezes left. Review Squads (Demo Buddy,
+// src/reviewSquad.ts) list the bot with `isBot` and don't count against anyone's squad limit.
 
 import type { AuthedContext } from "./context.ts";
 import { newFriendCode, newShortID } from "./context.ts";
@@ -27,7 +32,8 @@ import { MAX_SQUAD_NAME_LENGTH, isShortID } from "./liveActivity.ts";
 import { moderate, normaliseName } from "./moderation.ts";
 import { pickSpecies } from "./pet.ts";
 import { type SquadProgress, type SquadStreak, squadProgress } from "./progress.ts";
-import { FALLBACK_MEMBER_NAME } from "./sessions.ts";
+import { FALLBACK_MEMBER_NAME, refreshRoomPets } from "./sessions.ts";
+import { isPetAccessory } from "./shop.ts";
 
 export const FREE_SQUAD_LIMIT = 1;
 export const PLUS_SQUAD_LIMIT = 3;
@@ -41,6 +47,8 @@ export interface SquadMember {
   avatarCode: string;
   /** Unix seconds. */
   joinedAt: number;
+  /** Demo Buddy: the app labels it "Test bot". */
+  isBot: boolean;
 }
 
 export interface Squad {
@@ -54,11 +62,16 @@ export interface Squad {
   openSessionId: string | null;
   /** Your own mute switch for "X is locking in" (M4). */
   muted: boolean;
-  /** The egg is tinted by its `species` (stage 0) before it hatches. Mood 0–3; progress towards the next stage, 0–1. */
-  pet: { species: string; stage: number; xp: number; mood: number; progress: number };
+  /**
+   * The egg is tinted by its `species` (stage 0) before it hatches. Mood 0–3; progress towards the
+   * next stage, 0–1. `accessory` (M7): the `pet.<n>` it wears, only while the squad is boosted.
+   */
+  pet: { species: string; stage: number; xp: number; mood: number; progress: number; accessory: number | null };
   streak: SquadStreak;
   /** The IANA zone the squad's days and Monday follow. */
   tz: string;
+  /** M7, Squad Boost: a member has Plus, so the pet can wear premium accessories. */
+  boosted: boolean;
 }
 
 /** A member's week (GET /squads/:id/leaderboard). */
@@ -96,6 +109,7 @@ function squadView(row: MySquadRow, members: SquadMemberRow[], openSessionId: st
       displayName: member.display_name,
       avatarCode: member.avatar_code,
       joinedAt: member.joined_at,
+      isBot: member.is_bot === 1,
     })),
     openSessionId,
     muted: row.muted === 1,
@@ -105,25 +119,27 @@ function squadView(row: MySquadRow, members: SquadMemberRow[], openSessionId: st
       xp: progress.xp,
       mood: progress.mood,
       progress: progress.progress,
+      accessory: progress.accessory,
     },
     streak: progress.streak,
     tz: progress.tz,
+    boosted: progress.boosted,
   };
 }
 
 /** One squad as the caller sees it, or 403 `not_member`. */
-async function loadSquad(context: AuthedContext, squadId: string): Promise<Squad> {
+export async function loadSquad(context: AuthedContext, squadId: string): Promise<Squad> {
   const row = isShortID(squadId) ? await context.db.mySquad(squadId, context.user.id) : null;
   if (row === null) throw notMember();
   const [members, open, progress] = await Promise.all([
     context.db.membersOfSquad(squadId),
     context.db.openSessionOfSquad(squadId),
-    squadProgress(context.db, row, context.now, context.random),
+    squadProgress(context.db, row, context.now, context.random, context.user),
   ]);
   return squadView(row, members, open?.id ?? null, progress);
 }
 
-function notMember(): HttpError {
+export function notMember(): HttpError {
   return apiError(403, "not_member", "You're not in this squad");
 }
 
@@ -147,7 +163,7 @@ function squadName(value: unknown): string {
 export async function listSquads(context: AuthedContext): Promise<Response> {
   const { db, user } = context;
   const [rows, members, open] = await Promise.all([db.squadsOf(user.id), db.membersOfSquadsOf(user.id), db.openSessionsOfSquadsOf(user.id)]);
-  const progress = await Promise.all(rows.map((row) => squadProgress(db, row, context.now, context.random)));
+  const progress = await Promise.all(rows.map((row) => squadProgress(db, row, context.now, context.random, user)));
   const squads = rows.map((row, index) =>
     squadView(
       row,
@@ -242,7 +258,8 @@ export async function joinSquadByCode(context: AuthedContext, rawCode: string): 
   const owner = squad.owner_id === null ? null : await db.userById(squad.owner_id);
   const maxSquads = squadLimit(user, now);
   const maxMembers = memberLimit(owner, user, now);
-  if ((await db.squadCount(user.id)) >= maxSquads) throw plusRequired("squads");
+  // A Review Squad (Demo Buddy's) doesn't count against the squad limit, joining one included.
+  if (squad.review !== 1 && (await db.squadCount(user.id)) >= maxSquads) throw plusRequired("squads");
   if ((await db.squadSize(squad.id)) >= maxMembers) throw plusRequired("members");
   let joined: boolean;
   try {
@@ -252,7 +269,7 @@ export async function joinSquadByCode(context: AuthedContext, rawCode: string): 
     throw error;
   }
   // Someone else got in first and took the last place (or the squad went).
-  if (!joined) throw (await db.squadCount(user.id)) >= maxSquads ? plusRequired("squads") : plusRequired("members");
+  if (!joined) throw squad.review !== 1 && (await db.squadCount(user.id)) >= maxSquads ? plusRequired("squads") : plusRequired("members");
   console.log("squads: joined by code");
   return json({ squad: await loadSquad(context, squad.id) });
 }
@@ -274,6 +291,32 @@ export async function leaveSquad(context: AuthedContext, squadId: string): Promi
   if (isShortID(squadId)) await context.db.leaveSquad(squadId, context.user.id);
   console.log("squads: left");
   return noContent();
+}
+
+// PATCH /squads/:id/pet
+
+/**
+ * Squad Boost (M7): any member of a boosted squad (one with a Plus member) picks the pet's
+ * accessory, `pet.<n>` from the catalogue, or takes it off with null. Everyone sees it, in the Live
+ * Activity too (`p.k` "sprout.2.a3"): the squad's open room is told at once. Taking it off works
+ * boosted or not. 403 `not_member`, 422 `accessory_invalid` for anything but a catalogue accessory
+ * or null, 402 `plus_required` (`limit: "boost"`) when the squad isn't boosted.
+ */
+export async function setPetAccessory(context: AuthedContext, squadId: string): Promise<Response> {
+  const { db, now } = context;
+  const body = await readObject(context.request);
+  const row = isShortID(squadId) ? await db.mySquad(squadId, context.user.id) : null;
+  if (row === null) throw notMember();
+  const accessory = body.accessory;
+  if (accessory !== null && !isPetAccessory(accessory)) throw apiError(422, "accessory_invalid", "accessory must be one of the pet's accessories (pet.<n>) or null");
+  if (accessory !== null && !(await db.squadBoosted(squadId, now))) {
+    throw apiError(402, "plus_required", "Squad Boost: when someone in the squad has Lockin Plus, the pet can wear this", { limit: "boost" });
+  }
+  await db.setPetAccessory(squadId, accessory);
+  const open = await db.openSessionOfSquad(squadId);
+  if (open !== null) await refreshRoomPets(context.env, [open.id], context.user.id);
+  console.log("squads: pet accessory changed");
+  return json({ squad: await loadSquad(context, squadId) });
 }
 
 // GET /squads/:id/leaderboard?week=YYYY-MM-DD

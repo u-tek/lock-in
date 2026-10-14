@@ -103,6 +103,11 @@ export interface LockinAlert {
   openerId: string;
   /** The opener's Live Activity name: display name, else handle, else "Lockling" (src/sessions.ts). */
   openerName: string;
+  /**
+   * Demo Buddy locking in because the reviewer asked it to (POST /squads/:id/demo-buddy/lock-in):
+   * quiet hours don't hold it back. Mute, blocks, busy and every limit still do.
+   */
+  ignoreQuietHours?: boolean;
 }
 
 export interface LockinAlertPayload {
@@ -155,7 +160,7 @@ export async function sendLockinAlerts(context: Context, alert: LockinAlert): Pr
     const everyone = new Set<string>();
     for (const device of await db.alertCandidates(alert.squadId, alert.openerId)) {
       everyone.add(device.user_id);
-      if (deviceIsQuiet(device, now)) continue;
+      if (alert.ignoreQuietHours !== true && deviceIsQuiet(device, now)) continue;
       phones.set(device.user_id, [...(phones.get(device.user_id) ?? []), device]);
     }
     const quiet = everyone.size - phones.size;

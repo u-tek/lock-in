@@ -78,6 +78,18 @@ struct SettingsScreen: View {
                     } label: {
                         ToolRow(title: "Notifications", systemImage: "bell.badge.fill", color: .red)
                     }
+                    // Blocking apps during sessions (M8, Plus).
+                    NavigationLink {
+                        DeepFocusScreen(plus: plus, avatar: engine.avatar)
+                    } label: {
+                        HStack {
+                            ToolRow(title: "Deep Focus", systemImage: "lock.shield.fill", color: .indigo)
+                            if !plus.isPlus {
+                                Spacer()
+                                PlusBadge()
+                            }
+                        }
+                    }
                     Button {
                         editsLockling = true
                     } label: {

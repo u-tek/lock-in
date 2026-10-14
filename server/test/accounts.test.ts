@@ -52,7 +52,7 @@ describe("POST /auth/apple", () => {
     // Only the token's SHA-256 is stored.
     expect(app.value("SELECT token_hash FROM auth_tokens")).toBe(await hashToken(body.token));
     expect(app.count("SELECT count(*) FROM auth_tokens WHERE token_hash = ?", body.token)).toBe(0);
-    expect(app.value("SELECT apple_sub FROM users")).toBe("sub.ava");
+    expect(app.value("SELECT apple_sub FROM users WHERE is_bot = 0")).toBe("sub.ava");
     expect(logs).toContain("auth/apple: new account");
   });
 
@@ -62,7 +62,7 @@ describe("POST /auth/apple", () => {
     expect(second.isNew).toBe(false);
     expect(second.user.id).toBe(first.user.id);
     expect(second.token).not.toBe(first.token);
-    expect(app.count("SELECT count(*) FROM users")).toBe(1);
+    expect(app.count("SELECT count(*) FROM users WHERE is_bot = 0")).toBe(1);
     for (const token of [first.token, second.token]) expect((await app.request("GET", "/me", { token })).status).toBe(200);
   });
 
@@ -84,21 +84,21 @@ describe("POST /auth/apple", () => {
     const text = await response.text();
     expect(response.status).toBe(200);
     expect(text).not.toContain("refresh.");
-    expect(app.value("SELECT apple_refresh_token FROM users")).toBe("refresh.sub.ava.1");
+    expect(app.value("SELECT apple_refresh_token FROM users WHERE is_bot = 0")).toBe("refresh.sub.ava.1");
     expect(app.apple.requestsTo(APPLE_TOKEN_URL)).toHaveLength(1);
   });
 
   test("signs in anyway when the code exchange fails, and logs why", async () => {
     const { status } = await read(await app.request("POST", "/auth/apple", { body: await signInBody("sub.ava", { authorizationCode: "expired" }) }));
     expect(status).toBe(200);
-    expect(app.value("SELECT apple_refresh_token FROM users")).toBeNull();
+    expect(app.value("SELECT apple_refresh_token FROM users WHERE is_bot = 0")).toBeNull();
     expect(logs).toContain("auth/apple: token exchange failed (Apple said 400 invalid_grant)");
   });
 
   test("doesn't keep a refresh token for another Apple ID", async () => {
     const { status } = await read(await app.request("POST", "/auth/apple", { body: await signInBody("sub.ava", { authorizationCode: FakeApple.codeFor("sub.noor") }) }));
     expect(status).toBe(200);
-    expect(app.value("SELECT apple_refresh_token FROM users")).toBeNull();
+    expect(app.value("SELECT apple_refresh_token FROM users WHERE is_bot = 0")).toBeNull();
   });
 
   test("without the Sign in with Apple key, skips the exchange", async () => {
@@ -106,7 +106,7 @@ describe("POST /auth/apple", () => {
     const { status } = await read(await app.request("POST", "/auth/apple", { body: await signInBody("sub.ava", { authorizationCode: FakeApple.codeFor("sub.ava") }) }));
     expect(status).toBe(200);
     expect(app.apple.requestsTo(APPLE_TOKEN_URL)).toHaveLength(0);
-    expect(app.value("SELECT apple_refresh_token FROM users")).toBeNull();
+    expect(app.value("SELECT apple_refresh_token FROM users WHERE is_bot = 0")).toBeNull();
   });
 
   test("401 apple_token_invalid for a token Apple didn't issue for this app", async () => {
@@ -125,7 +125,7 @@ describe("POST /auth/apple", () => {
       expect(status, JSON.stringify(body).slice(0, 80)).toBe(401);
       expect(answer).toEqual({ error: expect.any(String), code: "apple_token_invalid" });
     }
-    expect(app.count("SELECT count(*) FROM users")).toBe(0);
+    expect(app.count("SELECT count(*) FROM users WHERE is_bot = 0")).toBe(0);
   });
 
   test("502 apple_unavailable when Apple's keys can't be fetched", async () => {
@@ -192,13 +192,13 @@ describe("PATCH /me", () => {
 
   test("sets the handle (lowercased), the name (trimmed) and the avatar", async () => {
     // The parts are hers (M5): three bought, and Plus for the purple.
-    const id = app.value("SELECT id FROM users") as string;
+    const id = app.value("SELECT id FROM users WHERE is_bot = 0") as string;
     for (const item of ["body.3", "eyes.2", "hat.4"]) app.sqlite.prepare("INSERT INTO cosmetics (user_id, item_id, acquired_at) VALUES (?, ?, 1)").run(id, item);
     app.sqlite.prepare("UPDATE users SET plus_until = ?").run(app.clock.now + 86_400);
     const { status, body } = await patch({ handle: "Ava_Smith", displayName: "  Ava  ", avatarCode: "b3.c7.e2.h4" });
     expect(status).toBe(200);
     expect(body.user).toMatchObject({ handle: "ava_smith", displayName: "Ava", avatarCode: "b3.c7.e2.h4" });
-    expect(app.value("SELECT handle FROM users")).toBe("ava_smith");
+    expect(app.value("SELECT handle FROM users WHERE is_bot = 0")).toBe("ava_smith");
 
     // Each on its own leaves the others alone; an empty patch changes nothing.
     expect((await patch({ displayName: "Avery" })).body.user).toMatchObject({ handle: "ava_smith", displayName: "Avery", avatarCode: "b3.c7.e2.h4" });
@@ -233,7 +233,7 @@ describe("PATCH /me", () => {
 
   test("an invalid field means nothing is saved", async () => {
     expect((await patch({ handle: "ava", displayName: "Ava", avatarCode: "nope" })).body.code).toBe("avatar_invalid");
-    expect(app.value("SELECT handle FROM users")).toBeNull();
+    expect(app.value("SELECT handle FROM users WHERE is_bot = 0")).toBeNull();
   });
 
   test("409 handle_taken when someone else has it, ignoring case", async () => {
@@ -275,7 +275,7 @@ describe("DELETE /auth/session", () => {
     expect((await app.request("DELETE", "/auth/session", { token: phone.token })).status).toBe(401);
     expect((await app.request("GET", "/me", { token: ipad.token })).status).toBe(200);
     expect(app.count("SELECT count(*) FROM auth_tokens")).toBe(1);
-    expect(app.count("SELECT count(*) FROM users")).toBe(1);
+    expect(app.count("SELECT count(*) FROM users WHERE is_bot = 0")).toBe(1);
     expect(logs).toContain("auth: signed out");
   });
 });
@@ -319,7 +319,7 @@ describe("DELETE /me", () => {
       { reporter_id: null, target_user_id: kai.user.id, reason: "spam" },
     ]);
     // Everyone else is untouched.
-    expect(app.count("SELECT count(*) FROM users")).toBe(3);
+    expect(app.count("SELECT count(*) FROM users WHERE is_bot = 0")).toBe(3);
     expect((await app.request("GET", "/me", { token: noor.token })).status).toBe(200);
 
     const [revoke] = app.apple.requestsTo(APPLE_REVOKE_URL);
@@ -347,7 +347,7 @@ describe("DELETE /me", () => {
     const { token } = await app.signIn("sub.ava", { authorizationCode: FakeApple.codeFor("sub.ava") });
     app.apple.revokeResponse = { status: 400, body: { error: "invalid_request" } };
     expect((await app.request("DELETE", "/me", { token })).status).toBe(204);
-    expect(app.count("SELECT count(*) FROM users")).toBe(0);
+    expect(app.count("SELECT count(*) FROM users WHERE is_bot = 0")).toBe(0);
     expect(logs).toContain("me: account deleted, Apple token not revoked (Apple said 400 invalid_request)");
   });
 
@@ -371,7 +371,7 @@ describe("POST /devices", () => {
 
   test("registers the phone", async () => {
     expect((await app.request("POST", "/devices", { token, body: device })).status).toBe(204);
-    const userId = app.value("SELECT id FROM users");
+    const userId = app.value("SELECT id FROM users WHERE is_bot = 0");
     expect(rows()).toEqual([
       {
         id: expect.stringMatching(/^[0-9A-Za-z]{10}$/),

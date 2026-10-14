@@ -29,9 +29,17 @@
 //   GET    /squads/:id/leaderboard                                               (src/squads.ts)
 //   GET    /shop  POST /shop/buy  GET /me/cosmetics                              (src/shop.ts)
 //   POST   /me/coins/import                                                      (src/accounts.ts)
+//   Demo Buddy, the App Review bot (docs/launch/app-review-notes.md §3): POST /squads/join/<review
+//   code> makes a Review Squad with it; it joins that squad's rooms (src/room.ts).
+//   POST   /squads/:id/demo-buddy/lock-in                                        (src/reviewSquad.ts)
+//   M7, Plus (docs/milestones/M7.md): GET /squads gains `boosted`, the pet's accessory and streak
+//   freezes (src/progress.ts).
+//   POST   /webhooks/revenuecat   RevenueCat's events, behind REVENUECAT_WEBHOOK_AUTH  (src/plus.ts)
+//   POST   /me/plus/refresh                                                      (src/plus.ts)
+//   PATCH  /squads/:id/pet                                                       (src/squads.ts)
 //
-// Every route but /health, /admin/*, /auth/apple, /shop, /j/:code and /.well-known/* needs
-// `Authorization: Bearer <token>`. Each session is a `Room` Durable Object (src/room.ts); the APNs
+// Every route but /health, /admin/*, /auth/apple, /shop, /webhooks/*, /j/:code and /.well-known/*
+// needs `Authorization: Bearer <token>`. Each session is a `Room` Durable Object (src/room.ts); the APNs
 // provider token comes from the one `ApnsAuth` Durable Object (src/apnsAuth.ts).
 //
 // The runtime treats every named export of this module as an entrypoint and refuses to start if
@@ -45,10 +53,23 @@ import { Database } from "./db.ts";
 import type { Env } from "./env.ts";
 import { blockUser, fileReport, friendCode, listBlocks, listFriends, redeemFriendCode, removeFriend, unblockUser } from "./friends.ts";
 import { HttpError, errorResponse, json, notFound } from "./http.ts";
+import { isReviewCode } from "./demoBuddy.ts";
 import { appSiteAssociation, invitePage } from "./invite.ts";
+import { refreshPlus, revenueCatWebhook } from "./plus.ts";
+import { askDemoBuddy, redeemReviewCode } from "./reviewSquad.ts";
 import { cheer, getSession, joinSession, liveSession, memberAction, startSession, uploadLiveActivityToken } from "./sessions.ts";
 import { buyItem, getShop, myCosmetics } from "./shop.ts";
-import { createSquad, joinSquadByCode, leaveSquad, listSquads, renameSquad, squadInvite, squadLeaderboard, updateMyMembership } from "./squads.ts";
+import {
+  createSquad,
+  joinSquadByCode,
+  leaveSquad,
+  listSquads,
+  renameSquad,
+  setPetAccessory,
+  squadInvite,
+  squadLeaderboard,
+  updateMyMembership,
+} from "./squads.ts";
 
 export { ApnsAuth } from "./apnsAuth.ts";
 export { Room } from "./room.ts";
@@ -88,6 +109,8 @@ const ROUTES: Route[] = [
   authed("POST", "/devices", registerDevice),
   authed("GET", "/me/cosmetics", myCosmetics),
   authed("POST", "/me/coins/import", importCoins),
+  authed("POST", "/me/plus/refresh", refreshPlus),
+  open("POST", "/webhooks/revenuecat", revenueCatWebhook),
 
   authed("GET", "/friends", listFriends),
   authed("POST", "/friends/code", friendCode),
@@ -100,12 +123,15 @@ const ROUTES: Route[] = [
 
   authed("GET", "/squads", listSquads),
   authed("POST", "/squads", createSquad),
-  authed("POST", "/squads/join/:code", (context, [code = ""]) => joinSquadByCode(context, code)),
+  // The review code (Demo Buddy on) makes a Review Squad; switched off, it's unknown like any other.
+  authed("POST", "/squads/join/:code", (context, [code = ""]) => (isReviewCode(context.env, code) ? redeemReviewCode(context) : joinSquadByCode(context, code))),
   authed("PATCH", "/squads/:id", (context, [id = ""]) => renameSquad(context, id)),
   authed("POST", "/squads/:id/invite", (context, [id = ""]) => squadInvite(context, id)),
   authed("PATCH", "/squads/:id/members/me", (context, [id = ""]) => updateMyMembership(context, id)),
   authed("DELETE", "/squads/:id/members/me", (context, [id = ""]) => leaveSquad(context, id)),
   authed("GET", "/squads/:id/leaderboard", (context, [id = ""]) => squadLeaderboard(context, id)),
+  authed("PATCH", "/squads/:id/pet", (context, [id = ""]) => setPetAccessory(context, id)),
+  authed("POST", "/squads/:id/demo-buddy/lock-in", (context, [id = ""]) => askDemoBuddy(context, id)),
 
   // The catalogue is the same for everyone, and the app shows it signed out too.
   open("GET", "/shop", getShop),

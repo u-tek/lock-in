@@ -69,6 +69,8 @@ final class LiveServices {
     let social: SocialModels
     /// What the Home and Lock Screen widgets show, kept in the App Group (M6).
     let widgets = WidgetDataWriter()
+    /// Deep Focus's shields following the session, and its slips (M8).
+    let deepFocus: DeepFocusCoordinator
 
     /// The latest push-to-start token, for the M4 spike (`devices.push_to_start_token`). Saved
     /// in the App Group as it arrives, so a background launch has it straight away.
@@ -104,6 +106,7 @@ final class LiveServices {
         }
         // A session may have ended while the app was away.
         engine.reconcile()
+        deepFocus = DeepFocusCoordinator(engine: engine, plus: plus)
         // From here on, including a background launch for the Lock in widget's button.
         widgets.watch(engine: engine, social: social)
         AppServices.analytics.track(.appOpened)

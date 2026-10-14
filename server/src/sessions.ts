@@ -75,7 +75,7 @@ async function alreadyInSession(context: AuthedContext): Promise<HttpError | nul
 }
 
 /** The room's answer's error code, if it's an error. */
-async function errorCode(response: Response): Promise<string | undefined> {
+export async function errorCode(response: Response): Promise<string | undefined> {
   if (response.ok) return undefined;
   const body = (await response.clone().json().catch(() => null)) as unknown;
   return isRecord(body) && typeof body.code === "string" ? body.code : undefined;
@@ -223,6 +223,22 @@ export async function liveSession(context: AuthedContext, sessionId: string): Pr
   }
   await mayWatch(context, sessionId);
   return callRoom(context.env, sessionId, context.user.id, "live", undefined, { upgrade: "websocket" });
+}
+
+/**
+ * Tells open rooms to look at their squad's pet again (the room's `pet`), as `userId`: after Plus
+ * changes (Squad Boost and its accessory, M7) or an accessory is picked. Best effort: failures are
+ * logged and nothing waits for a room that's gone.
+ */
+export async function refreshRoomPets(env: Env, sessionIds: Iterable<string>, userId: string): Promise<void> {
+  for (const sessionId of new Set(sessionIds)) {
+    try {
+      const response = await callRoom(env, sessionId, userId, "pet", {});
+      if (!response.ok && response.status !== 404) console.error(`room ${sessionId}: answered ${response.status} to pet`);
+    } catch (error) {
+      console.error(`room ${sessionId}: couldn't be told about its pet (${error instanceof Error ? error.name : typeof error})`);
+    }
+  }
 }
 
 /**

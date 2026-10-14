@@ -5,10 +5,18 @@ import { TestD1, migrationFiles } from "./d1.ts";
 
 describe("TestD1", () => {
   test("applies every migration in order", () => {
-    expect(migrationFiles()).toEqual(["0001_init.sql", "0002_accounts.sql", "0003_squads.sql", "0004_invites.sql", "0005_pet.sql"]);
+    expect(migrationFiles()).toEqual([
+      "0001_init.sql",
+      "0002_accounts.sql",
+      "0003_squads.sql",
+      "0004_invites.sql",
+      "0005_pet.sql",
+      "0006_demo_buddy.sql",
+      "0007_plus.sql",
+    ]);
     const d1 = new TestD1();
     const tables = d1.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
-    expect(tables.map((row) => row.name)).toEqual(expect.arrayContaining(["auth_tokens", "alerts", "focus_log"]));
+    expect(tables.map((row) => row.name)).toEqual(expect.arrayContaining(["auth_tokens", "alerts", "focus_log", "review_redemptions", "revenuecat_events", "streak_freezes"]));
   });
 
   test("first, all, run and raw", async () => {
@@ -24,9 +32,9 @@ describe("TestD1", () => {
     expect(await d1.prepare("SELECT id FROM users WHERE id = ?").bind("Av4Nq8sT2b").first("id")).toBe("Av4Nq8sT2b");
     expect(await d1.prepare("SELECT id FROM users WHERE id = ?").bind("nobody0000").first()).toBeNull();
 
-    const { results } = await d1.prepare("SELECT id FROM users ORDER BY created_at").all();
+    const { results } = await d1.prepare("SELECT id FROM users WHERE is_bot = 0 ORDER BY created_at").all();
     expect(results).toEqual([{ id: "Av4Nq8sT2b" }, { id: "Nr2Kx7pQ1m" }]);
-    expect(await d1.prepare("SELECT id, created_at FROM users ORDER BY created_at").raw()).toEqual([
+    expect(await d1.prepare("SELECT id, created_at FROM users WHERE is_bot = 0 ORDER BY created_at").raw()).toEqual([
       ["Av4Nq8sT2b", 1],
       ["Nr2Kx7pQ1m", 2],
     ]);
@@ -57,9 +65,9 @@ describe("TestD1", () => {
     const d1 = new TestD1();
     const insert = (id: string) => d1.prepare("INSERT INTO users (id, apple_sub, created_at) VALUES (?, ?, 1)").bind(id, `sub.${id}`);
     await expect(d1.batch([insert("Av4Nq8sT2b"), insert("Av4Nq8sT2b")])).rejects.toThrow(/UNIQUE/);
-    expect(d1.sqlite.prepare("SELECT count(*) AS n FROM users").get()).toEqual({ n: 0 });
+    expect(d1.sqlite.prepare("SELECT count(*) AS n FROM users WHERE is_bot = 0").get()).toEqual({ n: 0 });
 
-    const results = await d1.batch([insert("Av4Nq8sT2b"), d1.prepare("SELECT count(*) AS n FROM users")]);
+    const results = await d1.batch([insert("Av4Nq8sT2b"), d1.prepare("SELECT count(*) AS n FROM users WHERE is_bot = 0")]);
     expect(results[0]?.meta.changes).toBe(1);
     expect(results[1]?.results).toEqual([{ n: 1 }]);
   });

@@ -56,6 +56,8 @@ struct RootView: View {
             if phase == .active {
                 engine.reconcile()
                 refreshSquads()
+                // Screen Time's status, the shields, and slips from "Open anyway" (M8).
+                AppServices.live?.deepFocus.didBecomeActive()
             }
         }
         // Squads come with the account: at launch when already signed in, and after signing in.

@@ -115,7 +115,14 @@ export function bearerToken(request: Request): string {
  * where the tests run, doesn't.)
  */
 export async function hasBearerToken(request: Request, expected: string): Promise<boolean> {
-  const presented = bearerToken(request);
+  return sameSecret(bearerToken(request), expected);
+}
+
+/**
+ * Whether `presented` equals `expected`, compared in constant time (as `hasBearerToken`). An empty
+ * `presented` never matches. M7's RevenueCat webhook compares its whole `Authorization` value.
+ */
+export async function sameSecret(presented: string, expected: string): Promise<boolean> {
   const encoder = new TextEncoder();
   const [left, right] = await Promise.all([
     crypto.subtle.digest("SHA-256", encoder.encode(presented)),

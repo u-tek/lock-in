@@ -38,6 +38,9 @@ paywall
 settings
 settings.account
 settings.notifications
+settings.deepfocus
+settings.deepfocus.plus
+settings.deepfocus.soon
 widgets.pet
 widgets.lockin
 widgets.accessory

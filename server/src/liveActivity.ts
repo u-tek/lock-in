@@ -105,7 +105,9 @@ const LATEST_TIME = 4_102_444_800; // 2100-01-01T00:00:00Z
 // checks it fits. Widen one and that test says whether it still does.
 const SHORT_ID = /^[0-9A-Za-z]{10}$/;
 const AVATAR_CODE = /^[a-z][0-9]{1,2}(?:\.[a-z][0-9]{1,2}){0,3}$/;
-const PET_CODE = /^[a-z]{1,10}\.[0-9]{1,2}$/;
+// M7: a boosted squad's pet may wear an accessory after its stage, "sprout.2.a3" (`pet.3` in the
+// shop's catalogue). Model's PetCode reads the species and stage and ignores the rest.
+const PET_CODE = /^[a-z]{1,10}\.[0-9]{1,2}(?:\.a[0-9]{1,2})?$/;
 const MAX_CHEER_KIND = 99;
 
 // Control characters and lone surrogates turn into 6-byte `\uXXXX` escapes in JSON, which would
@@ -116,7 +118,7 @@ export class LiveActivityError extends Error {
   override name = "LiveActivityError";
 }
 
-/** A pet code the parser accepts: `<species>.<stage>`, e.g. `sprout.2`. */
+/** A pet code the parser accepts: `<species>.<stage>`, e.g. `sprout.2`, optionally with an accessory, `sprout.2.a3` (M7). */
 export function isPetCode(value: unknown): value is string {
   return typeof value === "string" && PET_CODE.test(value);
 }
@@ -329,14 +331,16 @@ export function assertPayloadBudget(attributes: Attributes, state: ContentState)
  * When the activity should look stale if no update has arrived: five minutes after the last running
  * timer should end. Same rule as Swift's `ContentState.staleDate(now:)` (Model), so the app and the
  * server never disagree:
- * - only running members count (focusing, on a break, paused); done, left and slipped members don't
- *   hold the activity open, unless nobody is running, when everyone's end counts;
+ * - only running members count (focusing, on a break, paused, slipped: a slip shows while the timer
+ *   keeps running, decision 0009); done and left members don't hold the activity open, unless
+ *   nobody is running, when everyone's end counts;
  * - a paused member's end keeps moving, so it counts as `now` plus the time they have left.
  * Whole seconds, rounded up, because APNs dates are integers.
  */
 export function staleDateFor(state: ContentState, now: number): number {
   const running = state.m.filter(
-    (member) => member.s === MemberState.focusing || member.s === MemberState.break || member.s === MemberState.paused,
+    (member) =>
+      member.s === MemberState.focusing || member.s === MemberState.break || member.s === MemberState.paused || member.s === MemberState.slipped,
   );
   const considered = running.length > 0 ? running : state.m;
   let latestEnd = -Infinity;

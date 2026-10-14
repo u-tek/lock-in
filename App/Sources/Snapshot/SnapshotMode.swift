@@ -1,4 +1,5 @@
 import API
+import DeepFocus
 import LiveActivity
 import Model
 import Paywall
@@ -174,6 +175,28 @@ enum SnapshotGallery {
             // Squad alerts on, quiet hours 22:00 to 07:00 (M4).
             return AnyView(NavigationStack {
                 NotificationSettingsScreen(snapshot: .authorised)
+            })
+        case "settings.deepfocus":
+            // Plus, Screen Time approved, blocking on with four apps and a category chosen (M8).
+            return AnyView(NavigationStack {
+                DeepFocusScreen(
+                    snapshot: .preview(
+                        status: .approved,
+                        isOn: true,
+                        summary: DeepFocusSelection.Summary(applications: 4, categories: 1, webDomains: 0)
+                    ),
+                    isPlus: true
+                )
+            })
+        case "settings.deepfocus.plus":
+            // Without Plus: the offer (paywall moment 3).
+            return AnyView(NavigationStack {
+                DeepFocusScreen(snapshot: .preview(status: .notEntitled), isPlus: false)
+            })
+        case "settings.deepfocus.soon":
+            // Plus, in a build Apple hasn't approved Family Controls for yet.
+            return AnyView(NavigationStack {
+                DeepFocusScreen(snapshot: .preview(status: .notEntitled), isPlus: true)
             })
 
         // Friends (sheets, shown as screens)

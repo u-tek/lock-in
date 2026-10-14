@@ -12,6 +12,10 @@
 //
 // `owned` is what you can wear beyond the defaults: what you bought or imported, and every Plus
 // item while you have Plus.
+//
+// M7: part `pet` is the squad pet's accessories (`pet.1` scarf … `pet.6` star clip), all Plus. They
+// aren't worn by your Lockling and aren't in `owned`: Squad Boost unlocks them for a whole squad
+// (PATCH /squads/:id/pet, src/squads.ts).
 
 import catalogue from "../../fixtures/shop/catalogue.json";
 import type { AuthedContext, Context } from "./context.ts";
@@ -19,7 +23,7 @@ import { type UserRow, isCheckViolation, isUniqueViolation } from "./db.ts";
 import { HttpError, apiError, json, readObject } from "./http.ts";
 import { hasPlus } from "./squads.ts";
 
-export type ShopPart = "body" | "colour" | "eyes" | "hat";
+export type ShopPart = "body" | "colour" | "eyes" | "hat" | "pet";
 
 export interface ShopItem {
   /** `<part>.<option>`, e.g. "hat.1". */
@@ -42,6 +46,11 @@ export function shopItem(id: string): ShopItem | undefined {
   return ITEMS_BY_ID.get(id);
 }
 
+/** Whether `option` is one of the pet's accessories (`pet.<option>` in the catalogue), M7. */
+export function isPetAccessory(option: unknown): option is number {
+  return typeof option === "number" && Number.isInteger(option) && shopItem(`pet.${option}`)?.part === "pet";
+}
+
 /** The item each part of an avatar code names, by part: "b2.c0.e1.h0" -> body.2, eyes.1 (defaults left out). */
 export function avatarItemIds(code: string): Map<ShopPart, string> {
   const parts = new Map<ShopPart, string>();
@@ -54,11 +63,14 @@ export function avatarItemIds(code: string): Map<ShopPart, string> {
   return parts;
 }
 
-/** What the user can wear beyond the defaults, in catalogue order: bought or imported, and Plus items while Plus lasts. */
+/**
+ * What the user can wear beyond the defaults, in catalogue order: bought or imported, and Plus
+ * items while Plus lasts. The pet's accessories aren't worn by a Lockling, so they're never here.
+ */
 export async function ownedItems(context: Context, user: Pick<UserRow, "id" | "plus_until">): Promise<string[]> {
   const bought = new Set(await context.db.cosmeticsOf(user.id));
   const plus = hasPlus(user, context.now);
-  return SHOP_ITEMS.filter((item) => (item.plus ? plus : bought.has(item.id))).map((item) => item.id);
+  return SHOP_ITEMS.filter((item) => item.part !== "pet" && (item.plus ? plus : bought.has(item.id))).map((item) => item.id);
 }
 
 /**

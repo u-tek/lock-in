@@ -40,7 +40,8 @@ export function parsePushToStart(value: unknown): PushToStartTarget | undefined 
   return { token: value.token.toLowerCase(), env: value.env };
 }
 
-const RUNNING: readonly number[] = [MemberState.focusing, MemberState.break, MemberState.paused];
+// A slipped member is still running (decision 0009).
+const RUNNING: readonly number[] = [MemberState.focusing, MemberState.break, MemberState.paused, MemberState.slipped];
 
 /**
  * "You're locked in with Ava": whoever else is running, host first. Two are named ("Ava and Noor"),
