@@ -262,6 +262,20 @@ describe("GET /handles/:handle", () => {
   });
 });
 
+describe("DELETE /auth/session", () => {
+  test("signs this token out and leaves the account's other sessions alone", async () => {
+    const phone = await app.signIn("sub.ava");
+    const ipad = await app.signIn("sub.ava");
+    expect((await app.request("DELETE", "/auth/session", { token: phone.token })).status).toBe(204);
+    expect((await app.request("GET", "/me", { token: phone.token })).status).toBe(401);
+    expect((await app.request("DELETE", "/auth/session", { token: phone.token })).status).toBe(401);
+    expect((await app.request("GET", "/me", { token: ipad.token })).status).toBe(200);
+    expect(app.count("SELECT count(*) FROM auth_tokens")).toBe(1);
+    expect(app.count("SELECT count(*) FROM users")).toBe(1);
+    expect(logs).toContain("auth: signed out");
+  });
+});
+
 describe("DELETE /me", () => {
   async function everything() {
     const ava = await app.signIn("sub.ava", { authorizationCode: FakeApple.codeFor("sub.ava") });

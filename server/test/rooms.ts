@@ -155,6 +155,8 @@ export class FakeAPNs {
   readonly requests: APNsRequest[] = [];
   /** By device token. */
   readonly answers = new Map<string, APNsAnswer>();
+  /** By provider token (JWT): checked first, e.g. 403 ExpiredProviderToken for an old one. */
+  readonly answersForJWT = new Map<string, APNsAnswer>();
   /** Thrown for every request while set: APNs can't be reached. */
   unreachable = false;
 
@@ -179,7 +181,8 @@ export class FakeAPNs {
       aps: (JSON.parse(body) as { aps: Record<string, any> }).aps,
     });
     if (this.unreachable) throw new TypeError("Network connection lost");
-    const answer = this.answers.get(token) ?? { status: 200 };
+    const jwt = (headers.authorization ?? "").replace(/^bearer /, "");
+    const answer = this.answersForJWT.get(jwt) ?? this.answers.get(token) ?? { status: 200 };
     const responseBody = answer.reason === undefined ? null : JSON.stringify({ reason: answer.reason });
     return new Response(responseBody, { status: answer.status, headers: { "apns-id": `apns-${this.requests.length}` } });
   }) as typeof fetch;

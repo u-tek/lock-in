@@ -94,3 +94,17 @@ describe("the steps", () => {
     }
   });
 });
+
+describe("squad names (M3)", () => {
+  test("follow the name rules with a longer limit", () => {
+    expect(moderate("name", "x".repeat(13))).toBe("invalid");
+    expect(moderate("name", "x".repeat(20), { maxNameLength: 20 })).toBe("ok");
+    expect(moderate("name", " Library Goblins ", { maxNameLength: 20 })).toBe("ok");
+    expect(moderate("name", "🔒".repeat(20), { maxNameLength: 20 })).toBe("ok");
+    expect(moderate("name", "🔒".repeat(21), { maxNameLength: 20 })).toBe("invalid");
+    expect(moderate("name", "Lockin Official", { maxNameLength: 20 })).toBe("not_allowed");
+    expect(isValid("name", "line\nbreak", { maxNameLength: 20 })).toBe(false);
+    // Handles ignore it.
+    expect(isValid("handle", "a".repeat(21), { maxNameLength: 40 })).toBe(false);
+  });
+});

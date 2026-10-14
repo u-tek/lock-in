@@ -118,6 +118,36 @@ describe("the D1 schema", () => {
     expect(db.prepare("SELECT id, reporter_id FROM reports").all().map((row) => ({ ...row }))).toEqual([{ id: "Rp00000001", reporter_id: null }]);
   });
 
+  test("0003: a Live Activity token and its APNs environment come together", () => {
+    run("INSERT INTO sessions (id, host_id, created_at) VALUES ('r7Kq2xP9aL', 'Av4Nq8sT2b', 1)");
+    const join = "INSERT INTO participants (session_id, user_id, planned_min, started_at, ends_at, la_token, la_env) VALUES ('r7Kq2xP9aL', ?, 25, 1, 2, ?, ?)";
+    expect(() => run(join, "Av4Nq8sT2b", "abcd", null)).toThrow(/CHECK/);
+    expect(() => run(join, "Av4Nq8sT2b", null, "sandbox")).toThrow(/CHECK/);
+    expect(() => run(join, "Av4Nq8sT2b", "abcd", "development")).toThrow(/CHECK/);
+    run(join, "Av4Nq8sT2b", "abcd", "production");
+    run(join, "Nr2Kx7pQ1m", null, null);
+    expect(() => run("UPDATE participants SET la_token = NULL WHERE user_id = 'Av4Nq8sT2b'")).toThrow(/CHECK/);
+    run("UPDATE participants SET la_token = NULL, la_env = NULL WHERE user_id = 'Av4Nq8sT2b'");
+  });
+
+  test("0003: one running timer per user, one open room per squad", () => {
+    run("INSERT INTO sessions (id, host_id, created_at) VALUES ('s1', 'Av4Nq8sT2b', 1), ('s2', 'Av4Nq8sT2b', 1), ('s3', 'Av4Nq8sT2b', 1)");
+    const join = "INSERT INTO participants (session_id, user_id, planned_min, started_at, ends_at, ended_at) VALUES (?, 'Av4Nq8sT2b', 25, 1, 2, ?)";
+    run(join, "s1", 2);
+    run(join, "s2", null);
+    expect(() => run(join, "s3", null)).toThrow(/UNIQUE constraint failed: participants\.user_id/);
+    run(join, "s3", 2);
+
+    run("INSERT INTO squads (id, name, owner_id, created_at) VALUES ('Sq00000001', 'Goblins', 'Av4Nq8sT2b', 1)");
+    const open = "INSERT INTO sessions (id, squad_id, host_id, status, created_at, ended_at) VALUES (?, ?, 'Av4Nq8sT2b', ?, 1, ?)";
+    run(open, "q1", "Sq00000001", "ended", 2);
+    run(open, "q2", "Sq00000001", "open", null);
+    expect(() => run(open, "q3", "Sq00000001", "open", null)).toThrow(/UNIQUE constraint failed: sessions\.squad_id/);
+    // Solo sessions aren't a squad's: any number may be open.
+    run(open, "q4", null, "open", null);
+    run(open, "q5", null, "open", null);
+  });
+
   test("a session's end and its status agree", () => {
     const insert = "INSERT INTO sessions (id, host_id, status, created_at, ended_at) VALUES (?, 'Av4Nq8sT2b', ?, 1, ?)";
     expect(() => run(insert, "s1", "ended", null)).toThrow(/CHECK/);
