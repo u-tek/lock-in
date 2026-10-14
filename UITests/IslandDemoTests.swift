@@ -5,7 +5,7 @@ import XCTest
 /// only that the activity started, and writes what it saw.
 ///
 /// The app's script, from the moment its activity starts: you, Noor and Kai locked in ("+2"),
-/// Mateo joins at 12 s ("+3"), Noor cheers you at 22 s, the cheer clears at 40 s.
+/// Mateo joins at 10 s ("+3") and Noor cheers you at 20 s.
 ///
 /// Environment (from xcodebuild with a `TEST_RUNNER_` prefix): `LK_ISLAND_DIR`, where the PNGs
 /// go. Without it the test is skipped, so a plain `xcodebuild test` never runs it.
@@ -51,38 +51,36 @@ final class IslandDemoTests: XCTestCase {
         wait(until: 2)
         save("1-app")
 
-        // Home: the activity moves into the island.
+        // Home: the activity moves into the island. The simulator on CI has no GPU and draws a
+        // Live Activity slowly, so each view gets time to fill in before its picture.
         XCUIDevice.shared.press(.home)
-        wait(until: 6)
+        wait(until: 22)
         save("2-island")
 
-        // Long-press the island to expand it.
+        // Long-press the island: the squad, each with their own timer. Mateo has joined.
         expandIsland()
+        wait(until: 40)
         save("3-island-expanded")
         XCUIDevice.shared.press(.home)
 
-        // Mateo has joined: "+3".
-        wait(until: 15)
-        save("4-island-joined")
+        // Noor's cheer arrived at 20 s; the island is compact again.
+        wait(until: 50)
+        save("4-island-cheer")
 
-        // Noor's cheer, expanded.
-        wait(until: 24)
-        expandIsland()
-        save("5-island-cheer")
-        XCUIDevice.shared.press(.home)
-
-        // The Lock Screen: lock, then wake.
-        wait(until: 28)
+        // The Lock Screen: lock, then wake. The first activity asks whether to allow Live
+        // Activities from Lockin; allow, as someone trying it would.
         if pressLock() {
             sleep(2)
             _ = pressLock()
-            wait(until: 33)
-            save("6-lock-screen")
+            wait(until: 62)
+            save("5-lock-screen")
+            let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"]
+            if allow.waitForExistence(timeout: 3) {
+                allow.tap()
+            }
+            wait(until: 72)
+            save("6-lock-screen-allowed")
         }
-
-        // The cheer gone, the timers still running.
-        wait(until: 44)
-        save("7-lock-screen-later")
     }
 
     /// A file the script waits for.

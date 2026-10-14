@@ -304,6 +304,8 @@ jobs:
         if: always()
         run: |
           [[ -d build/design-out/design ]] || { echo "Nothing exported"; exit 0; }
+          # A new film replaces the old one whole, so no picture from an earlier take lingers.
+          [[ -d build/design-out/design/island ]] && rm -rf design/island
           cp -R build/design-out/design .
           # GitHub refuses files over 100 MB; never let one block the renders.
           find design -type f -size +95M -print -delete

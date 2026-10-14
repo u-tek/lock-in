@@ -9,8 +9,8 @@ import UIKit
 /// only in builds with the developer tools (`LK_DEVELOPER_TOOLS`), so it never ships.
 ///
 /// It starts a real Live Activity for "Library Goblins" (you, Noor and Kai locked in), then updates
-/// it the way the room's pushes would: Mateo joins after 12 seconds, Noor cheers you at 22, and the
-/// cheer clears at 40. The app keeps running in the background meanwhile, so the updates land
+/// it the way the room's pushes would: Mateo joins after 10 seconds and Noor cheers you at 20. Both
+/// land inside the half-minute iOS gives an app in the background. The app keeps running in the background meanwhile, so the updates land
 /// while the island and the Lock Screen are on show.
 @MainActor
 final class IslandDemo: ObservableObject {
@@ -25,11 +25,10 @@ final class IslandDemo: ObservableObject {
         AppConfiguration.main.developerToolsEnabled && UserDefaults.standard.bool(forKey: "LKIslandDemo")
     }
 
-    private static let joinsAt: TimeInterval = 12
-    private static let cheersAt: TimeInterval = 22
-    private static let cheerEndsAt: TimeInterval = 40
-    /// How long the app asks to keep running in the background.
-    private static let lasts: TimeInterval = 75
+    private static let joinsAt: TimeInterval = 10
+    private static let cheersAt: TimeInterval = 20
+    /// How long the app asks to keep running in the background: iOS allows about 30 seconds.
+    private static let lasts: TimeInterval = 28
 
     private static let me = "Av4Nq8sT2b"
     private static let noor = "Nr2Kx7pQ1m"
@@ -74,9 +73,6 @@ final class IslandDemo: ObservableObject {
         await pause(until: start.addingTimeInterval(Self.cheersAt))
         let cheer = LockinAttributes.ContentState.Cheer(f: Self.noor, t: Self.me, k: 1, at: Date().timeIntervalSince1970)
         await controller.update(activity, state: Self.state(v: 3, at: start, mateo: true, cheer: cheer))
-
-        await pause(until: start.addingTimeInterval(Self.cheerEndsAt))
-        await controller.update(activity, state: Self.state(v: 4, at: start, mateo: true, cheer: nil))
 
         await pause(until: start.addingTimeInterval(Self.lasts))
         endBackgroundTask()
