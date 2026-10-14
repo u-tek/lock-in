@@ -108,6 +108,9 @@ enum SnapshotGallery {
             ) { engine, plus, social in
                 HomeScreen(engine: engine, plus: plus, social: social, squadID: SnapshotData.squad.id)
             })
+        case "home.custom":
+            // Lockin Plus's custom length (M7), from Home's Custom tile, shown as a screen.
+            return AnyView(CustomLengthSheet(minutes: .constant(45)))
         case "session":
             // The first session, so the "lock your phone" hint shows.
             return AnyView(PreviewModels(phase: SnapshotData.running(now: now), stats: SnapshotData.newcomer) { engine, plus, social in
@@ -210,6 +213,11 @@ enum SnapshotGallery {
             return AnyView(PreviewModels(stats: SnapshotData.regular, account: .signedIn(SnapshotData.me)) { engine, plus, social in
                 SettingsScreen(engine: engine, plus: plus, social: social, onClose: {})
             })
+        case "settings.plus":
+            // Plus on (M7): its status, and the App Store's subscription sheet a tap away.
+            return AnyView(PreviewModels(stats: SnapshotData.regular, isPlus: true, account: .signedIn(SnapshotData.me)) { engine, plus, social in
+                SettingsScreen(engine: engine, plus: plus, social: social, onClose: {})
+            })
         case "settings.notifications":
             // Squad alerts on, quiet hours 22:00 to 07:00 (M4).
             return AnyView(NavigationStack {
@@ -310,12 +318,58 @@ enum SnapshotGallery {
                 friends: SnapshotData.friends,
                 squads: [SnapshotData.squad],
                 leaderboards: [SnapshotData.squad.id: SnapshotData.leaderboard]
-            ) { _, _, social in
+            ) { engine, plus, social in
                 NavigationStack {
                     SquadDetailScreen(
                         squads: social.squads,
                         friends: social.friends,
+                        plus: plus,
+                        avatar: engine.avatar,
                         squadID: SnapshotData.squad.id,
+                        myID: SnapshotData.me.id,
+                        invite: SnapshotData.squadCode
+                    )
+                }
+            })
+        case "squads.detail.boosted":
+            // Squad Boost (M7): Sam has Plus, so the teen sprout wears the party hat; a freeze
+            // saved the day before yesterday, and Sam has one left this month.
+            return AnyView(PreviewModels(
+                stats: SnapshotData.regular,
+                isPlus: true,
+                account: .signedIn(SnapshotData.me),
+                friends: SnapshotData.friends,
+                squads: [SnapshotData.boostedSquad(now: now)],
+                leaderboards: [SnapshotData.squad.id: SnapshotData.leaderboard]
+            ) { engine, plus, social in
+                NavigationStack {
+                    SquadDetailScreen(
+                        squads: social.squads,
+                        friends: social.friends,
+                        plus: plus,
+                        avatar: engine.avatar,
+                        squadID: SnapshotData.squad.id,
+                        myID: SnapshotData.me.id,
+                        invite: SnapshotData.squadCode
+                    )
+                }
+            })
+        case "squads.review":
+            // App Review's squad (docs/launch/app-review-notes.md §3): Demo Buddy, labelled as a
+            // test bot, and the button that asks it to lock in.
+            return AnyView(PreviewModels(
+                stats: SnapshotData.regular,
+                account: .signedIn(SnapshotData.me),
+                squads: [SnapshotData.reviewSquad],
+                leaderboards: [SnapshotData.reviewSquad.id: SnapshotData.reviewLeaderboard]
+            ) { engine, plus, social in
+                NavigationStack {
+                    SquadDetailScreen(
+                        squads: social.squads,
+                        friends: social.friends,
+                        plus: plus,
+                        avatar: engine.avatar,
+                        squadID: SnapshotData.reviewSquad.id,
                         myID: SnapshotData.me.id,
                         invite: SnapshotData.squadCode
                     )
@@ -328,11 +382,13 @@ enum SnapshotGallery {
                 account: .signedIn(SnapshotData.me),
                 friends: SnapshotData.friends,
                 squads: [SnapshotData.eggSquad]
-            ) { _, _, social in
+            ) { engine, plus, social in
                 NavigationStack {
                     SquadDetailScreen(
                         squads: social.squads,
                         friends: social.friends,
+                        plus: plus,
+                        avatar: engine.avatar,
                         squadID: SnapshotData.eggSquad.id,
                         myID: SnapshotData.me.id,
                         invite: SnapshotData.squadCode
@@ -523,6 +579,59 @@ enum SnapshotData {
         egg.pet = SquadPet(species: "ember", stage: 0, xp: 0, mood: PetMood.hungry.rawValue)
         egg.streak = SquadStreak(count: 0, countedToday: false, doneToday: 0, needed: 2)
         return egg
+    }
+
+    /// The squad with Squad Boost on (M7): the teen sprout in its party hat, and a streak a freeze
+    /// kept going the day before yesterday, with one of Sam's two left this month.
+    static func boostedSquad(now: Date) -> Squad {
+        var boosted = Self.squad
+        boosted.openSessionId = nil
+        boosted.boosted = true
+        boosted.pet.accessory = PetAccessory.partyHat.rawValue
+        let zone = boosted.timeZone
+        let frozen = SquadStreak.day(of: now.addingTimeInterval(-2 * 86_400), in: zone)
+        boosted.streak = SquadStreak(count: 6, countedToday: true, doneToday: 2, needed: 2, frozenDays: [frozen], freezes: 1)
+        return boosted
+    }
+
+    /// Demo Buddy, the server's test bot (docs/launch/app-review-notes.md §3).
+    static var demoBuddy: SquadMember {
+        SquadMember(
+            id: "DemoBuddy0",
+            handle: "demobuddy",
+            displayName: "Demo Buddy",
+            avatarCode: "b2.c5.e4.h3",
+            joinedAt: 1_791_900_060,
+            isBot: true
+        )
+    }
+
+    /// A Review Squad just made with the review code: Sam and Demo Buddy, and a fresh egg.
+    static var reviewSquad: Squad {
+        Squad(
+            id: "sqReview01",
+            name: "Review Squad",
+            ownerId: me.id,
+            members: [
+                SquadMember(id: me.id, handle: me.handle, displayName: me.displayName, avatarCode: me.avatarCode, joinedAt: 1_791_900_000),
+                demoBuddy,
+            ],
+            openSessionId: nil,
+            muted: false,
+            pet: SquadPet(species: "puff", stage: 0, xp: 0, mood: PetMood.hungry.rawValue),
+            streak: SquadStreak(count: 0, countedToday: false, doneToday: 0, needed: 1),
+            tz: "Europe/London"
+        )
+    }
+
+    /// The Review Squad's week: Sam only, since Demo Buddy is never on a leaderboard.
+    static var reviewLeaderboard: Leaderboard {
+        Leaderboard(
+            weekStart: "2026-10-12",
+            startsAt: 1_791_759_600,
+            endsAt: 1_792_364_400,
+            entries: [Leaderboard.Entry(userId: me.id, minutes: 25, sessions: 1)]
+        )
     }
 
     /// The squad's week: Noor ahead, Sam second.

@@ -21,6 +21,8 @@ struct PetLabScreen: View {
         case ember
         case pebble
         case liveActivity = "liveactivity"
+        /// Squad Boost's accessories (M7).
+        case accessories
 
         var id: String { rawValue }
     }
@@ -41,6 +43,7 @@ struct PetLabScreen: View {
                 case .ember: SpeciesSection(species: .ember)
                 case .pebble: SpeciesSection(species: .pebble)
                 case .liveActivity: LiveActivitySection()
+                case .accessories: AccessoriesSection()
                 }
             }
         }
@@ -279,6 +282,83 @@ private struct SmallPets: View {
                         ForEach(PetMood.allCases, id: \.self) { mood in
                             PetView(code: PetLab.code(species, 2), mood: mood.rawValue, size: PetLab.petRowSize)
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Accessories (M7)
+
+/// Squad Boost's six accessories on every species: as teens at the grid's size, then every stage
+/// wearing the party hat, then at the Live Activity's size on the Lock Screen and in Always-On.
+private struct AccessoriesSection: View {
+    private static let gridSize: CGFloat = 48
+
+    var body: some View {
+        Section {
+            Grid(alignment: .center, horizontalSpacing: LKSpacing.xs, verticalSpacing: LKSpacing.s) {
+                ForEach(PetSpecies.allCases, id: \.self) { species in
+                    GridRow {
+                        ForEach(PetAccessory.allCases) { accessory in
+                            PetView(code: Self.code(species, 2, accessory), mood: PetMood.happy.rawValue, size: Self.gridSize)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, LKSpacing.s)
+            .frame(maxWidth: .infinity)
+            .listRowInsets(EdgeInsets(top: 0, leading: LKSpacing.xs, bottom: 0, trailing: LKSpacing.xs))
+
+            Grid(alignment: .center, horizontalSpacing: LKSpacing.s, verticalSpacing: LKSpacing.s) {
+                ForEach(PetSpecies.allCases, id: \.self) { species in
+                    GridRow {
+                        ForEach(PetLab.stages, id: \.self) { stage in
+                            PetView(code: Self.code(species, stage, .partyHat), mood: PetMood.content.rawValue, size: Self.gridSize)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, LKSpacing.s)
+            .frame(maxWidth: .infinity)
+
+            Text("Lock Screen")
+            SmallAccessories()
+                .padding(LKSpacing.m)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: LKRadius.card, style: .continuous))
+                .activityStageRow(.wallpaper)
+            Text("Always-On")
+            SmallAccessories()
+                .padding(LKSpacing.m)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: LKRadius.card, style: .continuous))
+                .environment(\.isLuminanceReduced, true)
+                .environment(\.colorScheme, .dark)
+                .activityStageRow(.dimmedWallpaper)
+        } header: {
+            Text("Accessories")
+        } footer: {
+            Text("Squad Boost: scarf, party hat, flower crown, glasses, bow and star clip, on a teen of each species; then every stage in the party hat (the egg wears nothing); then 18 points, as the Live Activity's pet row draws them.")
+        }
+    }
+
+    static func code(_ species: PetSpecies, _ stage: Int, _ accessory: PetAccessory) -> PetCode {
+        PetCode(species: species.rawValue, stage: stage, accessory: accessory.rawValue)
+    }
+}
+
+/// Each species in a row, wearing each accessory, at the pet row's size.
+private struct SmallAccessories: View {
+    var body: some View {
+        Grid(horizontalSpacing: LKSpacing.s, verticalSpacing: LKSpacing.s) {
+            ForEach(PetSpecies.allCases, id: \.self) { species in
+                GridRow {
+                    ForEach(PetAccessory.allCases) { accessory in
+                        PetView(
+                            code: AccessoriesSection.code(species, 3, accessory),
+                            mood: PetMood.content.rawValue,
+                            size: PetLab.petRowSize
+                        )
                     }
                 }
             }

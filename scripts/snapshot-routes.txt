@@ -13,6 +13,7 @@ onboarding.notifications
 onboarding.ready
 home
 home.squad
+home.custom
 session
 session.paused
 session.disabled
@@ -36,6 +37,8 @@ squads.list
 squads.new
 squads.detail
 squads.detail.egg
+squads.detail.boosted
+squads.review
 squads.join
 squads.joined
 paywall
@@ -43,6 +46,7 @@ shop
 shop.bought
 settings
 settings.account
+settings.plus
 settings.notifications
 settings.deepfocus
 settings.deepfocus.plus
@@ -76,6 +80,7 @@ lab.pets.sprout
 lab.pets.ember
 lab.pets.pebble
 lab.pets.liveactivity
+lab.pets.accessories
 store.1
 store.2
 store.3

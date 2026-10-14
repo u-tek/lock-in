@@ -143,7 +143,7 @@ struct HomeScreen: View {
                 CustomLengthSheet(minutes: $minutes)
             case .squad(let id):
                 NavigationStack {
-                    SquadDetailScreen(squads: squads, friends: friends, squadID: id, myID: account.user?.id)
+                    SquadDetailScreen(squads: squads, friends: friends, plus: plus, avatar: engine.avatar, squadID: id, myID: account.user?.id)
                         .toolbar {
                             ToolbarItem(placement: .confirmationAction) {
                                 Button("Done") { self.sheet = nil }
@@ -157,6 +157,12 @@ struct HomeScreen: View {
             }
         }
         .errorAlert("Couldn't lock in", message: $failure)
+        // Custom lengths are Plus's (M7): when Plus ends, back to 25.
+        .onChange(of: plus.isPlus) { _, isPlus in
+            if !isPlus, !SessionPreset.standard.contains(where: { $0.minutes == minutes }) {
+                minutes = SessionPreset.twentyFive.minutes
+            }
+        }
         // An invite link opens Friends, once no session covers Home.
         .onChange(of: friends.pendingInviteCode, initial: true) {
             openPendingInvite()
@@ -433,17 +439,24 @@ private struct DurationTile<Content: View>: View {
     }
 }
 
-/// Lockin Plus: any length from 5 minutes to the 4-hour cap.
-private struct CustomLengthSheet: View {
+/// Lockin Plus: any length from 5 minutes to the 4-hour cap, in fives. Done sets it on Home's
+/// picker, and Lock in starts a session that long (snapshots: `home.custom`).
+struct CustomLengthSheet: View {
     @Binding var minutes: Int
     @State private var draft: Int
     @Environment(\.dismiss) private var dismiss
 
-    private static let choices = Array(stride(from: 5, through: SessionPreset.customRange.upperBound, by: 5))
+    static let choices = Array(stride(from: 5, through: SessionPreset.customRange.upperBound, by: 5))
 
     init(minutes: Binding<Int>) {
         _minutes = minutes
-        _draft = State(initialValue: minutes.wrappedValue)
+        _draft = State(initialValue: Self.nearestChoice(to: minutes.wrappedValue))
+    }
+
+    /// The wheel's value nearest a length: 25 stays 25, 7 becomes 5.
+    static func nearestChoice(to minutes: Int) -> Int {
+        let rounded = Int((Double(minutes) / 5).rounded()) * 5
+        return min(max(rounded, choices.first ?? 5), choices.last ?? SessionPreset.customRange.upperBound)
     }
 
     var body: some View {

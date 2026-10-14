@@ -95,7 +95,7 @@ Live Activity can be seen with one phone. It's also how you test squads alone on
 | Blocked list | Settings → Account → Blocked | M2, planned |
 | Mute a squad | Squad → Mute | M3, planned |
 | Quiet hours | [OWNER: where the setting lives] | M4, planned |
-| Restore purchases | Paywall → Restore (Settings → Lockin Plus opens the paywall) | Shipped (M1) |
+| Restore purchases | Settings → Restore purchases, and Paywall → Restore | Shipped (M1; Settings' own row M7) |
 | Terms and Privacy links | Paywall footer | Shipped, but the links still point at `example.com` (`PaywallView.swift`) |
 | Support contact | Support URL, and [OWNER: Settings → About → Support, once added] | M9 |
 

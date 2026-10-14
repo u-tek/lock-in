@@ -111,12 +111,14 @@ struct StoreScreenshot: View {
                 friends: SnapshotData.friends,
                 squads: [SnapshotData.squad],
                 leaderboards: [SnapshotData.squad.id: SnapshotData.leaderboard]
-            ) { _, _, social in
+            ) { engine, plus, social in
                 PhoneStandIn(scale: Self.phoneScale, background: Color(uiColor: .systemGroupedBackground)) {
                     NavigationStack {
                         SquadDetailScreen(
                             squads: social.squads,
                             friends: social.friends,
+                            plus: plus,
+                            avatar: engine.avatar,
                             squadID: SnapshotData.squad.id,
                             myID: SnapshotData.me.id,
                             invite: SnapshotData.squadCode

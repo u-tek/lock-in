@@ -70,8 +70,9 @@ public enum LiveActivitySamples {
         )
     }
 
-    /// `squad-4`: a free squad, everyone focusing, so the compact island reads "+3". Mateo's
-    /// 90 minutes needs the hours digit. Their pet is a baby sprout having a happy day.
+    /// `squad-4`: everyone focusing, so the compact island reads "+3". Mateo's 90 minutes needs
+    /// the hours digit. Their pet is a baby sprout having a happy day, in the bow someone picked
+    /// with Squad Boost (M7: `.a5`), so the Lab shows an accessory in every presentation.
     public static func squadOfFour(now: Date = Date()) -> LiveActivitySample {
         let t = now.timeIntervalSince1970
         let focusing = MemberState.focusing.rawValue
@@ -87,7 +88,7 @@ public enum LiveActivitySamples {
                     Member(i: "Ka9Lm3Vx0c", n: "Kai", a: "b2.c4.e1.h2", s: focusing, b: t - 1_200, e: t + 300),
                     Member(i: "Mt5Rw1Zy8d", n: "Mateo", a: "b4.c1.e3.h1", s: focusing, b: t - 60, e: t + 5_340),
                 ],
-                p: LockinAttributes.ContentState.Pet(k: "sprout.1", md: 3, x: 0.2)
+                p: LockinAttributes.ContentState.Pet(k: "sprout.1.a5", md: 3, x: 0.2)
             )
         )
     }

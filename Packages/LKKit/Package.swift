@@ -90,7 +90,10 @@ let package = Package(
         .testTarget(name: "CreatureTests", dependencies: ["Creature", "Model"]),
         .testTarget(name: "LiveActivityTests", dependencies: ["LiveActivity", "Model"]),
         .testTarget(name: "SessionEngineTests", dependencies: ["SessionEngine", "Core", "Model", "LiveActivity", "API"]),
-        .testTarget(name: "PaywallTests", dependencies: ["Paywall", "Creature", "Model"]),
+        .testTarget(
+            name: "PaywallTests",
+            dependencies: ["Paywall", "Creature", "Model", .product(name: "RevenueCat", package: "purchases-ios-spm")]
+        ),
         .testTarget(name: "APITests", dependencies: ["API", "Core", "Model"]),
         .testTarget(name: "SocialTests", dependencies: ["Social", "API", "Core", "Model"]),
         .testTarget(name: "DeepFocusTests", dependencies: ["DeepFocus", "Core", "Model"]),

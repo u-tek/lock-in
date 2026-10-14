@@ -74,6 +74,66 @@ import Testing
     }
 }
 
+/// Lockin Plus on the account (M7): `User.plusUntil` counts as much as this Apple Account's
+/// purchases. Without a RevenueCat key nothing here reaches RevenueCat or the App Store.
+@MainActor
+@Suite struct AccountPlusTests {
+    @Test func withoutAKeyItsStoreKitAsBefore() {
+        let store = PlusStore(bundleID: "app.lockin")
+        #expect(!store.usesRevenueCat)
+        #expect(store.revenueCat == nil)
+        #expect(!PlusStore(bundleID: "app.lockin", revenueCatKey: nil).usesRevenueCat)
+        #expect(!PlusStore(bundleID: "app.lockin", revenueCatKey: "  \n").usesRevenueCat)
+        #expect(store.productIDs == ["app.lockin.plus.yearly", "app.lockin.plus.monthly", "app.lockin.plus.lifetime"])
+        #expect(!store.hasPurchasedPlus)
+        #expect(store.afterPurchase == nil)
+        // A key makes a RevenueCat store, which touches nothing until `load()`.
+        let withKey = PlusStore(bundleID: "app.lockin", revenueCatKey: " appl_TestKey ")
+        #expect(withKey.usesRevenueCat)
+        #expect(withKey.revenueCat?.isConfigured == false)
+        #expect(withKey.updatesTask == nil)
+    }
+
+    @Test func plusOnTheAccountCounts() {
+        let store = PlusStore(bundleID: "app.lockin")
+        let now = Date().timeIntervalSince1970
+        store.noteAccount(id: "u1Av4Nq8sT", plusUntil: now + 86_400)
+        #expect(store.isPlus)
+        #expect(!store.hasPurchasedPlus)
+        #expect(!store.isLifetimeOnAccount)
+
+        // Ran out, or signed out.
+        store.noteAccount(id: "u1Av4Nq8sT", plusUntil: now - 60)
+        #expect(!store.isPlus)
+        store.noteAccount(id: "u1Av4Nq8sT", plusUntil: now + 86_400)
+        store.noteAccount(id: nil, plusUntil: nil)
+        #expect(!store.isPlus)
+
+        // Lifetime is the year 9999.
+        store.noteAccount(id: "u1Av4Nq8sT", plusUntil: 253_402_300_799)
+        #expect(store.isPlus)
+        #expect(store.isLifetimeOnAccount)
+    }
+
+    @Test func thePreviewKeepsItsPlus() {
+        let plus = PlusStore.preview(isPlus: true)
+        plus.noteAccount(id: nil, plusUntil: nil)
+        #expect(plus.isPlus)
+        let free = PlusStore.preview()
+        free.noteAccount(id: "u1", plusUntil: Date().timeIntervalSince1970 + 60)
+        #expect(free.isPlus)
+    }
+
+    @Test func accountPlusRunsUntilPlusUntil() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(!PlusStore.accountHasPlus(until: nil, now: now))
+        #expect(!PlusStore.accountHasPlus(until: 1_800_000_000, now: now))
+        #expect(PlusStore.accountHasPlus(until: 1_800_000_001, now: now))
+        #expect(!PlusStore.accountHasPlus(until: Double.infinity, now: now))
+        #expect(!PlusStore.accountHasPlus(until: -Double.infinity, now: now))
+    }
+}
+
 @Suite struct EntitlementTests {
     private let ids: Set<String> = ["app.lockin.plus.yearly", "app.lockin.plus.monthly", "app.lockin.plus.lifetime"]
     private let now = Date(timeIntervalSince1970: 1_800_000_000)

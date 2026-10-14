@@ -6,6 +6,7 @@ import Model
 import Paywall
 import SessionEngine
 import Social
+import StoreKit
 import SwiftUI
 import UIKit
 
@@ -34,6 +35,10 @@ struct SettingsScreen: View {
     @State private var isDeleting = false
     @State private var failure: String? = nil
     @State private var versionTaps = 0
+    /// Lockin Plus (M7): restoring purchases from here, and the App Store's subscription sheet.
+    @State private var isRestoring = false
+    @State private var restoreNote: String? = nil
+    @State private var showsManageSubscriptions = false
 
     init(engine: SessionEngine, plus: PlusStore, social: SocialModels, onClose: @escaping () -> Void) {
         self.engine = engine
@@ -54,22 +59,7 @@ struct SettingsScreen: View {
             List {
                 accountSection
 
-                Section {
-                    Button {
-                        showsPaywall = true
-                    } label: {
-                        LabeledContent {
-                            Text(plus.isPlus ? "Active" : "Try free")
-                        } label: {
-                            Label {
-                                Text("Lockin Plus")
-                                    .foregroundStyle(LKColor.textPrimary)
-                            } icon: {
-                                LKIconTile(systemName: LockinSymbol.plus, color: LockinColour.plus)
-                            }
-                        }
-                    }
-                }
+                plusSection
 
                 Section {
                     // Squad alerts and quiet hours (M4).
@@ -133,6 +123,7 @@ struct SettingsScreen: View {
             }
         }
         .lockinPaywall(isPresented: $showsPaywall, store: plus, avatar: engine.avatar)
+        .manageSubscriptionsSheet(isPresented: $showsManageSubscriptions)
         .sheet(isPresented: $editsLockling) {
             EditLocklingSheet(engine: engine, plus: plus, owned: social.shop.owned)
         }
@@ -152,6 +143,68 @@ struct SettingsScreen: View {
             Text("This deletes your friends and history from the Lockin server, and can't be undone. Your Lockling and sessions on this iPhone stay.")
         }
         .errorAlert("Couldn't delete your account", message: $failure)
+    }
+
+    // MARK: - Lockin Plus (M7)
+
+    /// Plus's status, which opens the paywall; with Plus, the App Store's subscription sheet; without,
+    /// restoring purchases (App Review asks for a way to restore).
+    private var plusSection: some View {
+        Section {
+            Button {
+                showsPaywall = true
+            } label: {
+                LabeledContent {
+                    Text(plusStatus)
+                } label: {
+                    Label {
+                        Text("Lockin Plus")
+                            .foregroundStyle(LKColor.textPrimary)
+                    } icon: {
+                        LKIconTile(systemName: LockinSymbol.plus, color: LockinColour.plus)
+                    }
+                }
+            }
+            if plus.isPlus {
+                if !plus.isLifetimeOnAccount {
+                    Button("Manage subscription") {
+                        showsManageSubscriptions = true
+                    }
+                }
+            } else {
+                Button(action: restorePurchases) {
+                    HStack {
+                        Text("Restore purchases")
+                        if isRestoring {
+                            Spacer()
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(isRestoring)
+            }
+        } footer: {
+            if let restoreNote {
+                Text(restoreNote)
+            }
+        }
+    }
+
+    /// "Active", "Lifetime" or "Try free".
+    private var plusStatus: String {
+        guard plus.isPlus else { return "Try free" }
+        return plus.isLifetimeOnAccount ? "Lifetime" : "Active"
+    }
+
+    private func restorePurchases() {
+        guard !isRestoring else { return }
+        isRestoring = true
+        restoreNote = nil
+        Task {
+            await plus.restore()
+            isRestoring = false
+            restoreNote = plus.isPlus ? nil : "This Apple Account hasn't bought Lockin Plus."
+        }
     }
 
     // MARK: - Account

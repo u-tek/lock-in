@@ -95,7 +95,7 @@ struct FriendsScreen: View {
                 await refresh()
             }
             .navigationDestination(for: SquadLink.self) { link in
-                SquadDetailScreen(squads: squads, friends: friends, squadID: link.id, myID: account.user?.id)
+                SquadDetailScreen(squads: squads, friends: friends, plus: plus, avatar: avatar, squadID: link.id, myID: account.user?.id)
             }
             .confirmationDialog(
                 Text("Remove \(removing?.name ?? "")?"),
@@ -201,11 +201,17 @@ struct FriendsScreen: View {
 
     /// Free, and already in a squad: a second one is Plus.
     private var needsPlusForNewSquad: Bool {
-        !plus.isPlus && squads.squads.count >= Self.freeSquads
+        !plus.isPlus && countedSquads >= Self.freeSquads
     }
 
     private var isAtPlusLimit: Bool {
-        plus.isPlus && squads.squads.count >= Self.plusSquads
+        plus.isPlus && countedSquads >= Self.plusSquads
+    }
+
+    /// The squads the limits count: a Review Squad, with Demo Buddy in it, doesn't
+    /// (docs/launch/app-review-notes.md §3), as on the server.
+    private var countedSquads: Int {
+        squads.squads.filter { !$0.hasBot }.count
     }
 
     private func newSquad() {

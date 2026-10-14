@@ -69,7 +69,7 @@ public final class PlusStore: ObservableObject {
     @Published private(set) var products: [PlusPlan: Product] = [:]
     /// RevenueCat's own prices, for a package without a StoreKit 2 product behind it.
     @Published private(set) var revenueCatPrices: [PlusPlan: String] = [:]
-    @Published private(set) var revenueCatYearlyPerMonth: String?
+    @Published private(set) var revenueCatYearlyPerMonth: String? = nil
     /// Whether the yearly plan's free trial is on offer to this Apple Account. Assumed until the
     /// products load: the fallback prices advertise it too.
     @Published private(set) var isTrialAvailable = true
@@ -79,7 +79,7 @@ public final class PlusStore: ObservableObject {
     @Published public private(set) var hasPurchasedPlus: Bool
     /// The signed-in Lockin account's Plus, as the server last said (`User.plusUntil`, Unix
     /// seconds; lifetime is year 9999).
-    @Published public private(set) var accountPlusUntil: Double?
+    @Published public private(set) var accountPlusUntil: Double? = nil
     /// The Lockin account RevenueCat knows this person as; nil when signed out (anonymous).
     private(set) var accountID: String?
 
