@@ -1,3 +1,4 @@
+import Creature
 import DesignSystem
 import SwiftUI
 
@@ -7,12 +8,14 @@ import SwiftUI
 // - No animation modifiers: the system ignores them. Only content transitions animate.
 // - Countdowns are `Text(timerInterval:)` and progress is `ProgressView(timerInterval:)`, so they
 //   tick on the device with no pushes.
-// - No images from the network or asset catalogues: SF Symbols and shapes only.
-// - With `isLuminanceReduced` (Always-On) nothing glows: monograms become outlines, bars dim.
+// - No images from the network or asset catalogues: SF Symbols and shapes only. Members are
+//   Locklings (`CreatureView`), drawn in shapes from their avatar codes.
+// - With `isLuminanceReduced` (Always-On) nothing glows: Locklings become outlines, bars dim.
+// - No padding of our own inside the island: the system's region margins place everything.
 //
 // The look is design/SYSTEM.md's: system colours (the member states come from `LKMemberTone`),
 // text in the hierarchical styles so it stays vibrant on the Lock Screen, and SF Pro through
-// Dynamic Type text styles. Only the monograms' initials are SF Rounded, as in Contacts.
+// Dynamic Type text styles.
 
 /// Type for the Live Activity: Dynamic Type text styles, so it sits beside Apple's own activities
 /// and grows with the reader's text size, as far as each presentation has room for
@@ -26,7 +29,7 @@ enum ActivityFont {
     static let subheadline = LKFont.subheadline.weight(.medium)
     /// "1 of 6 locked in" beside or under the squad name, and "+2": Footnote medium.
     static let status = LKFont.footnote.weight(.medium)
-    /// Names under monograms, and the pet row: Caption medium.
+    /// Names under Locklings, and the pet row: Caption medium.
     static let caption = LKFont.caption.weight(.medium)
 }
 
@@ -35,10 +38,13 @@ enum ActivityFont {
 enum ActivityTimer {
     /// Your countdown on the Lock Screen: Title 2 semibold.
     static let lockScreen = LKTypeStyle.timerLockScreen
-    /// Your countdown in the Dynamic Island, compact and expanded: Body semibold.
+    /// Your countdown in the compact island: Body semibold, narrow enough to sit snug against
+    /// the camera.
     static let island = LKTypeStyle.timerIsland
-    /// Squadmates' countdowns under their monograms and in the island's chips: Subheadline
-    /// semibold, a step under yours.
+    /// Your countdown beside the camera in the expanded island: Title 2 semibold, the Lock
+    /// Screen's size, so the time is the biggest thing there.
+    static let expanded = LKTypeStyle.timerLockScreen
+    /// Squadmates' countdowns under their Locklings: Subheadline semibold, a step under yours.
     static let squadmate = LKTypeStyle.timerSquadmate
     /// Your countdown beside the squad name in StandBy: 40 points, as large as fits beside it.
     static let standBySquad = LKTypeStyle.timerStandBySmall
@@ -46,7 +52,7 @@ enum ActivityTimer {
     static let smartStack = LKTypeStyle.timerLockScreen
 
     /// StandBy's solo hero: 72 points, unless the timer needs its hours digit. "1:29:59" at 72
-    /// points is about 270 points wide, which beside the monogram is more than an iPhone has.
+    /// points is about 270 points wide, which beside the Lockling is more than an iPhone has.
     static func standBySolo(for countdown: LiveActivityPresentation.Countdown) -> LKTypeStyle {
         countdown.needsHours ? .timerStandBySmall : .timerStandBy
     }
@@ -68,23 +74,26 @@ enum ActivityTextSize {
     static let fixedRegion = ...DynamicTypeSize.large
 }
 
-/// Monogram sizes and margins per presentation.
+/// Lockling sizes and margins per presentation. A Lockling fills its square and stays inside it
+/// in every pose, so these are the sizes laid out, with no padding round them. From 28 points up
+/// it draws its hat and what it's holding; under that, just the lock and its face.
 enum ActivityMetrics {
-    /// Compact leading and minimal: the island is 36.67 points tall, and a minimal presentation
-    /// must fit 45 × 36.67 (SPEC.md §3).
-    static let islandBadge: CGFloat = 22
+    /// Compact leading and minimal: the island is 36.67 points tall, the HIG's limited-width
+    /// presentations are a 28-point circle, and a minimal presentation must fit 45 × 36.67
+    /// (SPEC.md §3). 24 sits inside all three with room to breathe.
+    static let islandCreature: CGFloat = 24
     /// Beside the camera in the expanded island.
-    static let expandedBadge: CGFloat = 40
-    /// The expanded island's squad chips. Under `MemberBadge.symbolOnlyBelow`, so they show the
-    /// state's symbol; the name is right beside it.
-    static let expandedChipBadge: CGFloat = 22
+    static let expandedCreature: CGFloat = 44
+    /// The expanded island's squad row: just big enough to show hats and props.
+    static let expandedRowCreature: CGFloat = 30
     /// The Lock Screen's squad row: six fit across an iPhone SE.
-    static let lockScreenRowBadge: CGFloat = 34
-    /// The solo Lock Screen: the height of the headline and status line beside it.
-    static let soloBadge: CGFloat = 44
-    static let soloStandByBadge: CGFloat = 64
+    static let lockScreenRowCreature: CGFloat = 34
+    /// The solo Lock Screen.
+    static let soloCreature: CGFloat = 52
+    /// StandBy's solo layout, beside the hero timer and about as tall.
+    static let soloStandByCreature: CGFloat = 84
     /// The Apple Watch Smart Stack.
-    static let smartStackBadge: CGFloat = 24
+    static let smartStackCreature: CGFloat = 24
     /// A member column never grows wider than this, so a squad of two doesn't sprawl.
     static let columnMaxWidth: CGFloat = 72
     /// The Lock Screen's side margin: Apple's standard layout margin for Live Activities there
@@ -92,9 +101,10 @@ enum ActivityMetrics {
     /// above and below. The one exception to the 4-point grid; the value is Apple's, not ours.
     static let lockScreenMargin: CGFloat = 14
 
-    /// Every monogram size the presentations draw, for the tests.
-    static let badgeSizes: [CGFloat] = [
-        islandBadge, expandedBadge, expandedChipBadge, lockScreenRowBadge, soloBadge, soloStandByBadge, smartStackBadge,
+    /// Every Lockling size the presentations draw, for the tests.
+    static let creatureSizes: [CGFloat] = [
+        islandCreature, expandedCreature, expandedRowCreature, lockScreenRowCreature, soloCreature,
+        soloStandByCreature, smartStackCreature,
     ]
 }
 
@@ -143,7 +153,7 @@ struct CountdownText: View {
         /// Always-On, the Smart Stack and the dark Lock Screen. On the light Lock Screen it
         /// resolves to primary (`resolve(_:for:in:)`).
         case tone
-        /// The primary text style: squadmates' times, whose monograms already carry the colour.
+        /// The primary text style: squadmates' times, whose Locklings already show their state.
         case primary
         /// The secondary text style. Words ("Done", "Left") always take it, whatever was asked:
         /// a finished member steps back.
@@ -197,8 +207,8 @@ struct CountdownText: View {
 
     /// The ink a countdown is drawn in. A word is always secondary. The state colours are made for
     /// black: on the light Lock Screen's default background teal, orange and green are under 3:1 as
-    /// text, so your own time takes the primary style there. The monogram, its status badge and the
-    /// bar still carry the colour.
+    /// text, so your own time takes the primary style there. The Lockling's pose and the bar still
+    /// carry the state.
     static func resolve(_ ink: Ink, for countdown: LiveActivityPresentation.Countdown, in scheme: ColorScheme) -> Ink {
         if countdown.staticText != nil { return .secondary }
         if ink == .tone && scheme == .light { return .primary }
@@ -261,17 +271,18 @@ struct SessionProgressBar: View {
     }
 }
 
-/// A member as a column, like a share sheet's people: monogram, name, countdown. One VoiceOver
-/// element that names them, says their state and reads a running timer as its value.
+/// A member as a column, like a share sheet's people: their Lockling, name and countdown. One
+/// VoiceOver element that names them, says their state and reads a running timer as its value.
 ///
-/// About 68 points tall at the default text size: monogram 34 + 2 + name 14 + countdown 18.
+/// About 70 points tall at the default text size on the Lock Screen: Lockling 34 + 2 + name 14.3
+/// + countdown 18; 66 in the expanded island's 30-point row.
 struct MemberColumn: View {
     let member: LiveActivityPresentation.Member
-    let badgeSize: CGFloat
+    let creatureSize: CGFloat
 
     var body: some View {
         VStack(spacing: LKSpacing.xxs) {
-            MemberBadge(member, size: badgeSize)
+            MemberBadge(member, size: creatureSize)
             VStack(spacing: 0) {
                 Text(member.name)
                     .font(ActivityFont.caption)
@@ -294,58 +305,59 @@ struct MemberColumn: View {
     }
 }
 
-/// A member as a chip for the expanded island: a small monogram beside their name and countdown.
-/// About 32 points tall, half a column's height, which leaves room under the row for M1's
-/// buttons.
-struct MemberChip: View {
-    let member: LiveActivityPresentation.Member
+/// A solo session's buttons: Pause or Resume, and End, as bordered capsules. Pause and Resume
+/// take the tint; End is neutral, so the everyday action is the one that stands out.
+///
+/// Each is a `Button(intent:)`: the system runs the intent in the app's process, the app's
+/// session engine does the work and updates the activity (`SessionIntentBridge`). Nothing is
+/// drawn when there's nothing to control. The caller picks the control size.
+struct SessionButtons: View {
+    let controls: LiveActivityPresentation.SessionControls
+    /// Both buttons share the width: the expanded island. On the Lock Screen they stay snug.
+    let fillsWidth: Bool
 
     var body: some View {
-        HStack(spacing: LKSpacing.xs) {
-            MemberBadge(member, size: ActivityMetrics.expandedChipBadge)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(member.name)
-                    .font(ActivityFont.caption)
-                    .foregroundStyle(LKColor.textSecondary)
-                    .lineLimit(1)
-                CountdownText(
-                    countdown: member.countdown,
-                    tone: member.tone,
-                    style: ActivityTimer.squadmate,
-                    alignment: .leading,
-                    sizing: .fill,
-                    ink: .primary
-                )
+        if controls != .hidden {
+            HStack(spacing: LKSpacing.s) {
+                primaryButton
+                    .tint(LKColor.tint)
+                Button(intent: EndSessionIntent()) {
+                    label("End", systemImage: "xmark")
+                }
+                // Neutral: the label in the primary style on a quiet grey capsule.
+                .tint(Color.primary)
             }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .fontWeight(.semibold)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(member.accessibilityLabel)
-        .accessibilityCountdownValue(member.countdown)
     }
-}
 
-/// Squadmates who didn't fit in the expanded row, as "+2".
-struct OverflowLabel: View {
-    let count: Int
+    @ViewBuilder
+    private var primaryButton: some View {
+        switch controls {
+        case .pauseAndEnd:
+            Button(intent: PauseSessionIntent()) {
+                label("Pause", systemImage: "pause.fill")
+            }
+        case .resumeAndEnd:
+            Button(intent: ResumeSessionIntent()) {
+                label("Resume", systemImage: "play.fill")
+            }
+        case .hidden:
+            EmptyView()
+        }
+    }
 
-    var body: some View {
-        Text(verbatim: "+\(count)")
-            .font(ActivityFont.status.monospacedDigit())
-            .foregroundStyle(LKColor.textSecondary)
+    private func label(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
             .lineLimit(1)
-            .fixedSize()
-            .contentTransition(.numericText())
-            .accessibilityLabel(label)
-    }
-
-    private var label: String {
-        count == 1 ? "1 more squadmate" : "\(count) more squadmates"
+            .frame(maxWidth: fillsWidth ? .infinity : nil)
     }
 }
 
 /// The squad pet: a paw in its mood's colour, its species and stage, and progress to the next
-/// stage. Stands in for the drawn pet (`Creature`, M1; moods and stages, M5).
+/// stage. Stands in for the drawn pet (M5).
 struct PetRow: View {
     let pet: LiveActivityPresentation.Pet
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced

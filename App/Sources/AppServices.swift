@@ -2,6 +2,7 @@ import ActivityKit
 import Core
 import Foundation
 import LiveActivity
+import Model
 import Paywall
 import SessionEngine
 

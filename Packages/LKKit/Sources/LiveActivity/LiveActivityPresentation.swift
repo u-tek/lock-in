@@ -14,8 +14,8 @@ import Model
 public struct LiveActivityPresentation: Hashable, Sendable {
     /// Members on the Lock Screen: a full Plus squad (SPEC.md §1.3).
     public static let lockScreenLimit = LiveActivityLimits.maxMembers
-    /// Squadmates in the expanded island's bottom row. `primary` already sits beside the camera
-    /// in the leading and trailing regions, so isn't one of them.
+    /// Squadmates in the expanded island's bottom row: four across, evenly spaced. `primary`
+    /// already sits beside the camera in the leading and trailing regions, so isn't one of them.
     public static let expandedLimit = 4
 
     /// No squad name: the solo layouts, which show `primary` alone.
@@ -31,13 +31,15 @@ public struct LiveActivityPresentation: Hashable, Sendable {
     public let lockScreenMembers: [Member]
     /// The expanded island's row: squadmates other than `primary`, up to `expandedLimit`.
     public let expandedMembers: [Member]
-    /// Squadmates left out of `expandedMembers`, shown as "+2".
+    /// Squadmates left out of `expandedMembers`. The island doesn't squeeze in a "+2" for them:
+    /// the Lock Screen shows everyone.
     public let expandedOverflow: Int
     /// Squadmates other than `primary` who are focusing right now: the "+3" in the compact island.
     public let othersFocusing: Int
     /// Everyone focusing right now, `primary` included.
     public let focusingCount: Int
-    /// The squad name; for a solo session, what you're doing ("Locked in").
+    /// The squad name; for a solo session, what you're doing ("Locked in"). One line wherever
+    /// it appears.
     public let headline: String
     /// "2 of 6 locked in", or "Solo session".
     public let statusLine: String
@@ -51,6 +53,8 @@ public struct LiveActivityPresentation: Hashable, Sendable {
     /// The squad pet, when the content-state carries one. It doesn't for a solo session, or for a
     /// squad whose egg hasn't hatched.
     public let pet: Pet?
+    /// The buttons under a solo session's timer.
+    public let sessionControls: SessionControls
 
     public init(attributes: LockinAttributes, state: LockinAttributes.ContentState) {
         var seen = Set<String>()
@@ -73,6 +77,7 @@ public struct LiveActivityPresentation: Hashable, Sendable {
         self.focusingCount = focusingCount
         pet = state.p.map(Pet.init)
         sessionProgress = Self.sessionProgress(for: primary)
+        sessionControls = isSolo ? Self.soloControls(for: primary) : .hidden
 
         if isSolo {
             headline = Self.soloHeadline(for: primary?.state)
@@ -113,17 +118,16 @@ public struct LiveActivityPresentation: Hashable, Sendable {
 // MARK: - Member
 
 extension LiveActivityPresentation {
-    /// One squad member as drawn: a monogram, a name and a countdown.
+    /// One squad member as drawn: their Lockling in the pose for their state, a name and a
+    /// countdown.
     public struct Member: Hashable, Sendable, Identifiable {
         public let id: String
         /// The display name held to the wire limit, or "Someone" when the server sent none.
         public let name: String
-        /// What the monogram shows until creatures arrive (M1): the name's first character.
-        public let initial: String
         /// A state from a newer server reads as `.focusing` (see `Member.state` in Model).
         public let state: MemberState
         public let tone: LKMemberTone
-        /// For the `Creature` renderer (M1).
+        /// Their Lockling's parts. Parts this version can't draw come out as the defaults.
         public let avatar: AvatarCode
         public let isMe: Bool
         public let countdown: Countdown
@@ -149,7 +153,6 @@ extension LiveActivityPresentation {
 
             id = member.i
             self.name = name
-            initial = LiveActivityPresentation.initial(of: name)
             self.state = state
             self.tone = tone
             avatar = member.avatar
@@ -253,6 +256,17 @@ extension LiveActivityPresentation {
         }
     }
 
+    /// A solo session's buttons. Each runs a `LiveActivityIntent` in the app's process
+    /// (`SessionIntentBridge`). A squad's buttons (Cheer) arrive with squads in M2.
+    public enum SessionControls: Hashable, Sendable {
+        /// None: a squad, or a session that's over.
+        case hidden
+        /// Running, or on a break: Pause and End.
+        case pauseAndEnd
+        /// Paused: Resume and End.
+        case resumeAndEnd
+    }
+
     /// A session as a bar.
     public enum SessionProgress: Hashable, Sendable {
         /// Filling on the device over the range: `ProgressView(timerInterval:countsDown: false)`.
@@ -337,11 +351,15 @@ extension LiveActivityPresentation {
         return parts.joined(separator: " ") + " left"
     }
 
-    /// The first character that isn't whitespace, uppercased; "?" for a blank name. A whole
-    /// character, so an emoji or an accented letter stays in one piece.
-    static func initial(of name: String) -> String {
-        guard let first = name.first(where: { !$0.isWhitespace }) else { return "?" }
-        return String(first).uppercased()
+    /// Your own session's buttons: only while there's a timer to pause or resume, and only if the
+    /// session is yours (a solo session always is).
+    static func soloControls(for member: Member?) -> SessionControls {
+        guard let member, member.isMe else { return .hidden }
+        switch member.state {
+        case .focusing, .onBreak: return .pauseAndEnd
+        case .paused: return .resumeAndEnd
+        case .done, .left, .slipped: return .hidden
+        }
     }
 
     static func sessionProgress(for member: Member?) -> SessionProgress {
