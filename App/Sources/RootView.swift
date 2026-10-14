@@ -101,6 +101,11 @@ struct RootView: View {
             // Tapping the Live Activity: the session cover is already up while a session runs.
             // Catch up in case it finished while the app was away.
             engine.reconcile()
+        case .squad(let id):
+            // The Squad pet widget: Home picks the squad, as for a tap on an alert, once the
+            // squads are in; whatever sheet is open closes. A session in progress stays on top.
+            AppServices.notificationInbox.pick(id)
+            refreshSquads()
         case .invite(let invite):
             // Home opens Friends for it (once no session is in the way), signing in first if
             // need be; the Friends screen then redeems it (`redeemInvite`): a squad to join, or

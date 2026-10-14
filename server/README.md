@@ -8,8 +8,10 @@ handles and names, friend codes and invite links, blocks, reports and account de
 pushes the squad's Live Activity to every member and serves a WebSocket live view, with one APNs
 provider token for all of them from the `ApnsAuth` Durable Object. M4 adds **invites and
 joining**: opening a squad's room tells the rest of the squad "Ava is locking in 🔒" (muted squads,
-blocks, quiet hours and limits permitting), and the push-to-start spike. The contracts the app is
-written against are `docs/milestones/M2.md`, `M3.md` and `M4.md`.
+blocks, quiet hours and limits permitting), and the push-to-start spike. M5 adds **the squad pet,
+streaks, the weekly leaderboard and the coin shop**: rooms credit coins and pet XP as timers stop,
+the egg hatches when two members finish together, and coins buy Lockling cosmetics. The contracts
+the app is written against are `docs/milestones/M2.md`, `M3.md`, `M4.md` and `M5.md`.
 
 | Route | Auth | What it does |
 |---|---|---|
@@ -18,7 +20,7 @@ written against are `docs/milestones/M2.md`, `M3.md` and `M4.md`.
 | `POST /admin/push-to-start-test` | admin | `{ token, env }`: starts the made-up squad's Live Activity by push-to-start (M4 spike). Same guard |
 | `POST /auth/apple` | | `{ identityToken, authorizationCode?, displayName? }` → `{ token, user, isNew }`. Verifies the identity token against Apple's keys, creates the account on first sign-in |
 | `GET /me` | bearer | `{ user }` |
-| `PATCH /me` | bearer | `{ handle?, displayName?, avatarCode? }` → `{ user }` |
+| `PATCH /me` | bearer | `{ handle?, displayName?, avatarCode? }` → `{ user }`. A new part of the avatar must be one you own (M5) |
 | `DELETE /me` | bearer | Deletes the account and everything that's only theirs, revokes Apple's token → 204 |
 | `GET /handles/:handle` | bearer | `{ available, reason? }` for the handle picker |
 | `POST /devices` | bearer | `{ apnsToken, env, pushToStartToken?, laEnabled, frequentPushes, tz, quietHours? }` → 204. `quietHours` is `{ start, end }` (minutes after local midnight) or `null`; left out, 22:00–07:00 for a new phone |
@@ -31,13 +33,18 @@ written against are `docs/milestones/M2.md`, `M3.md` and `M4.md`.
 | `GET /j/:code` | | The invite landing page (HTML) for a friend or squad code: open in Lockin, or get it and type the code |
 | `GET /.well-known/apple-app-site-association` | | Universal links for `/j/*` (used once the invite domain exists, M9) |
 | `DELETE /auth/session` | bearer | Signs this token out (other devices stay signed in) → 204 |
-| `GET /squads` | bearer | `{ squads: [Squad] }`, the one you joined first first |
-| `POST /squads` | bearer | `{ name }` → `{ squad }`. Free: 1 squad; Plus: 3 |
+| `GET /squads` | bearer | `{ squads: [Squad] }`, the one you joined first first, each with its pet, streak and time zone |
+| `POST /squads` | bearer | `{ name, tz? }` → `{ squad }`. Free: 1 squad; Plus: 3 |
 | `PATCH /squads/:id` | bearer | `{ name }` → `{ squad }`, the owner only |
 | `POST /squads/:id/invite` | bearer | Your code for the squad (`{ code, url, expiresAt }`), like a friend code |
 | `POST /squads/join/:code` | bearer | → `{ squad }`. Free squads hold 4, a Plus owner's (or Plus joiner's) 6 |
 | `PATCH /squads/:id/members/me` | bearer | `{ muted }` → `{ squad }` |
 | `DELETE /squads/:id/members/me` | bearer | Leaves → 204. An owner hands the squad to the longest-standing member; the last one out deletes it |
+| `GET /squads/:id/leaderboard?week=YYYY-MM-DD` | bearer | The week's minutes and finished sessions per member, Monday to Monday in the squad's zone |
+| `GET /shop` | | `{ items: [ShopItem] }`: `fixtures/shop/catalogue.json` |
+| `POST /shop/buy` | bearer | `{ itemId }` → `{ coins, owned }` |
+| `GET /me/cosmetics` | bearer | `{ owned }`: items bought or imported, and Plus items while Plus lasts |
+| `POST /me/coins/import` | bearer | `{ coins, owned }` → `{ user, owned }`, once per account: what the app earned signed out |
 | `POST /sessions` | bearer | `{ squadId?, minutes, pushToStart? }` → `Joined`: solo, or the squad's room (joined, or opened; opening alerts the squad) |
 | `POST /sessions/:id/join` | bearer | `{ minutes, pushToStart? }` → `Joined`. With `pushToStart: { token, env }`, also starts the Live Activity by push and adds `pushedToStart` |
 | `POST /sessions/:id/la-token` | bearer | `{ token, env }` → 204: the Live Activity's push token and its APNs environment |
@@ -48,8 +55,9 @@ written against are `docs/milestones/M2.md`, `M3.md` and `M4.md`.
 
 Everything else answers `404`. Errors are `{"error": "<a sentence>", "code": "<machine code>"}`;
 the app switches on `code`. A few carry one more field: `limit` on 402 `plus_required`, `sessionId`
-on 409 `already_in_session`, `retryAfter` (seconds) on 429 `cheer_too_soon`. The codes per route are
-in `docs/milestones/M2.md`, `M3.md` and `M4.md`; on top of those, any route can answer
+on 409 `already_in_session`, `retryAfter` (seconds) on 429 `cheer_too_soon`, `itemId` on 403
+`item_not_owned`. The codes per route are
+in `docs/milestones/M2.md` to `M5.md`; on top of those, any route can answer
 `400 bad_request` (a body that isn't a JSON object), `413 too_large` (a body over 16 KB) and
 `500 internal`, and `POST /auth/apple` answers `502 apple_unavailable` when Apple's keys can't be
 fetched.
@@ -60,7 +68,11 @@ fetched.
 | `src/accounts.ts` | `/auth/apple`, `/me`, `/handles/:handle`, `/devices` |
 | `src/friends.ts` | `/friends…`, `/blocks…`, `/reports` |
 | `src/invite.ts` | `/j/:code` and the apple-app-site-association file |
-| `src/squads.ts` | `/squads…`: limits, codes, joining, leaving and handing on |
+| `src/squads.ts` | `/squads…`: limits, codes, joining, leaving and handing on, the leaderboard |
+| `src/shop.ts` | `/shop…`, `/me/cosmetics`: the catalogue, buying, what you own, and `PATCH /me`'s ownership check |
+| `src/pet.ts` | The pet's rules from `fixtures/pet/rules.json`: stages, progress, mood, the streak's share, coins |
+| `src/progress.ts` | A squad's pet and streak now, from D1: what `GET /squads` and the rooms' `p` show |
+| `src/days.ts` | Calendar days in a time zone: the squad's today, its midnight, its Monday |
 | `src/sessions.ts` | `/sessions…`: checks what only D1 knows (squad membership, your other session), then forwards to the room |
 | `src/alerts.ts` | "X is locking in": who's told, quiet hours in each phone's time zone, the limits, the payload |
 | `src/pushToStart.ts` | The push-to-start spike: `pushToStart` on joins, the `start` payload |
@@ -76,8 +88,8 @@ fetched.
 | `src/apns.ts` | The APNs sender, for Live Activity pushes and alerts: token auth with an ES256 JWT (signed itself, or from `ApnsAuth`), one retry on `ExpiredProviderToken` (never on a 429), bodies over 4 KB refused before sending |
 | `src/jwt.ts` | ES256 signing with Web Crypto, from a `.p8` file |
 | `src/demo.ts` | The spike's scenarios: `squad`, `join`, `cheer`, `end` |
-| `migrations/` | The D1 schema (SPEC.md §4.6); `0002_accounts.sql` adds sessions, Apple's refresh token and report notes; `0003_squads.sql` adds `participants.la_env` and the indexes that keep one running timer per user and one open room per squad; `0004_invites.sql` adds quiet hours to `devices` and the `alerts` log |
-| `test/` | vitest. Route tests run real SQL on an in-memory SQLite behind a D1 stand-in (`test/d1.ts`), against a fake Apple with generated keys (`test/app.ts`). Rooms run on a fake Durable Objects runtime (`test/rooms.ts`: storage, alarms the test fires as its clock moves, WebSockets, eviction) and push to a fake APNs. The shared fixtures in `fixtures/live-activity/` and `fixtures/moderation/` are tested here and by the Swift tests |
+| `migrations/` | The D1 schema (SPEC.md §4.6); `0002_accounts.sql` adds sessions, Apple's refresh token and report notes; `0003_squads.sql` adds `participants.la_env` and the indexes that keep one running timer per user and one open room per squad; `0004_invites.sql` adds quiet hours to `devices` and the `alerts` log; `0005_pet.sql` adds the squad's zone, hatching and sad spells, the one-off coins import, and `focus_log` (every timer that stopped, and what it earned) |
+| `test/` | vitest. Route tests run real SQL on an in-memory SQLite behind a D1 stand-in (`test/d1.ts`), against a fake Apple with generated keys (`test/app.ts`). Rooms run on a fake Durable Objects runtime (`test/rooms.ts`: storage, alarms the test fires as its clock moves, WebSockets, eviction) and push to a fake APNs. The shared fixtures in `fixtures/live-activity/`, `fixtures/moderation/`, `fixtures/pet/` and `fixtures/shop/` are tested here and by the Swift tests |
 
 The moderation word list is imported straight from `fixtures/moderation/words.json`: wrangler
 bundles it into the Worker like any other import, so there is one copy, and a word added there
@@ -302,6 +314,31 @@ alerts r7Kq2xP9aL: 2 alerted, 1 in quiet hours, 0 over a limit; 3 pushes accepte
 The alerts and push-to-start use the same `ApnsAuth` provider token as the rooms. Without the APNs
 secrets, the routes work as before and nothing is sent; each isolate logs `push: APNs isn't set
 up (…)` once.
+
+## The pet, streaks and coins (M5)
+
+When a member's timer stops (finished, left early or slipped), their room credits it in the same D1
+transaction as its own rows: a coin per whole focused minute plus 5 for finishing to the member,
+the minutes to the squad's `pet_xp` (squad rooms only), a 30-minute sad spell for an early leave or
+a slip, the egg hatching once two members have finished in the room, the stage, and any streak
+day the finish makes count in each of the member's squads (solo sessions count for streaks). Each
+timer gets one `focus_log` row, and the coins and XP are added only while that row doesn't exist,
+so a room that writes again after a failure never credits twice. The room then reads the pet back,
+refreshes the content-state's `p` (priority 5, 10 for a hatch), and tells the open rooms of the
+member's other squads to do the same. It looks again by itself when a sad spell ends and at the
+squad's midnight.
+
+## Upgrading to M5
+
+```powershell
+cd server
+npx wrangler d1 migrations apply lockin --remote   # applies migrations/0005_pet.sql only
+npx wrangler deploy
+```
+
+Existing squads take their owner's latest phone's time zone (else UTC) and get a species the first
+time they're read; their eggs hatch the next time two members finish together. Rooms open during
+the deploy carry on and show the pet from their next join or finish. No new secrets.
 
 ## Upgrading to M4
 

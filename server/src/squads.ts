@@ -54,8 +54,8 @@ export interface Squad {
   openSessionId: string | null;
   /** Your own mute switch for "X is locking in" (M4). */
   muted: boolean;
-  /** `species` is null until the egg hatches (M5). Mood 0–3; progress towards the next stage, 0–1. */
-  pet: { species: string | null; stage: number; xp: number; mood: number; progress: number };
+  /** The egg is tinted by its `species` (stage 0) before it hatches. Mood 0–3; progress towards the next stage, 0–1. */
+  pet: { species: string; stage: number; xp: number; mood: number; progress: number };
   streak: SquadStreak;
   /** The IANA zone the squad's days and Monday follow. */
   tz: string;
@@ -100,7 +100,7 @@ function squadView(row: MySquadRow, members: SquadMemberRow[], openSessionId: st
     openSessionId,
     muted: row.muted === 1,
     pet: {
-      species: progress.hatched ? progress.species : null,
+      species: progress.species,
       stage: progress.stage,
       xp: progress.xp,
       mood: progress.mood,

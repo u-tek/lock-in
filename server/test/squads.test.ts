@@ -64,7 +64,7 @@ describe("POST /squads", () => {
         openSessionId: null,
         muted: false,
         // M5: an egg (its species kept back until it hatches), hungry, and no streak yet.
-        pet: { species: null, stage: 0, xp: 0, mood: 1, progress: 0 },
+        pet: { species: expect.any(String), stage: 0, xp: 0, mood: 1, progress: 0 },
         streak: { count: 0, countedToday: false, doneToday: 0, needed: 1 },
         tz: "UTC",
       },
@@ -121,7 +121,7 @@ describe("GET /squads", () => {
       members: [memberView(ava, T0), memberView(noor, T0 + 1), memberView(kai, T0 + 2)],
       openSessionId: null,
       muted: false,
-      pet: { species: null, stage: 0, xp: 0, mood: 1, progress: 0 },
+      pet: { species: expect.any(String), stage: 0, xp: 0, mood: 1, progress: 0 },
       streak: { count: 0, countedToday: false, doneToday: 0, needed: 2 },
       tz: "UTC",
     });

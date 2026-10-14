@@ -67,6 +67,8 @@ final class LiveServices {
     let engine: SessionEngine
     let plus: PlusStore
     let social: SocialModels
+    /// What the Home and Lock Screen widgets show, kept in the App Group (M6).
+    let widgets = WidgetDataWriter()
 
     /// The latest push-to-start token, for the M4 spike (`devices.push_to_start_token`). Saved
     /// in the App Group as it arrives, so a background launch has it straight away.
@@ -95,13 +97,15 @@ final class LiveServices {
             engine.configure(api: api)
         }
         pushToStartToken = JoinWithoutOpening.savedToken()
-        // The Live Activity's Pause, Resume and End buttons run their intents in this process;
-        // the bridge hands them to the engine.
+        // The Live Activity's Pause, Resume and End buttons, and the Lock in widget's and
+        // control's Start, run their intents in this process; the bridge hands them to the engine.
         SessionIntentBridge.shared.handler = { command in
             await engine.handle(command)
         }
         // A session may have ended while the app was away.
         engine.reconcile()
+        // From here on, including a background launch for the Lock in widget's button.
+        widgets.watch(engine: engine, social: social)
         AppServices.analytics.track(.appOpened)
     }
 

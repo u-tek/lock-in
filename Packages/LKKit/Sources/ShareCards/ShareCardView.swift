@@ -51,20 +51,20 @@ private struct StoryLayout: View {
     var body: some View {
         VStack(spacing: 0) {
             Wordmark(height: 72)
-            Spacer(minLength: 32)
+            Spacer(minLength: 24)
             if let squadName = card.squadName {
                 Text(squadName)
                     .font(.system(size: 60, weight: .bold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
-                    .padding(.bottom, 36)
+                    .padding(.bottom, 32)
             }
             Lineup(card: card, layout: .story)
-            Spacer(minLength: 32)
-            BigMinutes(card: card, numberSize: 220, lineSize: 60, alignment: .center)
-            Spacer(minLength: 32)
+            Spacer(minLength: 24)
+            BigMinutes(card: card, numberSize: 200, lineSize: 60, alignment: .center)
+            Spacer(minLength: 24)
             Badges(card: card, height: 104)
-            Spacer(minLength: 40)
+            Spacer(minLength: 32)
             Invitation(card: card, size: .large)
         }
         .padding(.horizontal, 88)
@@ -180,11 +180,11 @@ private struct Lineup: View {
         if !card.isSquad {
             LocklingWithGlow(avatar: card.avatar, pose: .celebrating, size: layout == .story ? 520 : 400)
         } else {
-            let rows = Self.rows(of: members)
+            let rows = Self.rows(of: members, layout: layout)
             let size = Self.size(count: members.count, layout: layout)
             VStack(spacing: layout == .story ? 28 : 20) {
                 ForEach(rows.indices, id: \.self) { index in
-                    HStack(alignment: .top, spacing: layout == .story ? 24 : 16) {
+                    HStack(alignment: .top, spacing: layout == .story ? 24 : 12) {
                         ForEach(rows[index]) { member in
                             VStack(spacing: 8) {
                                 LocklingWithGlow(
@@ -196,7 +196,7 @@ private struct Lineup: View {
                                     .font(.system(size: layout == .story ? 44 : 32, weight: .semibold))
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.5)
-                                    .frame(maxWidth: size + 16)
+                                    .frame(maxWidth: size + (layout == .story ? 16 : 8))
                             }
                         }
                     }
@@ -205,9 +205,17 @@ private struct Lineup: View {
         }
     }
 
-    /// One row up to three; two rows from four, the first as full as the second.
-    static func rows(of members: [ShareCard.Member]) -> [[ShareCard.Member]] {
-        guard members.count > 3 else { return [members] }
+    /// The story takes three to a row, the square's narrower column two (three from five). A
+    /// second row is never fuller than the first.
+    static func rows(of members: [ShareCard.Member], layout: Layout) -> [[ShareCard.Member]] {
+        let perRow: Int
+        switch layout {
+        case .story:
+            perRow = 3
+        case .square:
+            perRow = members.count > 4 ? 3 : 2
+        }
+        guard members.count > perRow else { return [members] }
         let firstRow = (members.count + 1) / 2
         return [Array(members.prefix(firstRow)), Array(members.dropFirst(firstRow))]
     }
@@ -216,17 +224,13 @@ private struct Lineup: View {
     static func size(count: Int, layout: Layout) -> CGFloat {
         switch layout {
         case .story:
-            switch count {
-            case ...2: 300
-            case 3: 240
-            default: 200
-            }
+            if count <= 2 { return 300 }
+            if count == 3 { return 240 }
+            return 180
         case .square:
-            switch count {
-            case ...2: 180
-            case 3, 4: 160
-            default: 120
-            }
+            if count <= 2 { return 180 }
+            if count <= 4 { return 160 }
+            return 120
         }
     }
 }

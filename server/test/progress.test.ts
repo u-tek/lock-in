@@ -219,7 +219,7 @@ describe("the pet", () => {
     expect(column(squadId, "pet_xp")).toBe(25);
     expect(column(squadId, "hatched_at")).toBeNull();
     expect((await stateOf(ava, sid)).p).toEqual({ k: `${species}.0`, md: 2, x: 0 });
-    expect((await mySquad(ava, squadId)).pet).toEqual({ species: null, stage: 0, xp: 25, mood: 2, progress: 0 });
+    expect((await mySquad(ava, squadId)).pet).toEqual({ species: expect.any(String), stage: 0, xp: 25, mood: 2, progress: 0 });
 
     // Noor finishes: two have, so it hatches, and today counts.
     app.apns.clear();
@@ -268,7 +268,7 @@ describe("the pet", () => {
     await call(noor, "POST", `/sessions/${sid}/end`);
     expect(column(squadId, "hatched_at")).toBeNull();
     expect(column(squadId, "pet_xp")).toBe(50 + 50);
-    expect((await mySquad(ava, squadId)).pet).toMatchObject({ species: null, stage: 0, xp: 100 });
+    expect((await mySquad(ava, squadId)).pet).toMatchObject({ species: expect.any(String), stage: 0, xp: 100 });
   });
 
   test("grows with XP: the stage is the highest whose XP it has", async () => {
@@ -350,12 +350,13 @@ describe("the pet", () => {
     });
   });
 
-  test("a squad from before M5 gets its species on first read, kept back until it hatches", async () => {
+  test("a squad from before M5 gets its species on first read, egg included", async () => {
     const squadId = await squad(ava, [noor]);
     app.sqlite.prepare("UPDATE squads SET pet_species = NULL WHERE id = ?").run(squadId);
-    expect((await mySquad(ava, squadId)).pet.species).toBeNull();
+    const read = (await mySquad(ava, squadId)).pet;
     const species = column(squadId, "pet_species");
     expect(["puff", "sprout", "ember", "pebble"]).toContain(species);
+    expect(read).toMatchObject({ species, stage: 0 });
     await mySquad(noor, squadId);
     expect(column(squadId, "pet_species")).toBe(species);
 

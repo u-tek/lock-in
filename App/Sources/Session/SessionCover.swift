@@ -2,6 +2,7 @@ import Foundation
 import Model
 import Paywall
 import SessionEngine
+import ShareCards
 import Social
 import SwiftUI
 
@@ -94,10 +95,25 @@ struct SessionCover: View {
                 onFriends: { showsFriends = true },
                 offersPlus: offersPlus,
                 onPlus: { showsPaywall = true },
+                share: shareCard(for: record),
                 onDone: { engine.dismissFinished() }
             )
             .transition(.opacity)
         }
+    }
+
+    /// What the finished screen's Share button shares (M6): the squad's card after a squad
+    /// session, yours otherwise, with your friend code while it's good.
+    private func shareCard(for record: SessionRecord) -> ShareCard? {
+        let code = social.friends.code.flatMap { $0.isExpired() ? nil : $0.code }
+        return ShareCard(
+            record: record,
+            avatar: engine.avatar,
+            streak: engine.stats.streakDays,
+            squad: isSquad ? squad : nil,
+            myName: social.account.user?.displayName,
+            inviteCode: code
+        )
     }
 
     /// The squad room on screen: the snapshot's, or the engine's in a squad session.

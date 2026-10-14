@@ -3,8 +3,8 @@ import PackageDescription
 
 // Every module of the app except the app and extension targets themselves.
 // Dependencies run one way: Core <- Model <- feature modules <- app/extension.
-// The widget extension links Core, Model, DesignSystem, Creature and LiveActivity, so those stay
-// extension-safe: no UIKit-only APIs, no networking.
+// The widget extension links Core, Model, DesignSystem, Creature, LiveActivity and WidgetViews,
+// so those stay extension-safe: no UIKit-only APIs, no networking.
 // Modules arrive with their milestone (SPEC.md §5.2).
 let package = Package(
     name: "LKKit",
@@ -22,6 +22,8 @@ let package = Package(
         .library(name: "Social", targets: ["Social"]),
         .library(name: "DeepFocus", targets: ["DeepFocus"]),
         .library(name: "Notifications", targets: ["Notifications"]),
+        .library(name: "WidgetViews", targets: ["WidgetViews"]),
+        .library(name: "ShareCards", targets: ["ShareCards"]),
     ],
     targets: [
         .target(name: "Core"),
@@ -62,6 +64,13 @@ let package = Package(
         // payload, quiet hours, and what a tap on it should do. App only; no session engine, so
         // it stays a set of plain values the tests can pin down.
         .target(name: "Notifications", dependencies: ["Core", "Model"]),
+        // The Home and Lock Screen widgets' views (M6): linked by the widget extension, which
+        // draws them, and by the app, whose snapshots draw the same. Extension-safe: no
+        // UIApplication, no network. LiveActivity for the Lock in button's `StartSessionIntent`.
+        .target(name: "WidgetViews", dependencies: ["Core", "Model", "DesignSystem", "Creature", "LiveActivity"]),
+        // Share cards (M6): the 9:16 and 1:1 pictures of a finished session, drawn in SwiftUI and
+        // rendered with ImageRenderer. App only.
+        .target(name: "ShareCards", dependencies: ["Core", "Model", "DesignSystem", "Creature"]),
 
         .testTarget(name: "CoreTests", dependencies: ["Core"]),
         .testTarget(name: "ModelTests", dependencies: ["Model"]),
@@ -74,5 +83,7 @@ let package = Package(
         .testTarget(name: "SocialTests", dependencies: ["Social", "API", "Core", "Model"]),
         .testTarget(name: "DeepFocusTests", dependencies: ["DeepFocus", "Core", "Model"]),
         .testTarget(name: "NotificationsTests", dependencies: ["Notifications", "Core", "Model"]),
+        .testTarget(name: "WidgetViewsTests", dependencies: ["WidgetViews", "Model"]),
+        .testTarget(name: "ShareCardsTests", dependencies: ["ShareCards", "Model"]),
     ]
 )

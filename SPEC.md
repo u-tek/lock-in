@@ -202,19 +202,22 @@ Six members ≈ 600–700 bytes of JSON — far inside 4 KB. The server rejects 
 ### 4.6 Data model (D1)
 ```
 users(id PK, apple_sub UNIQUE, handle UNIQUE, display_name, avatar_code, coins,
-      plus_until, created_at, deleted_at)
+      plus_until, coins_imported, created_at, deleted_at)
 friendships(user_id, friend_id, created_at)              -- stored both directions
 blocks(user_id, blocked_id, created_at)
 reports(id PK, reporter_id, target_user_id, reason, created_at)
 squads(id PK, name, owner_id, pet_species, pet_xp, pet_stage,
-       streak_count, streak_last_day, created_at)
+       streak_count, streak_last_day, tz, hatched_at, last_sad_at, created_at)
 squad_members(squad_id, user_id, joined_at, muted)
 invite_codes(code PK, kind['friend'|'squad'], target_id, created_by, expires_at)
 devices(id PK, user_id, apns_token, apns_env, push_to_start_token,
-        la_enabled, frequent_pushes, tz, updated_at)
+        la_enabled, frequent_pushes, tz, quiet_start, quiet_end, updated_at)
 sessions(id PK, squad_id NULL, host_id, status, created_at, ended_at)
 participants(session_id, user_id, state, planned_min, started_at, ends_at,
              paused_at, ended_at, focused_sec, la_token, slips)
+focus_log(session_id, user_id, started_at, ended_at, squad_id, focused_sec, completed, coins, xp)
+                                                          -- one row per stopped timer: credits once, streaks, leaderboard
+alerts(recipient_id, squad_id, sender_id, session_id, sent_at)   -- "is locking in" limits
 events(id PK, session_id, user_id, type, at, meta_json)   -- for stats & debugging
 cosmetics(user_id, item_id, acquired_at)
 ```
@@ -235,7 +238,8 @@ POST   /sessions/:id/{pause|resume|end|slip}
 POST   /sessions/:id/cheer              { to, kind }
 GET    /sessions/:id                    → snapshot
 WS     /sessions/:id/live               → room state stream for the in-app view
-GET    /leaderboard/:squadId?week=…
+GET    /squads/:id/leaderboard?week=…
+GET    /shop      POST /shop/buy { itemId }      GET /me/cosmetics     POST /me/coins/import
 POST   /admin/push-test                 (dev only) send a test update to a session
 ```
 The server is authoritative for squads, streaks, XP and coins. The app is authoritative for its own timer while offline and reconciles on reconnect.

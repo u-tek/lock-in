@@ -109,10 +109,14 @@ targets:
         product: DeepFocus
       - package: LKKit
         product: Notifications
+      - package: LKKit
+        product: WidgetViews
+      - package: LKKit
+        product: ShareCards
       - target: LockinWidgets
 
-  # The Live Activity (every presentation), and later the Home/Lock Screen widgets and the
-  # Control Center control. Runs in its own sandbox: no network, no location.
+  # The Live Activity (every presentation), the Home and Lock Screen widgets and the Control
+  # Center control (M6). Runs in its own sandbox: no network, no location.
   LockinWidgets:
     type: app-extension
     platform: iOS
@@ -150,6 +154,8 @@ targets:
         product: Creature
       - package: LKKit
         product: LiveActivity
+      - package: LKKit
+        product: WidgetViews
 
   # Deep Focus (M8): draws the shield over an app you blocked.
   # Built on every CI run so it keeps compiling, but not embedded in the app (and not archived)

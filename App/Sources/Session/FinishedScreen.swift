@@ -2,6 +2,7 @@ import Creature
 import DesignSystem
 import Model
 import SessionEngine
+import ShareCards
 import SwiftUI
 
 /// The end of a session: the Lockling celebrates, the coins land. After the very first one it
@@ -16,6 +17,8 @@ struct FinishedScreen: View {
     /// Show the "Your squad's on a roll" card.
     var offersPlus = false
     var onPlus: () -> Void = {}
+    /// What the Share button shares (M6); no button without one.
+    var share: ShareCard? = nil
     let onDone: () -> Void
 
     @State private var cheers = 0
@@ -50,12 +53,17 @@ struct FinishedScreen: View {
                     FriendsCard(onFriends: onFriends)
                         .padding(.bottom, LKSpacing.l)
                 }
-                Button(action: onDone) {
-                    Text("Done")
-                        .font(LKFont.headline)
-                        .frame(maxWidth: .infinity)
+                HStack(spacing: LKSpacing.m) {
+                    if let share {
+                        ShareCardButton(card: share)
+                    }
+                    Button(action: onDone) {
+                        Text("Done")
+                            .font(LKFont.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .lkProminentButton()
                 }
-                .lkProminentButton()
                 .controlSize(.large)
             }
             .padding(.horizontal, LKSpacing.xl)

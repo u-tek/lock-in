@@ -1037,6 +1037,8 @@ export class Room {
       room.squadName = squad.name;
       const before = room.pet;
       const pet = petSnapshot(await squadProgress(this.db, squad, now, (length) => this.random(length)));
+      // Never a check in the past, which would fire the alarm again at once.
+      pet.checkAt = Math.max(pet.checkAt, now + 60);
       room.pet = pet;
       const changed = before === null || before.k !== pet.k || before.md !== pet.md || before.x !== pet.x;
       return { changed, hatched: before !== null && !before.hatched && pet.hatched };

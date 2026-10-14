@@ -24,12 +24,14 @@ enum AppRoute: Hashable {
     }
 }
 
-/// Links the app opens: the Live Activity's, and invite links (SPEC.md §1.7). Widgets add theirs
-/// later.
+/// Links the app opens: the Live Activity's, the widgets', and invite links (SPEC.md §1.7).
 enum DeepLink: Equatable {
     /// `lockin://session/<sid>`: the Live Activity's `widgetURL`. The widget extension builds the
     /// same URL in `Widgets/LockinLiveActivity.swift`; change both together.
     case session(id: String)
+    /// `lockin://squad/<id>`: the Squad pet widget's, Home with that squad picked. Built by
+    /// `WidgetLink.squad` in the WidgetViews module; change both together.
+    case squad(id: String)
     /// `lockin://j/<code>`, or `https://<invite host>/j/<code>` once universal links exist (M9).
     case invite(InviteLink)
 
@@ -48,6 +50,9 @@ enum DeepLink: Equatable {
         case "session":
             guard let id = parts.first, ShortID.isValid(id) else { return nil }
             self = .session(id: id)
+        case "squad":
+            guard let id = parts.first, ShortID.isValid(id) else { return nil }
+            self = .squad(id: id)
         default:
             return nil
         }
