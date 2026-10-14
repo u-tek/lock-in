@@ -56,6 +56,13 @@ public struct LiveActivityPresentation: Hashable, Sendable {
     public let pet: Pet?
     /// The buttons under a solo session's timer.
     public let sessionControls: SessionControls
+    /// A cheer for you from a squadmate in the room: the content-state's cheer (`c`), when it's
+    /// addressed to `me` and whoever sent it is in the content-state. While it's here the compact
+    /// island shows its symbol, and the expanded island and the Lock Screen say who sent it.
+    ///
+    /// Not timed here, like everything else: the room clears `c` about 10 seconds after it
+    /// arrives, with a push, and the app's own updates do the same.
+    public let cheerForMe: Cheer?
 
     public init(attributes: LockinAttributes, state: LockinAttributes.ContentState) {
         var seen = Set<String>()
@@ -79,6 +86,8 @@ public struct LiveActivityPresentation: Hashable, Sendable {
         pet = state.p.map(Pet.init)
         sessionProgress = Self.sessionProgress(for: primary)
         sessionControls = isSolo ? Self.soloControls(for: primary) : .hidden
+        let cheerForMe = Self.cheer(state.c, for: attributes.me, among: members)
+        self.cheerForMe = cheerForMe
 
         if isSolo {
             headline = Self.soloHeadline(for: primary?.state)
@@ -89,8 +98,12 @@ public struct LiveActivityPresentation: Hashable, Sendable {
             statusLine = "\(focusingCount) of \(members.count) locked in"
         }
 
-        // "+0" says nothing, so with no squadmate focusing the compact island shows your own time.
-        if !isSolo, othersFocusing > 0 {
+        // A cheer for you comes first, for the few seconds the room holds it. "+0" says nothing,
+        // so with no squadmate focusing the compact island shows your own time.
+        if let cheerForMe {
+            compactTrailing = .cheer(cheerForMe)
+            compactTrailingAccessibilityLabel = cheerForMe.accessibilityLabel
+        } else if !isSolo, othersFocusing > 0 {
             compactTrailing = .squadmates(othersFocusing)
             compactTrailingAccessibilityLabel = Self.squadmatesPhrase(othersFocusing)
         } else if let primary {
@@ -240,6 +253,9 @@ extension LiveActivityPresentation {
 
     /// The right-hand side of the compact island (SPEC.md §1.3).
     public enum CompactTrailing: Hashable, Sendable {
+        /// A cheer for you, as its symbol in its colour, while the room holds it: ahead of either
+        /// of the others.
+        case cheer(Cheer)
         /// Squadmates focusing right now, as "+3".
         case squadmates(Int)
         /// Your own time: solo, or when no squadmate is focusing.
@@ -247,13 +263,34 @@ extension LiveActivityPresentation {
         /// An empty content-state.
         case empty
 
-        /// "+3", a word, or nil for a running or paused timer.
+        /// "+3", a word, or nil for a running or paused timer or a cheer's symbol.
         public var staticText: String? {
             switch self {
             case .squadmates(let count): return "+\(count)"
             case .countdown(let countdown, _): return countdown.staticText
-            case .empty: return nil
+            case .cheer, .empty: return nil
             }
+        }
+    }
+
+    /// A cheer for you (`cheerForMe`): what it is and who sent it.
+    public struct Cheer: Hashable, Sendable {
+        /// What was sent. A kind this version doesn't know is sparkles.
+        public let kind: CheerKind
+        /// Who sent it: their name as the squad row shows it.
+        public let senderName: String
+        /// "Noor cheered you on": one line, in place of the squad name in the expanded island and
+        /// of "4 of 4 locked in" on the Lock Screen and in StandBy.
+        public let text: String
+        /// "Noor cheered you on, heart".
+        public let accessibilityLabel: String
+
+        public init(kind: CheerKind, senderName: String) {
+            let text = "\(senderName) cheered you on"
+            self.kind = kind
+            self.senderName = senderName
+            self.text = text
+            accessibilityLabel = "\(text), \(kind.title.lowercased())"
         }
     }
 
@@ -328,6 +365,21 @@ extension LiveActivityPresentation {
         case .left: return "Ended early"
         case .slipped: return "Slipped"
         }
+    }
+
+    /// The room's cheer, when it's for `me` from someone else in the content-state. A cheer for
+    /// someone else, or from someone the content-state doesn't hold (they left the room, or a push
+    /// went missing), shows nothing: there'd be no name to put to it. The server won't let anyone
+    /// cheer themselves; a cheer that says so anyway shows nothing either.
+    static func cheer(
+        _ cheer: LockinAttributes.ContentState.Cheer?,
+        for me: String,
+        among members: [Member]
+    ) -> Cheer? {
+        guard let cheer, cheer.t == me, cheer.f != me,
+              let sender = members.first(where: { $0.id == cheer.f })
+        else { return nil }
+        return Cheer(kind: cheer.kind, senderName: sender.name)
     }
 
     /// "1 squadmate locked in", "3 squadmates locked in".

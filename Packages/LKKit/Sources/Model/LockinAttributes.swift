@@ -93,7 +93,7 @@ public struct LockinAttributes: Codable, Hashable, Sendable {
             public var f: String
             /// To member id.
             public var t: String
-            /// Cheer kind (index into the emoji set).
+            /// Cheer kind, 0–7 (see `CheerKind`).
             public var k: Int
             /// Sent at, Unix seconds.
             public var at: Double

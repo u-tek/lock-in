@@ -1,3 +1,4 @@
+import Model
 import SwiftUI
 import Testing
 import UIKit
@@ -43,6 +44,24 @@ import UIKit
         let atTop = Self.height(of: sample, layout: layout, textSize: top)
         for size in [DynamicTypeSize.xxLarge, .xxxLarge, .accessibility1, .accessibility5] where size > top {
             #expect(Self.height(of: sample, layout: layout, textSize: size) == atTop, "\(layout) at \(size)")
+        }
+    }
+
+    /// A cheer for you takes the status line's place ("Noor cheered you on" for "1 of 6 locked
+    /// in"), so the card doesn't grow while the room holds it. The symbol can sit a fraction
+    /// taller or shorter than the lock it replaces, hence the point of slack.
+    @Test(arguments: [LockScreenView.Layout.lockScreen, .standBy])
+    @MainActor func aCheerDoesntMakeTheCardTaller(layout: LockScreenView.Layout) {
+        let cheered = LiveActivitySamples.squadOfSix(now: LiveActivitySamples.fixtureDate)
+        #expect(cheered.presentation.cheerForMe != nil)
+        var state = cheered.state
+        state.c = nil
+        let plain = LiveActivitySample(id: "squad-6-plain", title: "", attributes: cheered.attributes, state: state)
+        #expect(plain.presentation.cheerForMe == nil)
+        for size in [DynamicTypeSize.large, .xLarge] {
+            let cheeredHeight = Self.height(of: cheered, layout: layout, textSize: size)
+            let plainHeight = Self.height(of: plain, layout: layout, textSize: size)
+            #expect(abs(cheeredHeight - plainHeight) <= 1, "\(layout) at \(size): \(plainHeight) → \(cheeredHeight)")
         }
     }
 

@@ -217,6 +217,9 @@ import UIKit
             }
         case .squadmates:
             #expect(size.width > 0 && size.width <= ActivityTimer.island.pointSize * 2, "\(sample.id): \(size)")
+        case .cheer:
+            // One symbol, about as wide as "+3".
+            #expect(size.width > 0 && size.width <= ActivityTimer.island.pointSize * 2, "\(sample.id): \(size)")
         case .empty:
             #expect(size.width == 0, "\(sample.id): \(size)")
         }

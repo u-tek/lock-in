@@ -41,8 +41,10 @@ public enum LiveActivitySamples {
     }
 
     /// `squad-6`: Ava (you), Noor on a break, Kai paused, Mateo done, Sakura left, Jules slipped,
-    /// a teen sprout and a cheer. Nobody but you is focusing, so the compact island shows your
-    /// time.
+    /// a teen sprout, and a heart Noor has just sent you. The cheer is what the compact island
+    /// shows, and "Noor cheered you on" takes the squad name's line in the expanded island and the
+    /// status line's on the Lock Screen and in StandBy. Without it, nobody but you is focusing,
+    /// so the compact island would show your time.
     ///
     /// - Parameter state: Your state. Anything but `.focusing` changes your times to suit it, and
     ///   the sample no longer mirrors the fixture.
@@ -106,7 +108,8 @@ public enum LiveActivitySamples {
     }
 
     /// `largest`: every limit at its maximum. Six paused members with twelve-emoji names, a
-    /// twenty-emoji squad name, the longest times. Its pauses fall about two hours after `now`,
+    /// twenty-emoji squad name, the longest times, and a cheer of a kind this version doesn't know
+    /// (drawn as sparkles) from a twelve-emoji name. Its pauses fall about two hours after `now`,
     /// so the Lab shows its timers running at their widest (about "3:50:00").
     public static func largest(now: Date = Date()) -> LiveActivitySample {
         let t = now.timeIntervalSince1970

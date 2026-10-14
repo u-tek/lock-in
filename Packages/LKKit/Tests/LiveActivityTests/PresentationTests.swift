@@ -5,6 +5,7 @@ import Testing
 
 private typealias WireMember = LockinAttributes.ContentState.Member
 private typealias WirePet = LockinAttributes.ContentState.Pet
+private typealias WireCheer = LockinAttributes.ContentState.Cheer
 
 /// Ten minutes into the fixtures' session.
 private let now = LiveActivitySamples.fixtureDate
@@ -15,10 +16,10 @@ private func wire(_ id: String, _ state: MemberState, end: Double = t + 900, pau
     WireMember(i: id, n: name ?? id, a: "b0.c0.e0.h0", s: state.rawValue, b: t - 600, e: end, q: pausedAt)
 }
 
-private func squad(_ members: [WireMember], me: String = "me", pet: WirePet? = nil) -> LiveActivityPresentation {
+private func squad(_ members: [WireMember], me: String = "me", pet: WirePet? = nil, cheer: WireCheer? = nil) -> LiveActivityPresentation {
     LiveActivityPresentation(
         attributes: LockinAttributes(sid: "r7Kq2xP9aL", me: me, sq: "Library Goblins"),
-        state: LockinAttributes.ContentState(v: 1, m: members, p: pet)
+        state: LockinAttributes.ContentState(v: 1, m: members, p: pet, c: cheer)
     )
 }
 
@@ -172,8 +173,11 @@ private func range(_ member: WireMember) -> ClosedRange<Date> {
     }
 
     @Test func withNobodyElseFocusingItShowsMyTime() throws {
-        // squad-6: only Ava (me) is focusing.
-        let presentation = LiveActivitySamples.squadOfSix(now: now).presentation
+        // squad-6 once its cheer has cleared: only Ava (me) is focusing.
+        let sample = LiveActivitySamples.squadOfSix(now: now)
+        var state = sample.state
+        state.c = nil
+        let presentation = LiveActivityPresentation(attributes: sample.attributes, state: state)
         #expect(presentation.othersFocusing == 0)
         let me = try #require(presentation.primary)
         #expect(presentation.compactTrailing == .countdown(me.countdown, tone: me.tone))
@@ -220,6 +224,128 @@ private func range(_ member: WireMember) -> ClosedRange<Date> {
     @Test func soloFinishedShowsAWord() {
         let presentation = solo(wire("me", .done, end: t))
         #expect(presentation.compactTrailing.staticText == "Done")
+    }
+
+    @Test func aCheerForMeComesFirst() throws {
+        // squad-6: Noor's heart for Ava (me), where Ava's own time would be.
+        let presentation = LiveActivitySamples.squadOfSix(now: now).presentation
+        let cheer = try #require(presentation.cheerForMe)
+        #expect(presentation.compactTrailing == .cheer(cheer))
+        #expect(presentation.compactTrailing.staticText == nil)
+        #expect(presentation.compactTrailingAccessibilityLabel == "Noor cheered you on, heart")
+
+        // Ahead of "+3" too.
+        let busy = squad(
+            [wire("me", .focusing), wire("ava", .focusing), wire("noor", .focusing), wire("kai", .focusing)],
+            cheer: WireCheer(f: "kai", t: "me", k: CheerKind.fire.rawValue, at: t)
+        )
+        #expect(busy.othersFocusing == 3)
+        #expect(busy.compactTrailing == .cheer(LiveActivityPresentation.Cheer(kind: .fire, senderName: "kai")))
+        #expect(busy.compactTrailingAccessibilityLabel == "kai cheered you on, fire")
+    }
+
+    @Test func aCheerForSomeoneElseLeavesItAlone() {
+        let presentation = squad(
+            [wire("me", .focusing), wire("ava", .focusing), wire("noor", .onBreak)],
+            cheer: WireCheer(f: "noor", t: "ava", k: CheerKind.star.rawValue, at: t)
+        )
+        #expect(presentation.compactTrailing == .squadmates(1))
+        #expect(presentation.compactTrailingAccessibilityLabel == "1 squadmate locked in")
+    }
+}
+
+/// A cheer for you, while the room holds it (SPEC.md §1.6). Nothing here is timed: the room
+/// clears `c` about 10 seconds after it arrives.
+@Suite struct CheerTests {
+    @Test func squadOfSixHasAHeartFromNoor() throws {
+        let presentation = LiveActivitySamples.squadOfSix(now: now).presentation
+        let cheer = try #require(presentation.cheerForMe)
+        #expect(cheer.kind == .heart)
+        #expect(cheer.senderName == "Noor")
+        #expect(cheer.text == "Noor cheered you on")
+        #expect(cheer.accessibilityLabel == "Noor cheered you on, heart")
+        // The status line is still worked out; the views show the cheer in its place.
+        #expect(presentation.statusLine == "1 of 6 locked in")
+    }
+
+    @Test func aCheerToMeFromSomeoneInTheRoom() throws {
+        let presentation = squad(
+            [wire("me", .focusing), wire("ava", .onBreak)],
+            cheer: WireCheer(f: "ava", t: "me", k: CheerKind.applause.rawValue, at: t)
+        )
+        let cheer = try #require(presentation.cheerForMe)
+        #expect(cheer == LiveActivityPresentation.Cheer(kind: .applause, senderName: "ava"))
+        #expect(cheer.text == "ava cheered you on")
+        #expect(cheer.accessibilityLabel == "ava cheered you on, applause")
+    }
+
+    @Test func aCheerToSomeoneElseIsntMine() {
+        let presentation = squad(
+            [wire("me", .focusing), wire("ava", .onBreak), wire("kai", .focusing)],
+            cheer: WireCheer(f: "ava", t: "kai", k: CheerKind.heart.rawValue, at: t)
+        )
+        #expect(presentation.cheerForMe == nil)
+    }
+
+    @Test func aCheerFromSomeoneNotInTheRoomShowsNothing() {
+        // They left before the push that carried it, or a push went missing: no name to give it.
+        let presentation = squad(
+            [wire("me", .focusing), wire("ava", .onBreak)],
+            cheer: WireCheer(f: "ghost", t: "me", k: CheerKind.heart.rawValue, at: t)
+        )
+        #expect(presentation.cheerForMe == nil)
+        guard case .countdown(_, _) = presentation.compactTrailing else {
+            Issue.record("Expected my time, got \(presentation.compactTrailing)")
+            return
+        }
+    }
+
+    @Test func aCheerFromMyselfShowsNothing() {
+        // The server refuses these (422 cheer_invalid); a state that has one anyway says nothing.
+        let presentation = squad(
+            [wire("me", .focusing), wire("ava", .onBreak)],
+            cheer: WireCheer(f: "me", t: "me", k: CheerKind.heart.rawValue, at: t)
+        )
+        #expect(presentation.cheerForMe == nil)
+    }
+
+    @Test(arguments: [8, 11, 42, -1, Int.max, Int.min])
+    func unknownKindsAreSparkles(raw: Int) throws {
+        // A kind from a newer app still shows, as sparkles.
+        let presentation = squad(
+            [wire("me", .focusing), wire("ava", .onBreak)],
+            cheer: WireCheer(f: "ava", t: "me", k: raw, at: t)
+        )
+        let cheer = try #require(presentation.cheerForMe)
+        #expect(cheer.kind == .sparkles)
+        #expect(cheer.accessibilityLabel == "ava cheered you on, sparkles")
+    }
+
+    @Test func theLargestPayloadsCheerIsSparklesFromAFoxName() throws {
+        // `largest`: kind 11, from a twelve-emoji name.
+        let presentation = LiveActivitySamples.largest(now: now).presentation
+        let cheer = try #require(presentation.cheerForMe)
+        #expect(cheer.kind == .sparkles)
+        #expect(cheer.senderName == String(repeating: "🦊", count: LiveActivityLimits.maxNameLength))
+    }
+
+    @Test func theSendersNameIsTheOneTheRowShows() throws {
+        // Fitted to the wire limit, or "Someone" when blank, as under their Lockling.
+        let long = squad(
+            [wire("me", .focusing), wire("ava", .onBreak, name: "Bartholomew-Jones")],
+            cheer: WireCheer(f: "ava", t: "me", k: 0, at: t)
+        )
+        #expect(long.cheerForMe?.senderName == "Bartholomew-")
+        let blank = squad(
+            [wire("me", .focusing), wire("ava", .onBreak, name: "  ")],
+            cheer: WireCheer(f: "ava", t: "me", k: 0, at: t)
+        )
+        #expect(blank.cheerForMe?.text == "Someone cheered you on")
+    }
+
+    @Test func noCheerNoLine() {
+        #expect(LiveActivitySamples.squadOfFour(now: now).presentation.cheerForMe == nil)
+        #expect(LiveActivitySamples.solo(now: now).presentation.cheerForMe == nil)
     }
 }
 

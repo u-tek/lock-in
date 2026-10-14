@@ -275,6 +275,25 @@ public enum LKColor {
         }
     }
 
+    // MARK: Cheers
+
+    /// The colour of a cheer, by its kind (`Cheer.k`, Model's `CheerKind`, which DesignSystem
+    /// doesn't import): orange applause, red fire, yellow star, pink heart, cyan lightning, indigo
+    /// thumbs up, purple party, mint sparkles. A kind this build doesn't know is mint, as
+    /// `CheerKind(kind:)` draws it as sparkles.
+    public static func cheer(_ kind: Int) -> Color {
+        switch kind {
+        case 0: .orange
+        case 1: .red
+        case 2: .yellow
+        case 3: .pink
+        case 4: .cyan
+        case 5: .indigo
+        case 6: .purple
+        default: .mint
+        }
+    }
+
     // MARK: Live Activity
 
     /// Black, for the Lab's stand-ins for the Dynamic Island, StandBy and Always-On. The real

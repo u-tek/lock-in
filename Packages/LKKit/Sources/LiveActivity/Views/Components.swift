@@ -397,20 +397,75 @@ struct PetRow: View {
 
 /// "1 of 6 locked in", behind a lock in the focusing colour. A `Label`, as the system would
 /// write it: the symbol is decorative and VoiceOver reads the words.
+///
+/// While a cheer for you is in the content-state, the same line says who sent it instead ("Noor
+/// cheered you on", behind the cheer's symbol), so the layout around it doesn't move or grow.
 struct SquadStatus: View {
     let text: String
+    var cheer: LiveActivityPresentation.Cheer? = nil
+
+    var body: some View {
+        Group {
+            if let cheer {
+                CheerLine(cheer: cheer, ink: LKColor.textSecondary)
+            } else {
+                Label {
+                    Text(text)
+                        .foregroundStyle(LKColor.textSecondary)
+                } icon: {
+                    Image(systemName: LKMemberTone.focusing.symbolName)
+                        .foregroundStyle(LKMemberTone.focusing.color)
+                }
+                .labelStyle(.titleAndIcon)
+            }
+        }
+        .font(ActivityFont.status)
+        .lineLimit(1)
+    }
+}
+
+/// A cheer's symbol in its own colour. In Always-On nothing glows, so it's the symbol's outline
+/// in the secondary style there, as the Locklings become outlines.
+///
+/// When a new cheer replaces one of another kind the symbol swaps with the system's replace
+/// effect: a content transition, which Live Activities do animate (an animation modifier they'd
+/// ignore). The caller gives VoiceOver the cheer in words: the symbol's own name says nothing
+/// about who sent it.
+struct CheerSymbol: View {
+    let kind: CheerKind
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+
+    var body: some View {
+        Image(systemName: isLuminanceReduced ? kind.outlineSymbolName : kind.symbolName)
+            .foregroundStyle(ink)
+            .contentTransition(.symbolEffect(.replace))
+    }
+
+    // The hierarchical style and a `Color` are different types, so they meet as `AnyShapeStyle`.
+    private var ink: AnyShapeStyle {
+        isLuminanceReduced ? AnyShapeStyle(LKColor.textSecondary) : AnyShapeStyle(LKColor.cheer(kind.rawValue))
+    }
+}
+
+/// "Noor cheered you on" behind the cheer's symbol, on one line: the expanded island's line under
+/// the camera, and the Lock Screen's and StandBy's status line, for as long as the room holds the
+/// cheer. The caller sets the font. One VoiceOver element: "Noor cheered you on, heart".
+struct CheerLine<Ink: ShapeStyle>: View {
+    let cheer: LiveActivityPresentation.Cheer
+    /// The words' style; the symbol keeps its own colour.
+    let ink: Ink
 
     var body: some View {
         Label {
-            Text(text)
-                .foregroundStyle(LKColor.textSecondary)
+            Text(cheer.text)
+                .foregroundStyle(ink)
         } icon: {
-            Image(systemName: LKMemberTone.focusing.symbolName)
-                .foregroundStyle(LKMemberTone.focusing.color)
+            CheerSymbol(kind: cheer.kind)
         }
         .labelStyle(.titleAndIcon)
-        .font(ActivityFont.status)
         .lineLimit(1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(cheer.accessibilityLabel)
     }
 }
 

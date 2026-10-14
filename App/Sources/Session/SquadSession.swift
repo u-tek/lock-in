@@ -35,66 +35,8 @@ struct SquadSessionInfo: Equatable {
     }
 }
 
-/// The eight cheers (`Cheer.k`, 0–7 on the server): SF Symbols, each in its own system colour.
-/// The order is the wire format: never reorder, only add at the end.
-enum CheerKind: Int, CaseIterable, Identifiable, Sendable {
-    case applause = 0
-    case fire = 1
-    case star = 2
-    case heart = 3
-    case lightning = 4
-    case thumbsUp = 5
-    case party = 6
-    case sparkles = 7
-
-    /// A kind from a newer app shows as sparkles rather than nothing.
-    init(kind: Int) {
-        self = CheerKind(rawValue: kind) ?? .sparkles
-    }
-
-    var id: Int { rawValue }
-
-    /// All exist on iOS 17 and later.
-    var symbol: String {
-        switch self {
-        case .applause: "hands.clap.fill"
-        case .fire: "flame.fill"
-        case .star: "star.fill"
-        case .heart: "heart.fill"
-        case .lightning: "bolt.fill"
-        case .thumbsUp: "hand.thumbsup.fill"
-        case .party: "party.popper.fill"
-        case .sparkles: "sparkles"
-        }
-    }
-
-    var colour: Color {
-        switch self {
-        case .applause: .orange
-        case .fire: .red
-        case .star: .yellow
-        case .heart: .pink
-        case .lightning: .cyan
-        case .thumbsUp: .indigo
-        case .party: .purple
-        case .sparkles: .mint
-        }
-    }
-
-    /// For VoiceOver.
-    var name: LocalizedStringKey {
-        switch self {
-        case .applause: "Applause"
-        case .fire: "Fire"
-        case .star: "Star"
-        case .heart: "Heart"
-        case .lightning: "Lightning"
-        case .thumbsUp: "Thumbs up"
-        case .party: "Party"
-        case .sparkles: "Sparkles"
-        }
-    }
-}
+// The eight cheers are Model's `CheerKind` (`Cheer.k`, 0–7), each drawn in its own system colour,
+// `LKColor.cheer(_:)`: the widget extension draws the same ones on the Live Activity.
 
 // MARK: - Squadmates
 
@@ -205,9 +147,9 @@ private struct CheerBadge: View {
     let kind: CheerKind
 
     var body: some View {
-        Image(systemName: kind.symbol)
+        Image(systemName: kind.symbolName)
             .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(kind.colour)
+            .foregroundStyle(LKColor.cheer(kind.rawValue))
             .frame(width: 24, height: 24)
             .background(.regularMaterial, in: Circle())
             .accessibilityHidden(true)
@@ -276,15 +218,15 @@ struct CheerPicker: View {
                     Button {
                         onCheer(kind)
                     } label: {
-                        Image(systemName: kind.symbol)
+                        Image(systemName: kind.symbolName)
                             .font(.title2.weight(.semibold))
-                            .foregroundStyle(kind.colour)
+                            .foregroundStyle(LKColor.cheer(kind.rawValue))
                             .frame(width: 56, height: 56)
                             .background(Color(uiColor: .tertiarySystemFill), in: Circle())
                             .contentShape(Circle())
                     }
                     .buttonStyle(TileButtonStyle())
-                    .accessibilityLabel(Text(kind.name))
+                    .accessibilityLabel(kind.title)
                 }
             }
         }
@@ -308,9 +250,9 @@ struct FloatingCheer: View {
 
     var body: some View {
         VStack(spacing: LKSpacing.xxs) {
-            Image(systemName: kind.symbol)
+            Image(systemName: kind.symbolName)
                 .font(.system(size: 40, weight: .semibold))
-                .foregroundStyle(kind.colour)
+                .foregroundStyle(LKColor.cheer(kind.rawValue))
                 .symbolEffect(.bounce, value: risen)
             if let from {
                 Text(verbatim: from)

@@ -17,10 +17,12 @@ import WidgetKit
 /// itself, so the Live Activity Lab's stand-ins match.
 ///
 /// Squad: the squad name and how many are locked in, a row of up to six Locklings with names and
-/// their own countdowns, and the pet. Solo: your Lockling, what you're doing, your countdown, a bar
-/// that fills as the session runs, and Pause or Resume and End. StandBy swaps in a big Lockling and
-/// a huge countdown, and leaves the buttons for the phone in your hand. Every layout stays under
-/// 160 points tall, StandBy included, where the system starts cutting content off (SPEC.md §3).
+/// their own countdowns, and the pet. While a cheer for you is in the content-state, the count's
+/// line says who sent it instead ("Noor cheered you on"), so nothing moves. Solo: your Lockling,
+/// what you're doing, your countdown, a bar that fills as the session runs, and Pause or Resume
+/// and End. StandBy swaps in a big Lockling and a huge countdown, and leaves the buttons for the
+/// phone in your hand. Every layout stays under 160 points tall, StandBy included, where the
+/// system starts cutting content off (SPEC.md §3).
 /// Text grows with Dynamic Type only as far as that allows (`ActivityTextSize`);
 /// LockScreenHeightTests checks every sample at the default and the largest text sizes.
 ///
@@ -137,12 +139,13 @@ private struct SquadLayout: View {
         .padding(.vertical, LKSpacing.m)
     }
 
-    /// The squad name, and how many are locked in on the same baseline at the trailing edge.
+    /// The squad name, and how many are locked in on the same baseline at the trailing edge (or,
+    /// while a cheer for you is in, who sent it).
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: LKSpacing.s) {
             title
             Spacer(minLength: LKSpacing.s)
-            SquadStatus(text: presentation.statusLine)
+            SquadStatus(text: presentation.statusLine, cheer: presentation.cheerForMe)
                 // The count keeps its width; a long squad name truncates instead.
                 .layoutPriority(1)
         }
@@ -154,7 +157,7 @@ private struct SquadLayout: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: LKSpacing.xxs) {
                     title
-                    SquadStatus(text: presentation.statusLine)
+                    SquadStatus(text: presentation.statusLine, cheer: presentation.cheerForMe)
                 }
                 .accessibilityElement(children: .combine)
                 if let pet = presentation.pet {
@@ -286,8 +289,9 @@ private struct SoloLayout: View {
 // MARK: - Smart Stack
 
 /// The small activity family: about 160 × 70 points on Apple Watch, with the system's margins
-/// around it. You, your time, and how many are locked in: about 66 points, Lockling 24 + timer
-/// 26.3 + status 15.7. No buttons: the HIG keeps them out of the Smart Stack, which CarPlay shares.
+/// around it. You, your time, and how many are locked in (or who cheered you on): about 66
+/// points, Lockling 24 + timer 26.3 + status 15.7. No buttons: the HIG keeps them out of the Smart
+/// Stack, which CarPlay shares.
 private struct SmartStackLayout: View {
     let presentation: LiveActivityPresentation
 
@@ -315,7 +319,7 @@ private struct SmartStackLayout: View {
                 .accessibilityCountdownValue(me.countdown)
             }
             if !presentation.isSolo {
-                SquadStatus(text: presentation.statusLine)
+                SquadStatus(text: presentation.statusLine, cheer: presentation.cheerForMe)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

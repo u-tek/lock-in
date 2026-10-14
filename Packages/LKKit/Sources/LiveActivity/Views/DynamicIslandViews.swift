@@ -30,7 +30,8 @@ public struct CompactLeadingView: View {
 
 /// Compact, right of the camera: "+3" squadmates focusing, or your own time when solo or when
 /// nobody else is focusing. Trailing-aligned with monospaced digits, so it hugs the island's edge
-/// and doesn't shuffle as it ticks.
+/// and doesn't shuffle as it ticks. While a cheer for you is in, its symbol in its colour instead,
+/// at the same size as the text it stands in for.
 public struct CompactTrailingView: View {
     private let presentation: LiveActivityPresentation
 
@@ -46,6 +47,10 @@ public struct CompactTrailingView: View {
     @ViewBuilder
     private var trailing: some View {
         switch presentation.compactTrailing {
+        case .cheer(let cheer):
+            CheerSymbol(kind: cheer.kind)
+                .font(ActivityTimer.island.font)
+                .accessibilityLabel(presentation.compactTrailingAccessibilityLabel)
         case .squadmates(let count):
             Text(verbatim: "+\(count)")
                 .font(ActivityTimer.island.font)
@@ -117,7 +122,10 @@ public struct ExpandedTrailingView: View {
 }
 
 /// Expanded, under the camera: the squad name, or for a solo session what you're doing ("Locked
-/// in"). One line.
+/// in"). One line. While a cheer for you is in, that line says who sent it instead ("Noor cheered
+/// you on", behind the cheer's symbol), in the same type, so the island keeps its height. The
+/// region is about 200 points wide between your Lockling and your time, so the words shrink a
+/// little before a long name is cut short.
 public struct ExpandedCenterView: View {
     private let presentation: LiveActivityPresentation
 
@@ -126,11 +134,18 @@ public struct ExpandedCenterView: View {
     }
 
     public var body: some View {
-        Text(presentation.headline)
-            .font(ActivityFont.headline)
-            .foregroundStyle(LKColor.textPrimary)
-            .lineLimit(1)
-            .islandAppearance()
+        Group {
+            if let cheer = presentation.cheerForMe {
+                CheerLine(cheer: cheer, ink: LKColor.textPrimary)
+                    .minimumScaleFactor(0.8)
+            } else {
+                Text(presentation.headline)
+                    .foregroundStyle(LKColor.textPrimary)
+                    .lineLimit(1)
+            }
+        }
+        .font(ActivityFont.headline)
+        .islandAppearance()
     }
 }
 
