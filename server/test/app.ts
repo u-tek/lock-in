@@ -2,17 +2,21 @@
 // tests: `const app = await testApp(); const { token } = await app.signIn("sub.ava");`.
 
 import type { DatabaseSync } from "node:sqlite";
+import { ApnsAuth } from "../src/apnsAuth.ts";
 import { APPLE_ISSUER, APPLE_KEYS_URL, APPLE_REVOKE_URL, APPLE_TOKEN_URL } from "../src/appleAuth.ts";
 import type { Dependencies } from "../src/context.ts";
 import type { Env } from "../src/env.ts";
 import { handle } from "../src/index.ts";
 import { base64url } from "../src/jwt.ts";
+import { Room } from "../src/room.ts";
 import { TestD1 } from "./d1.ts";
 import { type RecordedRequest, makeKey } from "./helpers.ts";
+import { FakeAPNs, FakeNamespace, FakeWebSocket } from "./rooms.ts";
 
 export const BUNDLE_ID = "com.example.lockin";
 export const TEAM_ID = "TEAM123456";
 export const SIWA_KEY_ID = "SIWAKEY123";
+export const APNS_KEY_ID = "APNSKEY123";
 /** 2026-10-14, give or take. */
 export const T0 = 1_792_000_000;
 
@@ -152,6 +156,16 @@ export interface TestApp {
   /** One value from D1. */
   value(sql: string, ...params: Array<string | number | null>): unknown;
   count(sql: string, ...params: Array<string | number | null>): number;
+  /** The rooms (M3): one `Room` per session id, on the test's clock, pushing to `apns`. */
+  rooms: FakeNamespace<Room>;
+  apnsAuth: FakeNamespace<ApnsAuth>;
+  apns: FakeAPNs;
+  /** Moves the clock on by `seconds`, firing every room's alarm on the way, each at its own time. */
+  advance(seconds: number): Promise<void>;
+  /** Fires the alarms that are due now (an `end` push goes out at once, for example). */
+  runAlarms(): Promise<void>;
+  /** The room's end of the last WebSocket opened to a session. */
+  socket(sessionId: string): FakeWebSocket;
 }
 
 export async function testApp(overrides: Partial<Env> = {}): Promise<TestApp> {
@@ -160,15 +174,51 @@ export async function testApp(overrides: Partial<Env> = {}): Promise<TestApp> {
   const apple = new FakeApple([keys.current]);
   const clock = { now: T0 };
   const deps: Dependencies = { fetch: apple.fetch, now: () => clock.now };
+  const apns = new FakeAPNs();
+  const rooms = new FakeNamespace<Room>(
+    (state) =>
+      new Room(state, env, {
+        fetch: apns.fetch,
+        now: () => clock.now,
+        webSocketPair: () => {
+          const socket = new FakeWebSocket();
+          return [socket, socket];
+        },
+        // Node can't make a 101: a 200 marked as the upgrade stands in for it.
+        upgradeResponse: () => new Response(null, { status: 200, headers: { "x-test-upgrade": "websocket" } }),
+      }),
+  );
+  const apnsAuth = new FakeNamespace<ApnsAuth>((state) => new ApnsAuth(state, env, { now: () => clock.now }));
   const env: Env = {
     DB: d1.binding,
-    ROOMS: {} as DurableObjectNamespace,
+    ROOMS: rooms.binding,
+    APNS_AUTH: apnsAuth.binding,
     APNS_BUNDLE_ID: BUNDLE_ID,
     ENVIRONMENT: "development",
     APNS_TEAM_ID: TEAM_ID,
+    // One key for APNs and Sign in with Apple, as the owner may well have.
+    APNS_KEY_ID,
+    APNS_PRIVATE_KEY: keys.siwa.pem,
     SIWA_KEY_ID,
     SIWA_PRIVATE_KEY: keys.siwa.pem,
     ...overrides,
+  };
+
+  const fireAlarms = async (until: number) => {
+    for (;;) {
+      let next: { name: string; at: number } | undefined;
+      for (const [name, { state }] of rooms.objects) {
+        const at = state.storage.alarm;
+        if (at !== null && at <= until * 1000 && (next === undefined || at < next.at)) next = { name, at };
+      }
+      if (next === undefined) break;
+      clock.now = Math.max(clock.now, next.at / 1000);
+      const entry = rooms.entry(next.name);
+      // The runtime clears an alarm as it fires; the handler sets the next one.
+      entry.state.storage.alarm = null;
+      await entry.object.alarm();
+    }
+    clock.now = until;
   };
 
   const issued = new Set<string>();
@@ -228,6 +278,16 @@ export async function testApp(overrides: Partial<Env> = {}): Promise<TestApp> {
     },
     count(sql, ...params) {
       return Number(app.value(sql, ...params));
+    },
+    rooms,
+    apnsAuth,
+    apns,
+    advance: (seconds) => fireAlarms(clock.now + seconds),
+    runAlarms: () => fireAlarms(clock.now),
+    socket(sessionId) {
+      const socket = rooms.entry(sessionId).state.sockets.at(-1);
+      if (socket === undefined) throw new Error("No WebSocket was opened to this session");
+      return socket;
     },
   };
   return app;

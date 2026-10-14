@@ -13,22 +13,28 @@ const DEFAULT_CODES: Readonly<Record<number, string>> = {
   502: "upstream_unavailable",
 };
 
-/** Thrown by a route; `handle` turns it into `{"error": message, "code": code}` with this status. */
+/**
+ * Thrown by a route; `handle` turns it into `{"error": message, "code": code, ...details}` with this
+ * status. `details` carries the few extra fields the contract names, e.g. `limit` on 402
+ * `plus_required` or `sessionId` on 409 `already_in_session` (docs/milestones/M3.md).
+ */
 export class HttpError extends Error {
   override name = "HttpError";
   readonly status: number;
   readonly code: string;
+  readonly details: Readonly<Record<string, unknown>>;
 
-  constructor(status: number, message: string, code?: string) {
+  constructor(status: number, message: string, code?: string, details: Record<string, unknown> = {}) {
     super(message);
     this.status = status;
     this.code = code ?? DEFAULT_CODES[status] ?? (status >= 500 ? "internal" : "bad_request");
+    this.details = details;
   }
 }
 
 /** An error from the contract: `apiError(409, "handle_taken", "That handle is taken")`. */
-export function apiError(status: number, code: string, message: string): HttpError {
-  return new HttpError(status, message, code);
+export function apiError(status: number, code: string, message: string, details: Record<string, unknown> = {}): HttpError {
+  return new HttpError(status, message, code, details);
 }
 
 export function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
@@ -39,7 +45,7 @@ export function json(body: unknown, status = 200, headers: Record<string, string
 }
 
 export function errorResponse(error: HttpError): Response {
-  return json({ error: error.message, code: error.code }, error.status);
+  return json({ ...error.details, error: error.message, code: error.code }, error.status);
 }
 
 export function noContent(): Response {

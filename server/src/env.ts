@@ -4,8 +4,13 @@
 export interface Env {
   /** D1: the schema in migrations/. Accounts and friends from M2. */
   DB: D1Database;
-  /** One `Room` Durable Object per live session. Stubbed until M3. */
+  /** One `Room` Durable Object per session (src/room.ts), named by the session id. */
   ROOMS: DurableObjectNamespace;
+  /**
+   * The one `ApnsAuth` Durable Object (src/apnsAuth.ts), named "global": it signs the APNs provider
+   * token every room presents, so they all present the same one (docs/decisions/0004).
+   */
+  APNS_AUTH: DurableObjectNamespace;
 
   /**
    * The app's bundle ID (LK_BUNDLE_ID). The APNs topic is `<this>.push-type.liveactivity`, it's the

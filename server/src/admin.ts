@@ -12,6 +12,7 @@ import {
   type ApnsResult,
   isDeviceToken,
 } from "./apns.ts";
+import { SharedProviderToken } from "./apnsAuth.ts";
 import { DEMO_SCENARIOS, type DemoScenario, demoScenario } from "./demo.ts";
 import type { Env } from "./env.ts";
 import { HttpError, hasBearerToken, json, notFound, readJSON } from "./http.ts";
@@ -74,7 +75,7 @@ export async function pushTest(request: Request, env: Env, deps: ApnsDependencie
     throw error;
   }
 
-  const client = apnsClient(apnsCredentials(env), deps);
+  const client = apnsClient(apnsCredentials(env), env, deps);
   let result: ApnsResult;
   try {
     result = await client.sendLiveActivity({ deviceToken: input.token, environment: input.env, priority, payload });
@@ -163,17 +164,22 @@ function apnsCredentials(env: Env): ApnsCredentials {
   return credentials;
 }
 
-// One client per isolate, so the provider token is reused across requests. APNs answers 429
-// TooManyProviderTokenUpdates when one connection sees a new token more than once in 20 minutes, and
-// Cloudflare may share connections between isolates that each sign their own token. Tests inject
-// `fetch` and get a fresh client each time. M3, or sooner if the spike sees that 429: give every
-// isolate the same token (docs/decisions/0004).
+// One client per isolate. Deployed, it presents the provider token every room presents, from the
+// `ApnsAuth` Durable Object: APNs answers 429 TooManyProviderTokenUpdates when one connection sees a
+// new token more than once in 20 minutes, and Cloudflare may share connections between isolates
+// (docs/decisions/0004). Tests inject `fetch` and get a fresh client that signs its own token.
 let sharedClient: { credentials: string; client: ApnsClient } | undefined;
 
-function apnsClient(credentials: ApnsCredentials, deps: ApnsDependencies): ApnsClient {
+function apnsClient(credentials: ApnsCredentials, env: Env, deps: ApnsDependencies): ApnsClient {
   if (deps.fetch !== undefined || deps.now !== undefined) return new ApnsClient(credentials, deps);
   const key = JSON.stringify(credentials);
-  if (sharedClient?.credentials !== key) sharedClient = { credentials: key, client: new ApnsClient(credentials) };
+  if (sharedClient?.credentials !== key) {
+    const client =
+      env.APNS_AUTH === undefined
+        ? new ApnsClient(credentials)
+        : new ApnsClient({ bundleId: credentials.bundleId, tokens: new SharedProviderToken(env.APNS_AUTH) });
+    sharedClient = { credentials: key, client };
+  }
   return sharedClient.client;
 }
 

@@ -39,12 +39,20 @@ export function normaliseName(input: string): string {
   return input.trim();
 }
 
+export interface ModerationOptions {
+  /**
+   * Names only: the most code points allowed after trimming. Display names are 12 (the Live
+   * Activity's `n`); squad names use the same rules up to 20 (the attributes' `sq`, M3).
+   */
+  maxNameLength?: number;
+}
+
 /** Step 1: the shape alone. */
-export function isValid(kind: ModerationKind, input: string): boolean {
+export function isValid(kind: ModerationKind, input: string, options: ModerationOptions = {}): boolean {
   if (kind === "handle") return HANDLE.test(normaliseHandle(input));
   const name = normaliseName(input);
   const length = [...name].length;
-  return length >= 1 && length <= MAX_DISPLAY_NAME_LENGTH && !UNPRINTABLE.test(name);
+  return length >= 1 && length <= (options.maxNameLength ?? MAX_DISPLAY_NAME_LENGTH) && !UNPRINTABLE.test(name);
 }
 
 /** Step 2: the tokens and the compact form of the (lowercased) input. */
@@ -66,8 +74,8 @@ export function isAllowed(input: string): boolean {
 }
 
 /** The whole check. Names are checked as stored, i.e. trimmed. */
-export function moderate(kind: ModerationKind, input: string): ModerationVerdict {
-  if (!isValid(kind, input)) return "invalid";
+export function moderate(kind: ModerationKind, input: string, options: ModerationOptions = {}): ModerationVerdict {
+  if (!isValid(kind, input, options)) return "invalid";
   const stored = kind === "handle" ? normaliseHandle(input) : normaliseName(input);
   return isAllowed(stored) ? "ok" : "not_allowed";
 }

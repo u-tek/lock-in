@@ -17,6 +17,7 @@ function env(overrides: Partial<Env> = {}): Env {
   return {
     DB: {} as D1Database,
     ROOMS: {} as DurableObjectNamespace,
+    APNS_AUTH: {} as DurableObjectNamespace,
     APNS_BUNDLE_ID: "com.example.lockin",
     ENVIRONMENT: "development",
     APNS_TEAM_ID: "TEAM123456",
@@ -51,7 +52,8 @@ describe("routes", () => {
   test("anything else is a JSON 404", async () => {
     for (const request of [
       new Request("https://x.example/"),
-      new Request("https://x.example/sessions/abc"),
+      new Request("https://x.example/rooms/abc"),
+      new Request("https://x.example/sessions"),
       new Request("https://x.example/health", { method: "POST" }),
       new Request("https://x.example/admin/push-test"),
     ]) {
@@ -76,6 +78,24 @@ describe("routes", () => {
       ["POST", "/blocks"],
       ["DELETE", "/blocks/Av4Nq8sT2b"],
       ["POST", "/reports"],
+      ["DELETE", "/auth/session"],
+      ["GET", "/squads"],
+      ["POST", "/squads"],
+      ["PATCH", "/squads/Sq00000001"],
+      ["POST", "/squads/Sq00000001/invite"],
+      ["POST", "/squads/join/ABCDEFGH"],
+      ["PATCH", "/squads/Sq00000001/members/me"],
+      ["DELETE", "/squads/Sq00000001/members/me"],
+      ["POST", "/sessions"],
+      ["POST", "/sessions/r7Kq2xP9aL/join"],
+      ["POST", "/sessions/r7Kq2xP9aL/la-token"],
+      ["POST", "/sessions/r7Kq2xP9aL/pause"],
+      ["POST", "/sessions/r7Kq2xP9aL/resume"],
+      ["POST", "/sessions/r7Kq2xP9aL/end"],
+      ["POST", "/sessions/r7Kq2xP9aL/slip"],
+      ["POST", "/sessions/r7Kq2xP9aL/cheer"],
+      ["GET", "/sessions/r7Kq2xP9aL"],
+      ["GET", "/sessions/r7Kq2xP9aL/live"],
     ];
     const app = await testApp();
     for (const [method, path] of authed) {

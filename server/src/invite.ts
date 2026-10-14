@@ -6,7 +6,8 @@
 //   GET /j/:code                                 -> the landing page (HTML)
 //   GET /.well-known/apple-app-site-association  -> universal links for /j/*
 //
-// The page is public: it shows the code's creator's display name and nothing else about them.
+// The page is public: it shows a friend code's creator's display name, or a squad code's squad name,
+// and nothing else about them.
 // Everything is escaped and nothing loads from anywhere else (src/http.ts sets the CSP).
 
 import type { Context } from "./context.ts";
@@ -18,6 +19,7 @@ export const APP_STORE_URL = "https://apps.apple.com/app/lockin/id0000000000";
 
 type Landing =
   | { kind: "invite"; code: string; name: string | null }
+  | { kind: "squad"; code: string; squad: string }
   | { kind: "expired" }
   | { kind: "unknown" };
 
@@ -26,8 +28,14 @@ type Landing =
 export async function invitePage(context: Context, rawCode: string): Promise<Response> {
   const code = canonicalFriendCode(rawCode);
   const invite = code === undefined ? null : await context.db.inviteCode(code);
-  if (code === undefined || invite === null || invite.kind !== "friend") return html(landingPage({ kind: "unknown" }), 404);
+  if (code === undefined || invite === null) return html(landingPage({ kind: "unknown" }), 404);
   if (invite.expires_at !== null && invite.expires_at <= context.now) return html(landingPage({ kind: "expired" }), 410);
+  if (invite.kind === "squad") {
+    // M3: a squad code shows the squad's name (moderated like display names), nothing about its members.
+    const squad = await context.db.squadById(invite.target_id);
+    if (squad === null) return html(landingPage({ kind: "unknown" }), 404);
+    return html(landingPage({ kind: "squad", code, squad: squad.name }));
+  }
   const creator = await context.db.userById(invite.created_by);
   if (creator === null) return html(landingPage({ kind: "unknown" }), 404);
   return html(landingPage({ kind: "invite", code, name: creator.display_name }));
@@ -45,6 +53,16 @@ export function landingPage(landing: Landing): string {
   <div class="card">
     <p class="step">New to Lockin? <a href="${escapeHTML(APP_STORE_URL)}">Get it on the App Store</a>, then add your friend with this code:</p>
     <p class="code" aria-label="Friend code ${code.split("").join(" ")}">${code.slice(0, 4)} ${code.slice(4)}</p>
+  </div>`;
+  } else if (landing.kind === "squad") {
+    const code = escapeHTML(landing.code);
+    title = `Join ${landing.squad} on Lockin`;
+    body = `<h1>${escapeHTML(title)}</h1>
+  <p class="lede">Lock in together. Your squad's timers sit right on your Lock Screen while you all work.</p>
+  <a class="button" href="lockin://j/${code}">Open in Lockin</a>
+  <div class="card">
+    <p class="step">New to Lockin? <a href="${escapeHTML(APP_STORE_URL)}">Get it on the App Store</a>, then join the squad with this code:</p>
+    <p class="code" aria-label="Squad code ${code.split("").join(" ")}">${code.slice(0, 4)} ${code.slice(4)}</p>
   </div>`;
   } else {
     title = landing.kind === "expired" ? "This invite has expired" : "This invite link doesn't work";

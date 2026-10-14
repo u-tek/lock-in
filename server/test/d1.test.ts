@@ -5,7 +5,7 @@ import { TestD1, migrationFiles } from "./d1.ts";
 
 describe("TestD1", () => {
   test("applies every migration in order", () => {
-    expect(migrationFiles()).toEqual(["0001_init.sql", "0002_accounts.sql"]);
+    expect(migrationFiles()).toEqual(["0001_init.sql", "0002_accounts.sql", "0003_squads.sql"]);
     const d1 = new TestD1();
     const tables = d1.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toContain("auth_tokens");

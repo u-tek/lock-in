@@ -20,12 +20,13 @@ export const APNS_HOSTS: Readonly<Record<ApnsEnvironment, string>> = {
 };
 
 /**
- * How old the cached provider token gets before it's signed again. Apple asks for a new token no
- * more than every 20 minutes and no less than every 60, and a token whose `iat` is over an hour old
- * gets 403 ExpiredProviderToken. APNs enforces the 20-minute floor per connection: a connection that
- * sees a new token more than once in 20 minutes gets 429 TooManyProviderTokenUpdates. 40 minutes
- * sits between the two bounds, but only for this isolate's own tokens: Cloudflare may carry several
- * isolates' different tokens on one connection to APNs (docs/decisions/0004).
+ * How old the provider token gets before it's signed again. Apple asks for a new token no more than
+ * every 20 minutes and no less than every 60, and a token whose `iat` is over an hour old gets 403
+ * ExpiredProviderToken. APNs enforces the 20-minute floor per connection: a connection that sees a
+ * new token more than once in 20 minutes gets 429 TooManyProviderTokenUpdates. Cloudflare, not our
+ * code, owns the connections to APNs and may carry several isolates' requests on one, so from M3
+ * every room asks one `ApnsAuth` Durable Object for the token (src/apnsAuth.ts,
+ * docs/decisions/0004): one token for everyone, changing every 40 minutes.
  */
 export const PROVIDER_TOKEN_REFRESH_SECONDS = 40 * 60;
 
@@ -44,6 +45,27 @@ export interface ApnsCredentials {
   privateKey: string;
   /** The app's bundle ID, not the widget extension's. */
   bundleId: string;
+}
+
+/** A provider token and when it was signed (its `iat`, Unix seconds). */
+export interface ProviderToken {
+  token: string;
+  issuedAt: number;
+}
+
+/** Where an `ApnsClient` gets the provider token for its `authorization` header. */
+export interface ProviderTokenSource {
+  /** The token to send now. */
+  token(): Promise<string>;
+  /** APNs answered 403 ExpiredProviderToken to `token`: replace it, unless that's already happened. */
+  expired(token: string): Promise<void>;
+}
+
+/** A client that takes its provider token from elsewhere (the rooms: `SharedProviderToken`). */
+export interface ApnsTokenConfig {
+  /** The app's bundle ID, not the widget extension's. */
+  bundleId: string;
+  tokens: ProviderTokenSource;
 }
 
 export interface ApnsDependencies {
@@ -87,43 +109,53 @@ export function isDeviceToken(value: unknown): value is string {
   return typeof value === "string" && DEVICE_TOKEN.test(value);
 }
 
-export class ApnsClient {
-  /** `<bundle id>.push-type.liveactivity`. */
-  readonly topic: string;
-
-  private readonly credentials: ApnsCredentials;
-  private readonly fetcher: typeof fetch;
+/**
+ * Signs provider tokens with the `.p8` key and keeps each one for `PROVIDER_TOKEN_REFRESH_SECONDS`.
+ * Requests that arrive together share one signature. Used by `ApnsAuth`, which hands its token to
+ * every room, and by `/admin/push-test` under test.
+ */
+export class ProviderTokenSigner implements ProviderTokenSource {
+  private readonly credentials: Pick<ApnsCredentials, "teamId" | "keyId" | "privateKey">;
   private readonly now: () => number;
   private key: CryptoKey | undefined;
-  private cached: { token: string; issuedAt: number } | undefined;
-  private signing: Promise<string> | undefined;
+  private cached: ProviderToken | undefined;
+  private signing: Promise<ProviderToken> | undefined;
 
-  constructor(credentials: ApnsCredentials, dependencies: ApnsDependencies = {}) {
-    for (const field of ["teamId", "keyId", "privateKey", "bundleId"] as const) {
+  constructor(credentials: Pick<ApnsCredentials, "teamId" | "keyId" | "privateKey">, now: () => number = () => Date.now() / 1000) {
+    for (const field of ["teamId", "keyId", "privateKey"] as const) {
       if (credentials[field].trim().length === 0) throw new ApnsConfigError(`APNs ${field} is empty`);
     }
     this.credentials = credentials;
-    this.topic = `${credentials.bundleId}.push-type.liveactivity`;
-    // Wrapped: stored bare and called as `this.fetcher(…)`, the global fetch would get the client as
-    // `this`, which Workers refuse ("Illegal invocation").
-    const fetcher = dependencies.fetch ?? fetch;
-    this.fetcher = (input, init) => fetcher(input, init);
-    this.now = dependencies.now ?? (() => Date.now() / 1000);
+    this.now = now;
   }
 
-  /** The provider token for the `authorization` header: cached, and signed again once it's 40 minutes old. */
-  async providerToken(): Promise<string> {
+  /** The cached token, or a new one once it's 40 minutes old. */
+  async current(): Promise<ProviderToken> {
     const cached = this.cached;
-    if (cached !== undefined && this.now() - cached.issuedAt < PROVIDER_TOKEN_REFRESH_SECONDS) return cached.token;
+    if (cached !== undefined && this.now() - cached.issuedAt < PROVIDER_TOKEN_REFRESH_SECONDS) return cached;
     // Requests that arrive together share one signature: a connection that sees a new token more
     // than once in 20 minutes gets 429 TooManyProviderTokenUpdates.
-    this.signing ??= this.signProviderToken().finally(() => {
+    this.signing ??= this.sign().finally(() => {
       this.signing = undefined;
     });
     return this.signing;
   }
 
-  private async signProviderToken(): Promise<string> {
+  async token(): Promise<string> {
+    return (await this.current()).token;
+  }
+
+  /** Forgets `token` if it's still the current one, so the next request signs again. */
+  async expired(token: string): Promise<void> {
+    if (this.cached?.token === token) this.cached = undefined;
+  }
+
+  /** Starts from a token signed earlier (by this key), e.g. one `ApnsAuth` kept in storage. */
+  restore(token: ProviderToken): void {
+    this.cached = { token: token.token, issuedAt: token.issuedAt };
+  }
+
+  private async sign(): Promise<ProviderToken> {
     if (this.key === undefined) {
       try {
         this.key = await importP8(this.credentials.privateKey);
@@ -134,7 +166,34 @@ export class ApnsClient {
     const issuedAt = Math.floor(this.now());
     const token = await signES256({ kid: this.credentials.keyId }, { iss: this.credentials.teamId, iat: issuedAt }, this.key);
     this.cached = { token, issuedAt };
-    return token;
+    return this.cached;
+  }
+}
+
+export class ApnsClient {
+  /** `<bundle id>.push-type.liveactivity`. */
+  readonly topic: string;
+
+  private readonly tokens: ProviderTokenSource;
+  private readonly fetcher: typeof fetch;
+
+  /**
+   * With credentials, the client signs its own provider tokens (`ProviderTokenSigner`); with a
+   * token source, it asks that instead (the rooms ask `ApnsAuth`, docs/decisions/0004).
+   */
+  constructor(config: ApnsCredentials | ApnsTokenConfig, dependencies: ApnsDependencies = {}) {
+    if (config.bundleId.trim().length === 0) throw new ApnsConfigError("APNs bundleId is empty");
+    this.topic = `${config.bundleId}.push-type.liveactivity`;
+    this.tokens = "tokens" in config ? config.tokens : new ProviderTokenSigner(config, dependencies.now);
+    // Wrapped: stored bare and called as `this.fetcher(…)`, the global fetch would get the client as
+    // `this`, which Workers refuse ("Illegal invocation").
+    const fetcher = dependencies.fetch ?? fetch;
+    this.fetcher = (input, init) => fetcher(input, init);
+  }
+
+  /** The provider token for the `authorization` header, from the client's token source. */
+  providerToken(): Promise<string> {
+    return this.tokens.token();
   }
 
   /**
@@ -159,7 +218,7 @@ export class ApnsClient {
 
     // Our clock and Apple's disagree about the token's age. Sign a new one (unless a concurrent
     // request already has) and try once more.
-    if (this.cached?.token === token) this.cached = undefined;
+    await this.tokens.expired(token);
     return this.post(url, await this.providerToken(), push, body);
   }
 

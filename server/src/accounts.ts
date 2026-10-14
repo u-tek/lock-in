@@ -5,6 +5,7 @@
 //   GET    /me                -> { user }
 //   PATCH  /me                { handle?, displayName?, avatarCode? } -> { user }
 //   DELETE /me                -> 204
+//   DELETE /auth/session      -> 204 (signs this token out, M3)
 //   GET    /handles/:handle   -> { available, reason? }
 //   POST   /devices           { apnsToken, env, pushToStartToken?, laEnabled, frequentPushes, tz } -> 204
 //
@@ -22,11 +23,12 @@ import {
   siwaConfig,
   verifyIdentityToken,
 } from "./appleAuth.ts";
-import { createSession } from "./auth.ts";
+import { createSession, hashToken } from "./auth.ts";
 import { type AuthedContext, type Context, newShortID } from "./context.ts";
 import { type ProfileChanges, type UserRow, isUniqueViolation } from "./db.ts";
-import { HttpError, apiError, json, noContent, readObject } from "./http.ts";
+import { HttpError, apiError, bearerToken, json, noContent, readObject } from "./http.ts";
 import { moderate, normaliseHandle, normaliseName } from "./moderation.ts";
+import { leaveRoomsForDeletion } from "./sessions.ts";
 
 /** The app's view of an account. Times are Unix seconds. */
 export interface User {
@@ -211,9 +213,13 @@ export async function handleAvailability(context: AuthedContext, rawHandle: stri
  * Deletes the account (App Review 5.1.1(v)): every row that's only theirs goes with it (src/db.ts),
  * reports they filed stay without their name on them, and Apple's refresh token is revoked. A
  * revocation Apple refuses is logged; the account is gone either way.
+ *
+ * M3: they leave any room that's still open first, so they vanish from their squadmates' Live
+ * Activities, and their squads are handed on as if they'd left each one (`Database.deleteUser`).
  */
 export async function deleteMe(context: AuthedContext): Promise<Response> {
   const refreshToken = context.user.apple_refresh_token;
+  await leaveRoomsForDeletion(context.env, context.db, context.user.id);
   await context.db.deleteUser(context.user.id);
 
   let revoked = "no Apple token to revoke";
@@ -231,6 +237,15 @@ export async function deleteMe(context: AuthedContext): Promise<Response> {
     }
   }
   console.log(`me: account deleted, ${revoked}`);
+  return noContent();
+}
+
+// DELETE /auth/session
+
+/** Signs out: the bearer token that made this request stops working. Other devices stay signed in. */
+export async function signOut(context: AuthedContext): Promise<Response> {
+  await context.db.deleteAuthToken(await hashToken(bearerToken(context.request)));
+  console.log("auth: signed out");
   return noContent();
 }
 

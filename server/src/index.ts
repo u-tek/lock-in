@@ -13,14 +13,22 @@
 //   POST   /reports
 //   GET    /j/:code                the invite landing page (src/invite.ts)
 //   GET    /.well-known/apple-app-site-association
+//   M3, squad sessions (docs/milestones/M3.md):
+//   DELETE /auth/session           signs this token out                          (src/accounts.ts)
+//   GET    /squads  POST /squads  PATCH /squads/:id  POST /squads/:id/invite      (src/squads.ts)
+//   POST   /squads/join/:code  PATCH /squads/:id/members/me  DELETE /squads/:id/members/me
+//   POST   /sessions  POST /sessions/:id/join  POST /sessions/:id/la-token       (src/sessions.ts)
+//   POST   /sessions/:id/pause|resume|end|slip  POST /sessions/:id/cheer
+//   GET    /sessions/:id  GET /sessions/:id/live (WebSocket)
 //
-// Every M2 route but /auth/apple, /j/:code and /.well-known/* needs `Authorization: Bearer <token>`.
-// M3 adds rooms (the `Room` Durable Object) and the push fan-out.
+// Every route but /health, /admin/*, /auth/apple, /j/:code and /.well-known/* needs
+// `Authorization: Bearer <token>`. Each session is a `Room` Durable Object (src/room.ts); the APNs
+// provider token comes from the one `ApnsAuth` Durable Object (src/apnsAuth.ts).
 //
 // The runtime treats every named export of this module as an entrypoint and refuses to start if
 // one isn't a function or class, so constants and helpers live in the other modules.
 
-import { deleteMe, getMe, handleAvailability, patchMe, registerDevice, signInWithApple } from "./accounts.ts";
+import { deleteMe, getMe, handleAvailability, patchMe, registerDevice, signInWithApple, signOut } from "./accounts.ts";
 import { pushTest } from "./admin.ts";
 import { authenticate } from "./auth.ts";
 import { type AuthedContext, type Context, type Dependencies, makeContext } from "./context.ts";
@@ -29,7 +37,10 @@ import type { Env } from "./env.ts";
 import { blockUser, fileReport, friendCode, listBlocks, listFriends, redeemFriendCode, removeFriend, unblockUser } from "./friends.ts";
 import { HttpError, errorResponse, json, notFound } from "./http.ts";
 import { appSiteAssociation, invitePage } from "./invite.ts";
+import { cheer, getSession, joinSession, liveSession, memberAction, startSession, uploadLiveActivityToken } from "./sessions.ts";
+import { createSquad, joinSquadByCode, leaveSquad, listSquads, renameSquad, squadInvite, updateMyMembership } from "./squads.ts";
 
+export { ApnsAuth } from "./apnsAuth.ts";
 export { Room } from "./room.ts";
 export type { Env } from "./env.ts";
 export type { Dependencies } from "./context.ts";
@@ -58,6 +69,7 @@ const ROUTES: Route[] = [
   open("POST", "/admin/push-test", ({ request, env, deps }) => pushTest(request, env, deps)),
 
   open("POST", "/auth/apple", signInWithApple),
+  authed("DELETE", "/auth/session", signOut),
   authed("GET", "/me", getMe),
   authed("PATCH", "/me", patchMe),
   authed("DELETE", "/me", deleteMe),
@@ -72,6 +84,24 @@ const ROUTES: Route[] = [
   authed("POST", "/blocks", blockUser),
   authed("DELETE", "/blocks/:userId", (context, [userId = ""]) => unblockUser(context, userId)),
   authed("POST", "/reports", fileReport),
+
+  authed("GET", "/squads", listSquads),
+  authed("POST", "/squads", createSquad),
+  authed("POST", "/squads/join/:code", (context, [code = ""]) => joinSquadByCode(context, code)),
+  authed("PATCH", "/squads/:id", (context, [id = ""]) => renameSquad(context, id)),
+  authed("POST", "/squads/:id/invite", (context, [id = ""]) => squadInvite(context, id)),
+  authed("PATCH", "/squads/:id/members/me", (context, [id = ""]) => updateMyMembership(context, id)),
+  authed("DELETE", "/squads/:id/members/me", (context, [id = ""]) => leaveSquad(context, id)),
+
+  authed("POST", "/sessions", startSession),
+  authed("POST", "/sessions/:id/join", (context, [id = ""]) => joinSession(context, id)),
+  authed("POST", "/sessions/:id/la-token", (context, [id = ""]) => uploadLiveActivityToken(context, id)),
+  ...(["pause", "resume", "end", "slip"] as const).map((action) =>
+    authed("POST", `/sessions/:id/${action}`, (context, [id = ""]) => memberAction(action)(context, id)),
+  ),
+  authed("POST", "/sessions/:id/cheer", (context, [id = ""]) => cheer(context, id)),
+  authed("GET", "/sessions/:id", (context, [id = ""]) => getSession(context, id)),
+  authed("GET", "/sessions/:id/live", (context, [id = ""]) => liveSession(context, id)),
 
   open("GET", "/j/:code", (context, [code = ""]) => invitePage(context, code)),
   open("GET", "/.well-known/apple-app-site-association", async (context) => appSiteAssociation(context)),
