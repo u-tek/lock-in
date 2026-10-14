@@ -37,7 +37,8 @@ import Testing
             .joinSession(SquadData.sessionId, minutes: 25),
             .liveUpdates(SquadData.sessionId),
         ])
-        #expect(api.pushToStarts == [nil])
+        let none: [PushToStart?] = [nil]
+        #expect(api.pushToStarts == none)
         #expect(engine.phase == .running(startedAt: referenceDate, endsAt: referenceDate.addingTimeInterval(25 * 60), plannedMinutes: 25))
         #expect(engine.mode == .squad(squadId: SquadData.squadId, sessionId: SquadData.sessionId))
         #expect(engine.me == SquadData.me)
@@ -136,7 +137,8 @@ import Testing
         let pushed = try await join(engine, pushToStart: token)
 
         #expect(pushed)
-        #expect(api.pushToStarts == [token])
+        let sent: [PushToStart?] = [token]
+        #expect(api.pushToStarts == sent)
         #expect(engine.phase != .idle)
         // Waiting for the activity iOS starts; the foreground starts one here if it never comes.
         #expect(engine.stored.room?.activityID == nil)
@@ -166,6 +168,7 @@ import Testing
         let pushed = try await join(engine, pushToStart: token)
 
         #expect(pushed)
-        #expect(api.pushToStarts == [token, token])
+        let sent: [PushToStart?] = [token, token]
+        #expect(api.pushToStarts == sent)
     }
 }

@@ -60,7 +60,8 @@ private let lockInJSON = """
 
 @Suite struct LockInAlertTests {
     @Test func readsTheServersPayload() throws {
-        let alert = LockInAlert(userInfo: try serverPayload(lockInJSON))
+        let userInfo = try serverPayload(lockInJSON)
+        let alert = LockInAlert(userInfo: userInfo)
         #expect(alert == LockInAlert(sessionId: "r7Kq2xP9aL", squadId: "Sq7Lb2Kd9P"))
     }
 
@@ -71,12 +72,14 @@ private let lockInJSON = """
 
     @Test func extraKeysAreIgnored() throws {
         let json = #"{"aps":{},"lk":{"type":"lockin","sid":"r7Kq2xP9aL","sq":"Sq7Lb2Kd9P","v":2,"name":"Ava"},"other":1}"#
-        #expect(LockInAlert(userInfo: try serverPayload(json))?.sessionId == "r7Kq2xP9aL")
+        let userInfo = try serverPayload(json)
+        #expect(LockInAlert(userInfo: userInfo)?.sessionId == "r7Kq2xP9aL")
     }
 
     @Test func aMissingTypeStillReads() throws {
         let json = #"{"lk":{"sid":"r7Kq2xP9aL","sq":"Sq7Lb2Kd9P"}}"#
-        #expect(LockInAlert(userInfo: try serverPayload(json))?.squadId == "Sq7Lb2Kd9P")
+        let userInfo = try serverPayload(json)
+        #expect(LockInAlert(userInfo: userInfo)?.squadId == "Sq7Lb2Kd9P")
     }
 
     @Test func anythingElseIsNotOne() throws {
@@ -92,7 +95,8 @@ private let lockInJSON = """
             #"{"lk":{"type":"lockin","sid":null,"sq":"Sq7Lb2Kd9P"}}"#,
         ]
         for json in payloads {
-            #expect(LockInAlert(userInfo: try serverPayload(json)) == nil, "\(json)")
+            let userInfo = try serverPayload(json)
+            #expect(LockInAlert(userInfo: userInfo) == nil, "\(json)")
         }
         #expect(LockInAlert(userInfo: [:]) == nil)
     }
@@ -114,7 +118,8 @@ private let lockInJSON = """
     }
 
     @Test func aTapOnTheAlertOpensTheSquad() throws {
-        let route = NotificationRoute.route(actionIdentifier: UNNotificationDefaultActionIdentifier, userInfo: try serverPayload(lockInJSON))
+        let userInfo = try serverPayload(lockInJSON)
+        let route = NotificationRoute.route(actionIdentifier: UNNotificationDefaultActionIdentifier, userInfo: userInfo)
         #expect(route == .openSquad(squadId: "Sq7Lb2Kd9P"))
         #expect(route.squadId == "Sq7Lb2Kd9P")
     }

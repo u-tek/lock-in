@@ -411,7 +411,8 @@ import Testing
         #expect(kept?.keys.contains("quietHours") == false)
 
         let off = try JSONSerialization.jsonObject(with: JSONEncoder().encode(registration(.off))) as? [String: Any]
-        #expect(off?["quietHours"] is NSNull)
+        let null = off?["quietHours"] as? NSNull
+        #expect(null != nil)
 
         let window = try JSONSerialization.jsonObject(with: JSONEncoder().encode(registration(.window(start: 1_320, end: 420)))) as? [String: Any]
         let sent = try #require(window?["quietHours"] as? [String: Any])
