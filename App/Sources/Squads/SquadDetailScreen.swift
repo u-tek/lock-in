@@ -5,8 +5,9 @@ import Model
 import Social
 import SwiftUI
 
-/// One squad: everyone's Lockling, the invite (code, QR and link), muting "locking in" alerts,
-/// and leaving. Pushed from the Friends screen, or shown in a sheet from Home's squad picker.
+/// One squad: its pet, its streak and this week's leaderboard (M5), the invite (code, QR and
+/// link), muting "locking in" alerts, and leaving. Pushed from the Friends screen, or shown in a
+/// sheet from Home's squad picker and pet.
 struct SquadDetailScreen: View {
     @ObservedObject var squads: SquadsStore
     /// For counting invites shared (`inviteShared`), the same count as a friend invite.
@@ -54,7 +55,13 @@ struct SquadDetailScreen: View {
 
     private func content(_ squad: Squad) -> some View {
         List {
-            membersSection(squad)
+            petSection(squad)
+            Section {
+                SquadStreakRow(streak: squad.streak)
+            } header: {
+                Text("Streak")
+            }
+            weekSection(squad)
             inviteSection(squad)
             Section {
                 Toggle("Mute ‘locking in’ alerts", isOn: $muted)
@@ -77,6 +84,9 @@ struct SquadDetailScreen: View {
         .listStyle(.insetGrouped)
         .refreshable {
             await squads.refresh()
+            if let fresh = squads.squad(id: squad.id) {
+                await squads.loadLeaderboard(for: fresh)
+            }
         }
         .onChange(of: squad.muted) { _, value in
             muted = value
@@ -104,36 +114,39 @@ struct SquadDetailScreen: View {
             }
         }
         .task {
+            await squads.loadLeaderboard(for: squad)
+        }
+        .task {
             await loadInvite(squad)
         }
     }
 
-    // MARK: - Members
+    // MARK: - Pet, streak and the week (M5)
 
-    /// Everyone's Lockling, three to a row: the squad's group photo.
-    private func membersSection(_ squad: Squad) -> some View {
+    /// The squad's pet, big, with its name, mood and growth.
+    private func petSection(_ squad: Squad) -> some View {
         Section {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: LKSpacing.m), count: 3), spacing: LKSpacing.l) {
-                ForEach(squad.members) { member in
-                    VStack(spacing: LKSpacing.xs) {
-                        FriendAvatar(avatar: member.locklingAvatar, size: 72)
-                        Text(member.nameForDisplay)
-                            .font(LKFont.subheadline.weight(.medium))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .accessibilityElement(children: .combine)
-                }
-            }
-            .padding(.vertical, LKSpacing.s)
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
+            SquadPetCard(pet: squad.pet)
         } header: {
             if squad.openSessionId != nil {
                 Label("Locked in now", systemImage: "lock.fill")
                     .foregroundStyle(LKColor.focusing)
             }
+        }
+    }
+
+    /// Everyone's focused minutes since Monday, most first. Members show without their minutes
+    /// until the week has loaded.
+    private func weekSection(_ squad: Squad) -> some View {
+        let ranking = squads.ranking(of: squad)
+        return Section {
+            ForEach(Array(ranking.enumerated()), id: \.element.member.id) { index, row in
+                LeaderboardRow(place: index + 1, member: row.member, entry: row.entry, isMe: row.member.id == myID)
+            }
+        } header: {
+            Text("This week")
+        } footer: {
+            Text("Starts again on Monday.")
         }
     }
 

@@ -36,6 +36,8 @@ struct RootView: View {
             } else {
                 OnboardingFlow(engine: engine, plus: plus) {
                     OnboardingState.markComplete()
+                    // The first Lockling is free to make: its parts are yours from now on (M5).
+                    social.shop.keepParts(of: engine.avatar)
                     hasOnboarded = true
                 }
                 .transition(.opacity)
@@ -61,8 +63,10 @@ struct RootView: View {
             }
         }
         // Squads come with the account: at launch when already signed in, and after signing in.
+        // So do the account's coins and items, this phone's brought over the first time (M5).
         .task(id: account.state.isSignedIn) {
             await social.refreshSquads()
+            await social.shop.refresh()
         }
         // Friends see the Lockling on this phone: send it when signing in and whenever it changes.
         .onChange(of: account.state) { _, state in
@@ -78,17 +82,22 @@ struct RootView: View {
         }
     }
 
+    /// The squads, and the coins a session may have earned (M5).
     private func refreshSquads() {
         let social = self.social
         Task {
             await social.refreshSquads()
+            await social.shop.refresh()
         }
     }
 
     private func syncAvatar() {
         let avatar = engine.avatar
         let account = self.account
+        let shop = social.shop
         Task {
+            // The account may only wear parts it owns (M5): this phone's come over first.
+            await shop.importIfNeeded()
             await account.updateAvatar(avatar)
         }
     }

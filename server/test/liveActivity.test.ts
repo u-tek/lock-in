@@ -236,6 +236,19 @@ describe("staleDateFor", () => {
     expect(staleDateFor(state, 1_791_900_000)).toBe(3300);
   });
 
+  test("a slipped member is running: their end holds the activity open (decision 0009)", () => {
+    const base = solo().m[0]!;
+    const state = {
+      v: 1,
+      m: [
+        { ...base, s: MemberState.done, b: 1000, e: 1000 },
+        { ...base, i: "Nr2Kx7pQ1m", s: MemberState.left, b: 1000, e: 3000 },
+        { ...base, i: "Jl3Bt8Gc2f", s: MemberState.slipped, b: 1000, e: 2000 },
+      ],
+    };
+    expect(staleDateFor(state, 1_791_900_000)).toBe(2300);
+  });
+
   test("counts a paused member as now plus the time they have left", () => {
     // Kai paused with 780 s left; at this point that outlasts everyone else.
     const now = 1_791_903_000;

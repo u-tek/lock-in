@@ -102,7 +102,6 @@ struct HomeScreen: View {
                         StatChips(stats: engine.stats)
                             .padding(.top, LKSpacing.l)
                     }
-                        .padding(.top, LKSpacing.l)
                     Spacer(minLength: LKSpacing.l)
                     if !mySquads.isEmpty {
                         SquadPicker(squads: mySquads, rooms: social.rooms, selection: $squadChoice) { squad in
@@ -150,6 +149,10 @@ struct HomeScreen: View {
                                 Button("Done") { self.sheet = nil }
                             }
                         }
+                }
+            case .shop:
+                ShopScreen(shop: shop, account: account, plus: plus, avatar: $engine.avatar) {
+                    self.sheet = nil
                 }
             }
         }
@@ -262,10 +265,17 @@ struct HomeScreen: View {
 
     private var topBar: some View {
         HStack(spacing: LKSpacing.s) {
-            CoinCount(coins: engine.stats.coins)
-                .padding(.horizontal, LKSpacing.m)
-                .frame(minHeight: 36)
-                .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+            // The coin shop (M5).
+            Button {
+                sheet = .shop
+            } label: {
+                CoinCount(coins: shop.coins)
+                    .padding(.horizontal, LKSpacing.m)
+                    .frame(minHeight: 36)
+                    .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the shop")
             Spacer()
             if !plus.isPlus {
                 Button {
