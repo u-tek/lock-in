@@ -388,9 +388,12 @@ public final class SessionEngine: ObservableObject {
         }
     }
 
-    /// Runs a Live Activity button's command. Set as `SessionIntentBridge.shared.handler` at
-    /// launch. Returns once the activity shows the change, so the system doesn't suspend the app
-    /// with the update still pending.
+    /// Runs a Live Activity button's command, or the "Lock in" widget's and control's start. Set as
+    /// `SessionIntentBridge.shared.handler` at launch. Returns once the activity shows the change,
+    /// so the system doesn't suspend the app with the update still pending.
+    ///
+    /// Start begins a solo session only when nothing is running or paused (`start(minutes:)`): a
+    /// widget tapped mid-session leaves that session alone.
     public func handle(_ command: SessionIntentBridge.Command) async {
         // The button may be pressed after the time ran out, before the app noticed.
         if let session = stored.active, session.isSquad {
@@ -405,6 +408,7 @@ public final class SessionEngine: ObservableObject {
         case .pause: pause()
         case .resume: resume()
         case .end: end()
+        case .start(let minutes): start(minutes: minutes)
         }
         await squadWork?.value
         await activityWork?.value

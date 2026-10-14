@@ -66,6 +66,7 @@ describe("a join with pushToStart", () => {
     const { pushedToStart, ...joined } = response.body;
     expect(pushedToStart).toBe(true);
     // Otherwise the usual Joined.
+    const species = app.value("SELECT pet_species FROM squads WHERE id = ?", squadId);
     expect(joined).toEqual({
       session: { id: sid, squadId, hostId: ava.user.id, status: "open", createdAt: T0 },
       attributes: { sid, me: noor.user.id, sq: "Library Goblins" },
@@ -75,6 +76,8 @@ describe("a join with pushToStart", () => {
           { i: ava.user.id, n: "Ava", a: "b0.c0.e0.h0", s: 0, b: T0, e: T0 + 1500 },
           { i: noor.user.id, n: "Noor", a: "b0.c0.e0.h0", s: 0, b: T0 + 60, e: T0 + 60 + 3000 },
         ],
+        // The egg (M5), hungry: nobody has finished today.
+        p: { k: `${species}.0`, md: 1, x: 0 },
       },
     });
 

@@ -11,7 +11,8 @@ import {
   parseContentState,
   payloadByteCount,
 } from "../src/liveActivity.ts";
-import { CHEER_SHOWN_SECONDS, COALESCE_SECONDS, ENDED_ROOM_KEPT_SECONDS, MEMBER_MAX_SECONDS, PET_MOOD_HAPPY, PET_MOOD_LOW } from "../src/room.ts";
+import { PET_RULES } from "../src/pet.ts";
+import { CHEER_SHOWN_SECONDS, COALESCE_SECONDS, ENDED_ROOM_KEPT_SECONDS, MEMBER_MAX_SECONDS } from "../src/room.ts";
 import { type SignedIn, T0, type TestApp, read, testApp } from "./app.ts";
 import { JWT_IN_LOG } from "./helpers.ts";
 import { laToken } from "./rooms.ts";
@@ -72,6 +73,8 @@ async function upload(who: SignedIn, sid: string, seed: number, env = "productio
 const participant = (sid: string, who: SignedIn) =>
   ({ ...(app.sqlite.prepare("SELECT * FROM participants WHERE session_id = ? AND user_id = ?").get(sid, who.user.id) as object) }) as Record<string, unknown>;
 const stateOf = async (who: SignedIn, sid: string) => (await call(who, "GET", `/sessions/${sid}`)).body.contentState;
+/** The squad's egg as the content-state shows it (M5): its species at stage 0, hungry until someone finishes today. */
+const egg = (squadId: string, md = 1) => ({ k: `${app.value("SELECT pet_species FROM squads WHERE id = ?", squadId)}.0`, md, x: 0 });
 
 describe("POST /sessions, solo", () => {
   test("opens a room with just you, ready for ActivityKit", async () => {
@@ -135,8 +138,8 @@ describe("POST /sessions, squad", () => {
     const sid = opened.session.id;
     expect(opened.session).toEqual({ id: sid, squadId, hostId: ava.user.id, status: "open", createdAt: T0 });
     expect(opened.attributes).toEqual({ sid, me: ava.user.id, sq: "Library Goblins" });
-    // No pet until the egg hatches (M5): `p` is left out, never null.
-    expect(opened.contentState).toEqual({ v: 1, m: [{ i: ava.user.id, n: "Ava", a: "b0.c0.e0.h0", s: 0, b: T0, e: T0 + 1500 }] });
+    // M5: the egg is there from the start.
+    expect(opened.contentState).toEqual({ v: 1, m: [{ i: ava.user.id, n: "Ava", a: "b0.c0.e0.h0", s: 0, b: T0, e: T0 + 1500 }], p: egg(squadId) });
     expect((await call(noor, "GET", "/squads")).body.squads[0].openSessionId).toBe(sid);
 
     app.clock.now = T0 + 60;
@@ -150,6 +153,7 @@ describe("POST /sessions, squad", () => {
         { i: ava.user.id, n: "Ava", a: "b0.c0.e0.h0", s: 0, b: T0, e: T0 + 1500 },
         { i: noor.user.id, n: "Noor", a: "b0.c0.e0.h0", s: 0, b: T0 + 60, e: T0 + 60 + 3000 },
       ],
+      p: egg(squadId),
     });
     expect(app.count("SELECT count(*) FROM sessions")).toBe(1);
     expect(app.count("SELECT count(*) FROM participants WHERE session_id = ?", sid)).toBe(2);
@@ -164,15 +168,12 @@ describe("POST /sessions, squad", () => {
     expect(again).toEqual(first);
   });
 
-  test("the squad pet comes from D1, with today's mood", async () => {
+  test("the squad pet comes from D1: species and stage, today's mood, progress to the next stage", async () => {
     const squadId = await squad(ava, noor, kai);
-    app.sqlite.prepare("UPDATE squads SET pet_species = 'fox', pet_stage = 2, pet_xp = 1350 WHERE id = ?").run(squadId);
-    // One of three focused today: low.
+    app.sqlite.prepare("UPDATE squads SET pet_species = 'sprout', pet_xp = 1350, hatched_at = ? WHERE id = ?").run(T0 - 86_400, squadId);
+    // A teen (600 XP up), (1350 - 600) / (3000 - 600) of the way to adult; hungry, nobody has finished today.
     const opened = await start(ava, { squadId, minutes: 25 });
-    expect(opened.contentState.p).toEqual({ k: "fox.2", md: PET_MOOD_LOW, x: 0.25 });
-    // Two of three: happy.
-    const joined = await start(noor, { squadId, minutes: 25 });
-    expect(joined.contentState.p).toEqual({ k: "fox.2", md: PET_MOOD_HAPPY, x: 0.25 });
+    expect(opened.contentState.p).toEqual({ k: "sprout.2", md: 1, x: 0.31 });
   });
 
   test("only members: 403 not_member", async () => {
@@ -592,7 +593,9 @@ describe("payload budget", () => {
     app.sqlite.prepare("UPDATE users SET plus_until = ?").run(T0 + 86_400);
     const created = await call(owner, "POST", "/squads", { name: "🔒".repeat(20) });
     const squadId = created.body.squad.id as string;
-    app.sqlite.prepare("UPDATE squads SET pet_species = 'abcdefghij', pet_stage = 99, pet_xp = 599 WHERE id = ?").run(squadId);
+    // The longest species the rules have, prestige, and a progress that needs both decimals.
+    const longest = [...PET_RULES.species].sort((a, b) => b.length - a.length)[0] ?? "";
+    app.sqlite.prepare("UPDATE squads SET pet_species = ?, pet_xp = 14950, hatched_at = 1 WHERE id = ?").run(longest, squadId);
     const code = (await call(owner, "POST", `/squads/${squadId}/invite`)).body.code;
     const others: SignedIn[] = [];
     for (let index = 0; index < 5; index++) {
@@ -618,7 +621,7 @@ describe("payload budget", () => {
     for (const request of app.apns.requests) {
       const state = request.aps["content-state"];
       expect(state.m).toHaveLength(6);
-      expect(state.p).toEqual({ k: "abcdefghij.99", md: PET_MOOD_HAPPY, x: 1 });
+      expect(state.p).toEqual({ k: `${longest}.4`, md: 1, x: 0.33 });
       expect(new TextEncoder().encode(request.body).length).toBeLessThanOrEqual(APNS_BODY_LIMIT_BYTES);
       const bytes = payloadByteCount({ sid, me: owner.user.id, sq: "🔒".repeat(20) }, state);
       expect(bytes).toBeLessThanOrEqual(PAYLOAD_BUDGET_BYTES);
@@ -635,7 +638,7 @@ describe("GET /sessions/:id", () => {
       status: 200,
       body: {
         session: { id: sid, squadId, hostId: ava.user.id, status: "open", createdAt: T0 },
-        contentState: { v: 1, m: [{ i: ava.user.id, n: "Ava", a: "b0.c0.e0.h0", s: 0, b: T0, e: T0 + 1500 }] },
+        contentState: { v: 1, m: [{ i: ava.user.id, n: "Ava", a: "b0.c0.e0.h0", s: 0, b: T0, e: T0 + 1500 }], p: egg(squadId) },
       },
     });
     // Kai hasn't joined, but is in the squad: may look.

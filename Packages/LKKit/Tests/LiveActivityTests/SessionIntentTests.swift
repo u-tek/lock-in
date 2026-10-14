@@ -30,6 +30,20 @@ import Testing
         #expect(recorder.commands == [.pause, .resume, .end])
     }
 
+    /// The "Lock in" widget and control start 25 minutes; Shortcuts can ask for another length.
+    @Test func startSendsItsLength() async throws {
+        let recorder = Recorder()
+        SessionIntentBridge.shared.handler = { command in
+            await recorder.record(command)
+        }
+        defer { SessionIntentBridge.shared.handler = nil }
+
+        _ = try await StartSessionIntent().perform()
+        #expect(recorder.commands == [.start(minutes: 25)])
+        _ = try await StartSessionIntent(minutes: 50).perform()
+        #expect(recorder.commands == [.start(minutes: 25), .start(minutes: 50)])
+    }
+
     /// The intent waits for the handler, so the activity has its update before the system is told
     /// the intent finished.
     @Test func theIntentWaitsForTheHandlerToFinish() async throws {
@@ -52,6 +66,7 @@ import Testing
         _ = try await PauseSessionIntent().perform()
         _ = try await ResumeSessionIntent().perform()
         _ = try await EndSessionIntent().perform()
+        _ = try await StartSessionIntent().perform()
 
         // Setting a handler afterwards replays nothing.
         let recorder = Recorder()
@@ -71,5 +86,10 @@ import Testing
         #expect(!PauseSessionIntent.isDiscoverable)
         #expect(!ResumeSessionIntent.isDiscoverable)
         #expect(!EndSessionIntent.isDiscoverable)
+    }
+
+    /// Starting a session is something to ask Siri or Shortcuts for.
+    @Test func startIsInShortcuts() {
+        #expect(StartSessionIntent.isDiscoverable)
     }
 }

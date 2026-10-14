@@ -9,6 +9,12 @@
 //   and 5 otherwise (SPEC.md §4.4);
 // - finishes timers itself: an alarm at the next `e` marks that member done;
 // - clears a cheer 10 seconds after it arrives;
+// - credits what each timer earned when it stops (M5): coins to the member, XP to the squad's pet,
+//   a sad spell for a slip or an early leave, the egg hatching once two members finished, and the
+//   streak days the finish makes count, all in the same D1 transaction as the room's own rows and
+//   each exactly once (`Database.syncRoom`); then it reads the pet back and refreshes `p`, and tells
+//   the open rooms of the member's other squads to do the same (their mood and streak can change);
+// - looks at the pet again when its mood changes by itself: a sad spell ending, the squad's midnight;
 // - ends when nobody's timer is running any more: one `end` push with dismissal-date now + 30 min,
 //   the session marked ended in D1, and the room's push counts logged;
 // - serves the app's live view over a WebSocket (the hibernation API), sending the state on connect
@@ -30,7 +36,7 @@
 
 import { ApnsClient, type ApnsEnvironment, type ApnsPriority, type ApnsResult, isDeviceToken, isGoneToken } from "./apns.ts";
 import { SharedProviderToken } from "./apnsAuth.ts";
-import { Database, type EventWrite, type ParticipantWrite, type SquadSnapshotRow, isUniqueViolation } from "./db.ts";
+import { type CreditWrite, Database, type EventWrite, type ParticipantWrite, type StreakDayWrite, isUniqueViolation } from "./db.ts";
 import type { Env } from "./env.ts";
 import { HttpError, apiError, errorResponse, isRecord, json, noContent, readJSON } from "./http.ts";
 import {
@@ -41,7 +47,6 @@ import {
   MAX_MEMBERS,
   type Member,
   MemberState,
-  type Pet,
   assertPayloadBudget,
   buildLiveActivityPayload,
   canonicalContentState,
@@ -49,6 +54,8 @@ import {
   isShortID,
   staleDateFor,
 } from "./liveActivity.ts";
+import { PET_RULES, sessionCoins, wholeMinutes } from "./pet.ts";
+import { type SquadProgress, squadProgress, streakDay } from "./progress.ts";
 
 /** The member the Worker authenticated. Set by the Worker only. */
 export const ROOM_USER_HEADER = "x-lockin-user";
@@ -73,13 +80,8 @@ export const MEMBER_MAX_SECONDS = 8 * 60 * 60;
 export const D1_RETRY_SECONDS = 30;
 /** An ended room keeps its final state this long for GET /sessions/:id, then deletes it. */
 export const ENDED_ROOM_KEPT_SECONDS = 24 * 60 * 60;
-/** Pet mood counts members who focused in this window (until M5 decides whose "today" it is). */
-export const PET_MOOD_WINDOW_SECONDS = 24 * 60 * 60;
-/** Pet mood: happy when at least half the squad focused in the window, otherwise low. */
-export const PET_MOOD_HAPPY = 3;
-export const PET_MOOD_LOW = 1;
-/** Placeholder until M5's stage thresholds: progress `x` is XP within a 600-XP stage. */
-export const PET_XP_PER_STAGE = 600;
+/** The pet's progress `x` is rounded to this many decimal places: plenty for a bar, and short. */
+export const PET_PROGRESS_DECIMALS = 2;
 
 /** The part of a WebSocket the room uses. */
 export interface RoomSocket {
@@ -111,6 +113,8 @@ export interface RoomDependencies {
   webSocketPair?: () => [client: unknown, server: RoomSocket];
   /** The 101 response that hands the client end to the caller. */
   upgradeResponse?: (client: unknown) => Response;
+  /** `length` random bytes: a species for a squad from before M5 that has none yet. */
+  random?: (length: number) => Uint8Array;
 }
 
 /** Who's joining, as the Worker read them from D1. `name` is 1–12 code points, `avatar` an avatar code. */
@@ -159,11 +163,15 @@ interface RoomMember {
   laEnv?: ApnsEnvironment;
 }
 
+/** The squad's pet as the room last read it (M5). */
 interface PetSnapshot {
-  species: string | null;
-  stage: number;
-  xp: number;
-  mood: number;
+  /** The content-state's `p`: `<species>.<stage>` (an egg is stage 0), mood and progress. */
+  k: string;
+  md: number;
+  x: number;
+  hatched: boolean;
+  /** When to look again: when a sad spell ends or the squad's day does, the mood changes by itself. */
+  checkAt: number;
 }
 
 interface PendingPush {
@@ -201,7 +209,14 @@ interface RoomRecord {
   members: RoomMember[];
   /** Focused seconds and slips of members moved out to make room, should they come back. */
   former: Record<string, { focusedSec: number; slips: number }>;
+  /** The squad's pet; null for a solo room (or a squad room that couldn't read it yet). */
   pet: PetSnapshot | null;
+  /** What stopped timers earned, not in D1 yet (M5). */
+  credits: CreditWrite[];
+  /** Members who finished a timer here: two of them hatch the squad's egg (M5). */
+  finishers: string[];
+  /** The egg hatched here at this time, and D1 hasn't heard yet. */
+  hatchAt?: number;
   cheer?: Cheer;
   cheerClearAt?: number;
   /** When each member last cheered. */
@@ -233,6 +248,12 @@ interface Batch {
 
 type Outcome = { result: ApnsResult } | { error: string };
 
+/** What a D1 write took with it (M5): the credits, and whether the egg hatched. */
+interface Synced {
+  credits: CreditWrite[];
+  hatched: boolean;
+}
+
 const STORAGE_KEY = "room";
 const RUNNING: readonly MemberState[] = [MemberState.focusing, MemberState.break, MemberState.paused];
 
@@ -261,6 +282,8 @@ export class Room {
   private record: RoomRecord | null | undefined;
   private queue: Promise<unknown> = Promise.resolve();
   private apns: ApnsClient | null | undefined;
+  /** Other squads' open rooms to tell to look at their pet again, once this one is free: session id -> the member who finished. */
+  private readonly pokes = new Map<string, string>();
 
   constructor(state: RoomState, env: Env, deps: RoomDependencies = {}) {
     this.state = state;
@@ -268,6 +291,10 @@ export class Room {
     this.deps = deps;
     this.db = new Database(env.DB);
     this.clock = deps.now ?? (() => Date.now() / 1000);
+  }
+
+  private random(length: number): Uint8Array {
+    return (this.deps.random ?? ((count: number) => crypto.getRandomValues(new Uint8Array(count))))(length);
   }
 
   /** Whole Unix seconds: the times in the content-state, in D1 and on alarms. */
@@ -285,7 +312,9 @@ export class Room {
       if (!isShortID(userId) || !isShortID(sessionId)) throw new HttpError(400, "Missing the user or session header");
       const body = request.method === "POST" ? await readJSON(request) : {};
       if (!isRecord(body)) throw new HttpError(400, "Expected a JSON object");
-      return await this.exclusive(() => this.route(request, action, userId, sessionId, body));
+      const response = await this.exclusive(() => this.route(request, action, userId, sessionId, body));
+      await this.sendPokes();
+      return response;
     } catch (error) {
       if (error instanceof HttpError) return errorResponse(error);
       console.error(`room ${isShortID(sessionId) ? sessionId : "?"}: ${action} failed (${error instanceof Error ? error.name : typeof error})`);
@@ -321,6 +350,9 @@ export class Room {
       case "forget":
         await this.forget(room, userId);
         return noContent();
+      case "pet":
+        await this.petChanged(room);
+        return noContent();
       default:
         throw new HttpError(404, "Not found");
     }
@@ -335,16 +367,17 @@ export class Room {
     const profile = roomProfile(body.profile);
     const now = this.now();
 
-    let squad: SquadSnapshotRow | null = null;
+    let squadName: string | null = null;
     if (squadId !== null) {
-      squad = await this.db.squadSnapshot(squadId, now - PET_MOOD_WINDOW_SECONDS);
+      const squad = await this.db.squadById(squadId);
       if (squad === null) throw apiError(403, "not_member", "You're not in this squad");
+      squadName = squad.name;
     }
     const host = newMember(userId, profile, minutes, now);
     const room: RoomRecord = {
       sid,
       squadId,
-      squadName: squad?.name ?? null,
+      squadName,
       hostId: userId,
       createdAt: now,
       status: "open",
@@ -352,6 +385,8 @@ export class Room {
       members: [host],
       former: {},
       pet: null,
+      credits: [],
+      finishers: [],
       lastCheer: {},
       pushes: { batches: 0, p10: 0, p5: 0, refused: 0, failed: 0, cleared: 0 },
       dirty: [],
@@ -367,8 +402,8 @@ export class Room {
       }
       throw error;
     }
-    // After the host's row is written, so they count towards today's mood.
-    if (squadId !== null) await this.refreshSquad(room, now);
+    // The egg shows from the start (M5): `p` is in every squad room's state.
+    if (squadId !== null) await this.refreshPet(room, now);
     this.record = room;
     await this.commit(room, now, false);
     console.log(`room ${sid}: opened (${squadId === null ? "solo" : "squad"})`);
@@ -422,7 +457,7 @@ export class Room {
     delete room.former[userId];
     room.dirty = room.dirty.filter((id) => id !== userId);
 
-    await this.refreshSquad(room, now);
+    await this.refreshPet(room, now);
     this.change(room, 10, now);
     await this.commit(room, now, true);
     return this.joined(room, userId);
@@ -521,6 +556,7 @@ export class Room {
     delete room.former[userId];
     delete room.lastCheer[userId];
     room.events = room.events.filter((event) => event.userId !== userId);
+    room.credits = room.credits.filter((credit) => credit.userId !== userId);
     if (member === undefined) return;
     const now = this.now();
     room.members = room.members.filter((each) => each !== member);
@@ -534,6 +570,18 @@ export class Room {
       this.endIfIdle(room, now);
     }
     await this.commit(room, now, true);
+  }
+
+  /**
+   * Another room says this squad's pet may have changed: one of its members finished a session
+   * elsewhere (solo, or in another squad's room), which can change today's mood and streak.
+   */
+  private async petChanged(room: RoomRecord): Promise<void> {
+    if (room.status !== "open" || room.squadId === null) return;
+    const now = this.now();
+    const refreshed = await this.refreshPet(room, now);
+    if (refreshed?.changed === true) this.change(room, refreshed.hatched ? 10 : 5, now);
+    await this.commit(room, now, refreshed?.changed === true);
   }
 
   /** The live view (GET /sessions/:id/live): the state now, then after every change. */
@@ -594,12 +642,23 @@ export class Room {
         this.record = null;
         return undefined;
       }
-      const changed = this.tick(room, now);
+      let changed = this.tick(room, now);
+      // The mood changes by itself when a sad spell ends and at the squad's midnight.
+      if (room.status === "open" && room.pet !== null && now >= room.pet.checkAt) {
+        const refreshed = await this.refreshPet(room, now);
+        if (refreshed?.changed === true) {
+          this.change(room, refreshed.hatched ? 10 : 5, now);
+          changed = true;
+        }
+      }
+      // D1 first, so a push taken now carries what the finishes just earned (the hatch, say).
+      if (await this.settle(room, now)) changed = true;
       let taken: Batch | undefined;
       if (room.pending !== undefined && now >= room.pending.flushAt) taken = this.takeBatch(room, now);
-      await this.commit(room, now, changed);
+      await this.save(room, changed);
       return taken;
     });
+    await this.sendPokes();
     if (batch === undefined) return;
 
     // The APNs requests go out without holding the room, so members' requests aren't kept waiting.
@@ -649,8 +708,34 @@ export class Room {
     member.endedAt = at;
     const type = state === MemberState.done ? "done" : state === MemberState.slipped ? "slip" : "leave";
     room.events.push({ sessionId: room.sid, userId: member.id, type, at, meta: { sec: round, ...meta } });
+    this.credit(room, member, state, at, round, meta.cap === true);
     markDirty(room, member);
     this.change(room, 10, this.now());
+  }
+
+  /**
+   * What the timer earned (M5): coins for every whole focused minute plus the bonus for finishing,
+   * XP for the squad's pet, and a sad spell for a slip or an early leave (not the 8-hour cap, which
+   * nobody chose). Two members finishing in a squad's room hatch its egg.
+   */
+  private credit(room: RoomRecord, member: RoomMember, state: MemberState, at: number, focusedSec: number, capped: boolean): void {
+    const completed = state === MemberState.done;
+    const squadId = room.squadId;
+    room.credits.push({
+      sessionId: room.sid,
+      userId: member.id,
+      startedAt: member.b,
+      endedAt: at,
+      squadId,
+      focusedSec,
+      completed,
+      coins: sessionCoins(focusedSec, completed),
+      xp: squadId === null ? 0 : wholeMinutes(focusedSec),
+      sad: squadId !== null && (state === MemberState.slipped || (state === MemberState.left && !capped)),
+    });
+    if (!completed) return;
+    if (!room.finishers.includes(member.id)) room.finishers.push(member.id);
+    if (squadId !== null && room.finishers.length >= 2 && room.hatchAt === undefined && room.pet?.hatched !== true) room.hatchAt = at;
   }
 
   /** Nobody's timer is running: the room ends, and its final state goes out as an `end` push now. */
@@ -781,38 +866,117 @@ export class Room {
   // State, storage and D1
 
   private async load(): Promise<RoomRecord | null> {
-    if (this.record === undefined) this.record = (await this.state.storage.get<RoomRecord>(STORAGE_KEY)) ?? null;
+    if (this.record === undefined) {
+      const stored = await this.state.storage.get<RoomRecord>(STORAGE_KEY);
+      this.record = stored === undefined ? null : upgraded(stored);
+    }
     return this.record;
   }
 
   /** Writes D1 if it's behind, saves the room, sets the next alarm, and tells the live views if `changed`. */
   private async commit(room: RoomRecord, now: number, changed: boolean): Promise<void> {
-    await this.syncD1(room, now);
+    const settled = await this.settle(room, now);
+    await this.save(room, changed || settled);
+  }
+
+  /**
+   * Writes D1 if it's behind. When that credited a squad's room (M5), reads the pet back and
+   * refreshes `p`: priority 10 if the egg hatched, else 5. Whether the state changed.
+   */
+  private async settle(room: RoomRecord, now: number): Promise<boolean> {
+    const synced = await this.syncD1(room, now);
+    if (synced === null || room.squadId === null || (synced.credits.length === 0 && !synced.hatched)) return false;
+    const refreshed = await this.refreshPet(room, now);
+    if (refreshed?.changed !== true) return false;
+    this.change(room, refreshed.hatched ? 10 : 5, now);
+    return true;
+  }
+
+  /** Saves the room, sets the next alarm, and tells the live views if `changed`. */
+  private async save(room: RoomRecord, changed: boolean): Promise<void> {
     await this.state.storage.put(STORAGE_KEY, room);
     await this.scheduleAlarm(room);
     if (changed) this.broadcast(room);
   }
 
-  private async syncD1(room: RoomRecord, now: number): Promise<void> {
-    if (room.dirty.length === 0 && !room.endDirty && room.events.length === 0) return;
-    if (room.syncRetryAt !== undefined && now < room.syncRetryAt && !room.endDirty) return;
+  /** What was written, or null when nothing was (nothing to write, or D1 failed and it's tried again later). */
+  private async syncD1(room: RoomRecord, now: number): Promise<Synced | null> {
+    if (room.dirty.length === 0 && !room.endDirty && room.events.length === 0 && room.credits.length === 0 && room.hatchAt === undefined) return null;
+    if (room.syncRetryAt !== undefined && now < room.syncRetryAt && !room.endDirty) return null;
     const participants = room.dirty
       .map((id) => room.members.find((member) => member.id === id))
       .filter((member) => member !== undefined)
       .map((member) => participantRow(room, member));
+    const credits = room.credits;
+    const hatch = room.squadId !== null && room.hatchAt !== undefined ? { squadId: room.squadId, at: room.hatchAt } : undefined;
     try {
+      const streakDays = await this.streakDays(room, credits);
       await this.db.syncRoom({
         participants,
         ...(room.endDirty ? { ended: { sessionId: room.sid, endedAt: room.endedAt ?? now } } : {}),
         events: room.events,
+        credits,
+        ...(hatch === undefined ? {} : { hatch }),
+        ...(room.squadId !== null && (hatch !== undefined || credits.some((credit) => credit.xp > 0)) ? { stageOf: room.squadId } : {}),
+        streakDays,
       });
       room.dirty = [];
       room.endDirty = false;
       room.events = [];
+      room.credits = [];
+      delete room.hatchAt;
       delete room.syncRetryAt;
+      return { credits, hatched: hatch !== undefined };
     } catch (error) {
       console.error(`room ${room.sid}: D1 write failed (${error instanceof Error ? error.name : typeof error}), trying again in ${D1_RETRY_SECONDS} s`);
       room.syncRetryAt = now + D1_RETRY_SECONDS;
+      return null;
+    }
+  }
+
+  /**
+   * The days finished timers may make count, in each of the member's squads (solo sessions count
+   * too), each in its squad's zone on the day the timer stopped. Notes the other squads' open rooms
+   * to tell afterwards: a finish changes today's mood there.
+   */
+  private async streakDays(room: RoomRecord, credits: CreditWrite[]): Promise<StreakDayWrite[]> {
+    const days = new Map<string, StreakDayWrite>();
+    const zones = new Map<string, Awaited<ReturnType<Database["squadZonesOf"]>>>();
+    for (const credit of credits) {
+      if (!credit.completed) continue;
+      let mine = zones.get(credit.userId);
+      if (mine === undefined) {
+        mine = await this.db.squadZonesOf(credit.userId);
+        zones.set(credit.userId, mine);
+      }
+      for (const zone of mine) {
+        if (zone.open_session !== null && zone.open_session !== room.sid) this.pokes.set(zone.open_session, credit.userId);
+        if (credit.focusedSec < PET_RULES.streakMinMinutes * 60) continue;
+        const day = streakDay(zone.squad_id, zone.tz, credit.endedAt);
+        days.set(`${day.squadId} ${day.day}`, day);
+      }
+    }
+    return [...days.values()];
+  }
+
+  /** Tells other squads' open rooms to look at their pet again (`pet`). Best effort: failures are logged. */
+  private async sendPokes(): Promise<void> {
+    const pokes = [...this.pokes];
+    this.pokes.clear();
+    for (const [sessionId, userId] of pokes) {
+      try {
+        const stub = this.env.ROOMS.get(this.env.ROOMS.idFromName(sessionId));
+        const response = await stub.fetch(
+          new Request("https://room/pet", {
+            method: "POST",
+            headers: { [ROOM_USER_HEADER]: userId, [ROOM_SESSION_HEADER]: sessionId, "content-type": "application/json" },
+            body: "{}",
+          }),
+        );
+        if (!response.ok && response.status !== 404) console.error(`room ${sessionId}: answered ${response.status} to pet`);
+      } catch (error) {
+        console.error(`room ${sessionId}: couldn't be told about its pet (${error instanceof Error ? error.name : typeof error})`);
+      }
     }
   }
 
@@ -827,6 +991,7 @@ export class Room {
         if (isRunning(member)) times.push(member.b + MEMBER_MAX_SECONDS);
       }
       if (room.cheer !== undefined && room.cheerClearAt !== undefined) times.push(room.cheerClearAt);
+      if (room.pet !== null) times.push(room.pet.checkAt);
     } else if (room.cleanupAt !== undefined) {
       times.push(room.cleanupAt);
     }
@@ -855,14 +1020,31 @@ export class Room {
     return JSON.stringify({ type: "state", status: room.status, contentState: this.contentState(room) });
   }
 
-  /** The squad's name, pet and mood from D1, after a join. Unchanged if the squad is gone. */
-  private async refreshSquad(room: RoomRecord, now: number): Promise<void> {
-    if (room.squadId === null) return;
-    const squad = await this.db.squadSnapshot(room.squadId, now - PET_MOOD_WINDOW_SECONDS);
-    if (squad === null) return;
-    room.squadName = squad.name;
-    const happy = squad.size > 0 && squad.focused * 2 >= squad.size;
-    room.pet = { species: squad.pet_species, stage: squad.pet_stage, xp: squad.pet_xp, mood: happy ? PET_MOOD_HAPPY : PET_MOOD_LOW };
+  /**
+   * The squad's name and pet from D1 (src/progress.ts). Unchanged if the squad is gone; if D1 can't
+   * be read, the pet stays as it was and is looked at again in D1_RETRY_SECONDS. Never throws:
+   * whether `p` changed, and whether that was the egg hatching, or null if nothing was read.
+   */
+  private async refreshPet(room: RoomRecord, now: number): Promise<{ changed: boolean; hatched: boolean } | null> {
+    if (room.squadId === null) return null;
+    try {
+      const squad = await this.db.squadById(room.squadId);
+      if (squad === null) {
+        // The squad is gone (its last member left): keep showing the pet as it was.
+        if (room.pet !== null) room.pet.checkAt = now + ENDED_ROOM_KEPT_SECONDS;
+        return null;
+      }
+      room.squadName = squad.name;
+      const before = room.pet;
+      const pet = petSnapshot(await squadProgress(this.db, squad, now, (length) => this.random(length)));
+      room.pet = pet;
+      const changed = before === null || before.k !== pet.k || before.md !== pet.md || before.x !== pet.x;
+      return { changed, hatched: before !== null && !before.hatched && pet.hatched };
+    } catch (error) {
+      console.error(`room ${room.sid}: couldn't read the squad's pet (${error instanceof Error ? error.name : typeof error}), trying again in ${D1_RETRY_SECONDS} s`);
+      if (room.pet !== null) room.pet.checkAt = now + D1_RETRY_SECONDS;
+      return null;
+    }
   }
 
   private async alreadyInSession(userId: string): Promise<HttpError> {
@@ -890,8 +1072,7 @@ export class Room {
       return view;
     });
     const state: ContentState = { v: room.v, m };
-    const pet = petView(room.pet);
-    if (pet !== undefined) state.p = pet;
+    if (room.pet !== null && isPetCode(room.pet.k)) state.p = { k: room.pet.k, md: room.pet.md, x: room.pet.x };
     if (room.cheer !== undefined) state.c = room.cheer;
     // The shared encoder's key order, optional keys left out: what Swift's default decoder takes.
     return canonicalContentState(state);
@@ -964,12 +1145,25 @@ function joinEvent(room: RoomRecord, member: RoomMember): EventWrite {
   return { sessionId: room.sid, userId: member.id, type: "join", at: member.b, meta: { min: member.plannedMin } };
 }
 
-function petView(pet: PetSnapshot | null): Pet | undefined {
-  if (pet === null || pet.species === null) return undefined;
-  const k = `${pet.species}.${pet.stage}`;
-  if (!isPetCode(k)) return undefined;
-  const x = Math.round(((pet.xp % PET_XP_PER_STAGE) / PET_XP_PER_STAGE) * 100) / 100;
-  return { k, md: pet.mood, x };
+/** The pet as the room keeps it: the content-state's `p`, whether it hatched, and when to look again. */
+function petSnapshot(progress: SquadProgress): PetSnapshot {
+  const scale = 10 ** PET_PROGRESS_DECIMALS;
+  return {
+    k: `${progress.species}.${progress.stage}`,
+    md: progress.mood,
+    x: Math.round(progress.progress * scale) / scale,
+    hatched: progress.hatched,
+    checkAt: progress.changesAt,
+  };
+}
+
+/** A room saved by an earlier version, given what's new since (M5). */
+function upgraded(room: RoomRecord): RoomRecord {
+  room.credits ??= [];
+  room.finishers ??= [];
+  // M3 kept the pet as species, stage, XP and mood; it's read again at the room's next change.
+  if (room.pet !== null && typeof (room.pet as Partial<PetSnapshot>).k !== "string") room.pet = null;
+  return room;
 }
 
 /** Whole minutes, 1–240: sessions are capped at 4 hours (SPEC.md §1.4). The Worker checks first. */

@@ -8,17 +8,26 @@
 //   POST   /squads/join/:code          -> { squad }
 //   PATCH  /squads/:id/members/me      { muted } -> { squad }
 //   DELETE /squads/:id/members/me      -> 204 (an owner leaving hands the squad on; the last one out deletes it)
+//   GET    /squads/:id/leaderboard?week=YYYY-MM-DD -> the week's minutes per member (M5)
 //
 // A squad you're not in looks the same as one that doesn't exist: 403 `not_member`.
+//
+// M5: every squad has a pet (an egg until two members finish together), a streak and a time zone
+// (src/progress.ts). The egg's species is picked when the squad is made, and its zone is the
+// creator's.
 
 import type { AuthedContext } from "./context.ts";
 import { newFriendCode, newShortID } from "./context.ts";
-import type { MySquadRow, SquadMemberRow, UserRow } from "./db.ts";
+import type { LeaderboardRow, MySquadRow, SquadMemberRow, UserRow } from "./db.ts";
 import { isUniqueViolation } from "./db.ts";
+import { addDays, isDay, isTimeZoneName, localDay, mondayOf, startOfDay } from "./days.ts";
 import { EXPIRED_CODE_RETENTION_SECONDS, FRIEND_CODE_LIFETIME_SECONDS, canonicalFriendCode, friendCodeView } from "./friends.ts";
 import { HttpError, apiError, json, noContent, readObject } from "./http.ts";
 import { MAX_SQUAD_NAME_LENGTH, isShortID } from "./liveActivity.ts";
 import { moderate, normaliseName } from "./moderation.ts";
+import { pickSpecies } from "./pet.ts";
+import { type SquadProgress, type SquadStreak, squadProgress } from "./progress.ts";
+import { FALLBACK_MEMBER_NAME } from "./sessions.ts";
 
 export const FREE_SQUAD_LIMIT = 1;
 export const PLUS_SQUAD_LIMIT = 3;
@@ -45,8 +54,20 @@ export interface Squad {
   openSessionId: string | null;
   /** Your own mute switch for "X is locking in" (M4). */
   muted: boolean;
-  /** `species` is null until the egg hatches (M5). */
-  pet: { species: string | null; stage: number; xp: number };
+  /** `species` is null until the egg hatches (M5). Mood 0–3; progress towards the next stage, 0–1. */
+  pet: { species: string | null; stage: number; xp: number; mood: number; progress: number };
+  streak: SquadStreak;
+  /** The IANA zone the squad's days and Monday follow. */
+  tz: string;
+}
+
+/** A member's week (GET /squads/:id/leaderboard). */
+export interface LeaderboardEntry {
+  userId: string;
+  /** Whole focused minutes from every timer that stopped in the week: finished, left early or slipped. */
+  minutes: number;
+  /** Sessions finished in the week. */
+  sessions: number;
 }
 
 /** Lockin Plus is active (SPEC.md §2). Set by M7's purchases; nothing sets it before then. */
@@ -64,7 +85,7 @@ export function memberLimit(owner: Pick<UserRow, "plus_until"> | null, joiner: P
   return (owner !== null && hasPlus(owner, now)) || hasPlus(joiner, now) ? PLUS_MEMBER_LIMIT : FREE_MEMBER_LIMIT;
 }
 
-function squadView(row: MySquadRow, members: SquadMemberRow[], openSessionId: string | null): Squad {
+function squadView(row: MySquadRow, members: SquadMemberRow[], openSessionId: string | null, progress: SquadProgress): Squad {
   return {
     id: row.id,
     name: row.name,
@@ -78,7 +99,15 @@ function squadView(row: MySquadRow, members: SquadMemberRow[], openSessionId: st
     })),
     openSessionId,
     muted: row.muted === 1,
-    pet: { species: row.pet_species, stage: row.pet_stage, xp: row.pet_xp },
+    pet: {
+      species: progress.hatched ? progress.species : null,
+      stage: progress.stage,
+      xp: progress.xp,
+      mood: progress.mood,
+      progress: progress.progress,
+    },
+    streak: progress.streak,
+    tz: progress.tz,
   };
 }
 
@@ -86,8 +115,12 @@ function squadView(row: MySquadRow, members: SquadMemberRow[], openSessionId: st
 async function loadSquad(context: AuthedContext, squadId: string): Promise<Squad> {
   const row = isShortID(squadId) ? await context.db.mySquad(squadId, context.user.id) : null;
   if (row === null) throw notMember();
-  const [members, open] = await Promise.all([context.db.membersOfSquad(squadId), context.db.openSessionOfSquad(squadId)]);
-  return squadView(row, members, open?.id ?? null);
+  const [members, open, progress] = await Promise.all([
+    context.db.membersOfSquad(squadId),
+    context.db.openSessionOfSquad(squadId),
+    squadProgress(context.db, row, context.now, context.random),
+  ]);
+  return squadView(row, members, open?.id ?? null, progress);
 }
 
 function notMember(): HttpError {
@@ -114,11 +147,13 @@ function squadName(value: unknown): string {
 export async function listSquads(context: AuthedContext): Promise<Response> {
   const { db, user } = context;
   const [rows, members, open] = await Promise.all([db.squadsOf(user.id), db.membersOfSquadsOf(user.id), db.openSessionsOfSquadsOf(user.id)]);
-  const squads = rows.map((row) =>
+  const progress = await Promise.all(rows.map((row) => squadProgress(db, row, context.now, context.random)));
+  const squads = rows.map((row, index) =>
     squadView(
       row,
       members.filter((member) => member.squad_id === row.id),
       open.get(row.id) ?? null,
+      progress[index] as SquadProgress,
     ),
   );
   return json({ squads });
@@ -126,16 +161,25 @@ export async function listSquads(context: AuthedContext): Promise<Response> {
 
 // POST /squads
 
+/**
+ * `{ name, tz? }`. The squad's zone (M5) is `tz` if the app sends it, else that of the creator's most
+ * recently registered phone, else UTC. The egg's species is picked now, so it has its colour.
+ */
 export async function createSquad(context: AuthedContext): Promise<Response> {
   const { db, user, now } = context;
   const body = await readObject(context.request);
   const name = squadName(body.name);
+  if (body.tz !== undefined && body.tz !== null && !isTimeZoneName(body.tz)) {
+    throw apiError(422, "tz_invalid", "tz must be an IANA time zone name like Australia/Sydney");
+  }
+  const tz = isTimeZoneName(body.tz) ? body.tz : ((await db.latestDeviceZone(user.id)) ?? "UTC");
+  const species = pickSpecies(context.random);
   const maxSquads = squadLimit(user, now);
   // A fresh id collides with an existing one about never; the retry is for that.
   for (let attempt = 0; attempt < 3; attempt++) {
     const id = newShortID(context.random);
     try {
-      if (!(await db.insertSquad({ id, name, ownerId: user.id, now, maxSquads }))) throw plusRequired("squads");
+      if (!(await db.insertSquad({ id, name, ownerId: user.id, now, maxSquads, species, tz }))) throw plusRequired("squads");
     } catch (error) {
       if (isUniqueViolation(error, "squads.id")) continue;
       throw error;
@@ -230,4 +274,34 @@ export async function leaveSquad(context: AuthedContext, squadId: string): Promi
   if (isShortID(squadId)) await context.db.leaveSquad(squadId, context.user.id);
   console.log("squads: left");
   return noContent();
+}
+
+// GET /squads/:id/leaderboard?week=YYYY-MM-DD
+
+/**
+ * The week's focused minutes and finished sessions of every member, most minutes first, ties by name
+ * (M5). The week runs from Monday 00:00 to the next Monday in the squad's zone, solo and squad
+ * sessions alike: a timer counts in the week it stopped. `week` is any day in it; left out, this
+ * week. 422 `week_invalid` for anything but a real 'YYYY-MM-DD' date.
+ */
+export async function squadLeaderboard(context: AuthedContext, squadId: string): Promise<Response> {
+  const row = isShortID(squadId) ? await context.db.mySquad(squadId, context.user.id) : null;
+  if (row === null) throw notMember();
+  const week = context.url.searchParams.get("week");
+  if (week !== null && !isDay(week)) throw apiError(422, "week_invalid", "week must be a date: YYYY-MM-DD");
+  const weekStart = mondayOf(week ?? localDay(row.tz, context.now));
+  const startsAt = startOfDay(row.tz, weekStart);
+  const endsAt = startOfDay(row.tz, addDays(weekStart, 7));
+  const rows = await context.db.leaderboard(squadId, startsAt, endsAt);
+  const entries: LeaderboardEntry[] = rows.sort(byMinutesThenName).map((entry) => ({ userId: entry.id, minutes: entry.minutes, sessions: entry.sessions }));
+  return json({ weekStart, startsAt, endsAt, entries });
+}
+
+/** Most minutes first; ties by the name the Live Activity shows, ignoring case, then by id. */
+function byMinutesThenName(a: LeaderboardRow, b: LeaderboardRow): number {
+  if (a.minutes !== b.minutes) return b.minutes - a.minutes;
+  const nameA = (a.display_name ?? a.handle ?? FALLBACK_MEMBER_NAME).toLowerCase();
+  const nameB = (b.display_name ?? b.handle ?? FALLBACK_MEMBER_NAME).toLowerCase();
+  if (nameA !== nameB) return nameA < nameB ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }

@@ -273,6 +273,49 @@ import Testing
         #expect(record.focusedSeconds == 5 * 60)
     }
 
+    /// The "Lock in" widget and control (M6).
+    @Test func startCommandStartsASoloSession() async throws {
+        let engine = makeEngine(clock: clock)
+        await engine.handle(.start(minutes: 25))
+        guard case .running(let startedAt, let endsAt, 25) = engine.phase else {
+            Issue.record("Start should start a 25-minute session")
+            return
+        }
+        #expect(startedAt == clock.now)
+        #expect(endsAt == clock.now.addingTimeInterval(25 * 60))
+        #expect(engine.mode == .solo)
+    }
+
+    /// A widget tapped mid-session leaves that session alone, running or paused.
+    @Test func startCommandDoesNothingWhileASessionIsGoing() async throws {
+        let engine = makeEngine(clock: clock)
+        engine.start(minutes: 50)
+        let running = engine.phase
+        clock.advance(minutes: 5)
+        await engine.handle(.start(minutes: 25))
+        #expect(engine.phase == running)
+
+        await engine.handle(.pause)
+        let paused = engine.phase
+        clock.advance(minutes: 5)
+        await engine.handle(.start(minutes: 25))
+        #expect(engine.phase == paused)
+    }
+
+    /// From the finish screen it's a new session; once the old one has run out, too.
+    @Test func startCommandAfterAFinishStartsANewSession() async throws {
+        let engine = makeEngine(clock: clock)
+        engine.start(minutes: 25)
+        clock.advance(minutes: 30)
+        await engine.handle(.start(minutes: 25))
+        guard case .running(let startedAt, _, 25) = engine.phase else {
+            Issue.record("Start after the time ran out should start a new session")
+            return
+        }
+        #expect(startedAt == clock.now)
+        #expect(engine.stats.completedSessions == 1)
+    }
+
     @Test func aCommandAfterTheTimeRanOutFinishesTheSession() async throws {
         let engine = makeEngine(clock: clock)
         engine.start(minutes: 25)

@@ -8,6 +8,7 @@
 //   DELETE /auth/session      -> 204 (signs this token out, M3)
 //   GET    /handles/:handle   -> { available, reason? }
 //   POST   /devices           { apnsToken, env, pushToStartToken?, laEnabled, frequentPushes, tz, quietHours? } -> 204
+//   POST   /me/coins/import   { coins, owned: [itemId] } -> { user, owned }   (M5, once per account)
 //
 // Logs say what happened, never who: no ids, handles, names or tokens.
 
@@ -26,10 +27,12 @@ import {
 } from "./appleAuth.ts";
 import { createSession, hashToken } from "./auth.ts";
 import { type AuthedContext, type Context, newShortID } from "./context.ts";
-import { type ProfileChanges, type UserRow, isUniqueViolation } from "./db.ts";
+import { type ProfileChanges, type UserRow, isCheckViolation, isUniqueViolation } from "./db.ts";
+import { isTimeZoneName } from "./days.ts";
 import { HttpError, apiError, bearerToken, json, noContent, readObject } from "./http.ts";
 import { moderate, normaliseHandle, normaliseName } from "./moderation.ts";
 import { leaveRoomsForDeletion } from "./sessions.ts";
+import { checkAvatarOwnership, ownedItems, shopItem } from "./shop.ts";
 
 /** The app's view of an account. Times are Unix seconds. */
 export interface User {
@@ -60,9 +63,10 @@ export function publicUser(row: UserRow): User {
  */
 const AVATAR_CODE = /^b[0-9]{1,2}\.c[0-9]{1,2}\.e[0-9]{1,2}\.h[0-9]{1,2}$/;
 
-/** An IANA zone name's shape: `UTC`, `Australia/Sydney`, `Etc/GMT+10`, `America/Port-au-Prince`. */
-const TIME_ZONE = /^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)*$/;
-const MAX_TIME_ZONE_LENGTH = 64;
+/** POST /me/coins/import brings over at most this many coins (M5). */
+export const MAX_IMPORTED_COINS = 5000;
+/** …and looks at no more than this many items: the catalogue has 20. */
+const MAX_IMPORTED_ITEMS = 100;
 
 /** Apple's authorisation codes are short; this only keeps junk out of the form we post. */
 const MAX_AUTHORIZATION_CODE_LENGTH = 1024;
@@ -144,6 +148,10 @@ export async function getMe(context: AuthedContext): Promise<Response> {
 
 // PATCH /me
 
+/**
+ * M5: an `avatarCode` may only change parts to ones you own (src/shop.ts): 403 `item_not_owned`
+ * otherwise, with nothing saved.
+ */
 export async function patchMe(context: AuthedContext): Promise<Response> {
   const body = await readObject(context.request);
   const changes: ProfileChanges = {};
@@ -169,6 +177,7 @@ export async function patchMe(context: AuthedContext): Promise<Response> {
     changes.avatarCode = body.avatarCode;
   }
 
+  if (changes.avatarCode !== undefined) await checkAvatarOwnership(context, changes.avatarCode);
   if (changes.handle !== undefined) {
     const owner = await context.db.handleOwner(changes.handle);
     if (owner !== null && owner !== context.user.id) throw handleTaken();
@@ -272,9 +281,7 @@ export async function registerDevice(context: AuthedContext): Promise<Response> 
   }
   if (typeof body.laEnabled !== "boolean") throw invalid("laEnabled must be true or false");
   if (typeof body.frequentPushes !== "boolean") throw invalid("frequentPushes must be true or false");
-  if (typeof body.tz !== "string" || body.tz.length > MAX_TIME_ZONE_LENGTH || !TIME_ZONE.test(body.tz)) {
-    throw invalid("tz must be an IANA time zone name like Australia/Sydney");
-  }
+  if (!isTimeZoneName(body.tz)) throw invalid("tz must be an IANA time zone name like Australia/Sydney");
   let quietHours: QuietHours | null | undefined;
   if (body.quietHours === null) {
     quietHours = null;
@@ -298,5 +305,40 @@ export async function registerDevice(context: AuthedContext): Promise<Response> 
     keepQuietHours: quietHours === undefined,
     now: context.now,
   });
+  // M5: the squads they own follow them to a new time zone.
+  await context.db.setOwnedSquadsZone(context.user.id, body.tz);
   return noContent();
+}
+
+// POST /me/coins/import
+
+/**
+ * Brings over what the app earned while signed out (M5), once per account: `coins` (a whole number,
+ * at most MAX_IMPORTED_COINS are added) and `owned`, the items bought with them. Items that aren't
+ * in the catalogue, or are Plus items, are skipped; so are ones already owned. 409
+ * `already_imported` the second time, with nothing changed.
+ */
+export async function importCoins(context: AuthedContext): Promise<Response> {
+  const body = await readObject(context.request);
+  const invalid = () => apiError(422, "import_invalid", "Expected { coins: a whole number from 0, owned: [item ids] }");
+  if (typeof body.coins !== "number" || !Number.isInteger(body.coins) || body.coins < 0) throw invalid();
+  if (!Array.isArray(body.owned) || body.owned.length > MAX_IMPORTED_ITEMS || !body.owned.every((id) => typeof id === "string")) throw invalid();
+  const items = [...new Set(body.owned as string[])].filter((id) => shopItem(id)?.plus === false);
+  if (context.user.coins_imported !== 0) throw alreadyImported();
+
+  let updated: UserRow | null;
+  try {
+    updated = await context.db.importCoins(context.user.id, Math.min(body.coins, MAX_IMPORTED_COINS), items, context.now);
+  } catch (error) {
+    // Another import got there first.
+    if (isCheckViolation(error, "coins_imported")) throw alreadyImported();
+    throw error;
+  }
+  const user = updated ?? context.user;
+  console.log("me: coins imported");
+  return json({ user: publicUser(user), owned: await ownedItems(context, user) });
+}
+
+function alreadyImported(): HttpError {
+  return apiError(409, "already_imported", "Your coins are already here");
 }

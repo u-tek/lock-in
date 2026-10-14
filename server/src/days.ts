@@ -7,6 +7,15 @@
 const SECONDS_PER_DAY = 24 * 60 * 60;
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
+/** An IANA zone name's shape: `UTC`, `Australia/Sydney`, `Etc/GMT+10`, `America/Port-au-Prince`. */
+const TIME_ZONE = /^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)*$/;
+export const MAX_TIME_ZONE_LENGTH = 64;
+
+/** Whether `value` looks like an IANA zone name. Whether the runtime knows it is another matter (unknown ones count as UTC). */
+export function isTimeZoneName(value: unknown): value is string {
+  return typeof value === "string" && value.length <= MAX_TIME_ZONE_LENGTH && TIME_ZONE.test(value);
+}
+
 // Formatters are slow to make, and there are only so many time zones.
 const formatters = new Map<string, Intl.DateTimeFormat>();
 const MAX_FORMATTERS = 512;

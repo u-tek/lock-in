@@ -24,15 +24,20 @@
 //   M4, invites and joining (docs/milestones/M4.md): POST /devices takes quiet hours; opening a
 //   squad's room alerts the squad after the response (src/alerts.ts, through `ctx.waitUntil`); joins
 //   take a push-to-start token (src/pushToStart.ts).
+//   M5, pet, streaks, leaderboard, cosmetics (docs/milestones/M5.md): GET /squads gains the pet, the
+//   streak and the zone; the rooms credit coins and XP (src/room.ts).
+//   GET    /squads/:id/leaderboard                                               (src/squads.ts)
+//   GET    /shop  POST /shop/buy  GET /me/cosmetics                              (src/shop.ts)
+//   POST   /me/coins/import                                                      (src/accounts.ts)
 //
-// Every route but /health, /admin/*, /auth/apple, /j/:code and /.well-known/* needs
+// Every route but /health, /admin/*, /auth/apple, /shop, /j/:code and /.well-known/* needs
 // `Authorization: Bearer <token>`. Each session is a `Room` Durable Object (src/room.ts); the APNs
 // provider token comes from the one `ApnsAuth` Durable Object (src/apnsAuth.ts).
 //
 // The runtime treats every named export of this module as an entrypoint and refuses to start if
 // one isn't a function or class, so constants and helpers live in the other modules.
 
-import { deleteMe, getMe, handleAvailability, patchMe, registerDevice, signInWithApple, signOut } from "./accounts.ts";
+import { deleteMe, getMe, handleAvailability, importCoins, patchMe, registerDevice, signInWithApple, signOut } from "./accounts.ts";
 import { pushTest, pushToStartTest } from "./admin.ts";
 import { authenticate } from "./auth.ts";
 import { type AuthedContext, type Context, type Dependencies, makeContext } from "./context.ts";
@@ -42,7 +47,8 @@ import { blockUser, fileReport, friendCode, listBlocks, listFriends, redeemFrien
 import { HttpError, errorResponse, json, notFound } from "./http.ts";
 import { appSiteAssociation, invitePage } from "./invite.ts";
 import { cheer, getSession, joinSession, liveSession, memberAction, startSession, uploadLiveActivityToken } from "./sessions.ts";
-import { createSquad, joinSquadByCode, leaveSquad, listSquads, renameSquad, squadInvite, updateMyMembership } from "./squads.ts";
+import { buyItem, getShop, myCosmetics } from "./shop.ts";
+import { createSquad, joinSquadByCode, leaveSquad, listSquads, renameSquad, squadInvite, squadLeaderboard, updateMyMembership } from "./squads.ts";
 
 export { ApnsAuth } from "./apnsAuth.ts";
 export { Room } from "./room.ts";
@@ -80,6 +86,8 @@ const ROUTES: Route[] = [
   authed("DELETE", "/me", deleteMe),
   authed("GET", "/handles/:handle", (context, [handle = ""]) => handleAvailability(context, handle)),
   authed("POST", "/devices", registerDevice),
+  authed("GET", "/me/cosmetics", myCosmetics),
+  authed("POST", "/me/coins/import", importCoins),
 
   authed("GET", "/friends", listFriends),
   authed("POST", "/friends/code", friendCode),
@@ -97,6 +105,11 @@ const ROUTES: Route[] = [
   authed("POST", "/squads/:id/invite", (context, [id = ""]) => squadInvite(context, id)),
   authed("PATCH", "/squads/:id/members/me", (context, [id = ""]) => updateMyMembership(context, id)),
   authed("DELETE", "/squads/:id/members/me", (context, [id = ""]) => leaveSquad(context, id)),
+  authed("GET", "/squads/:id/leaderboard", (context, [id = ""]) => squadLeaderboard(context, id)),
+
+  // The catalogue is the same for everyone, and the app shows it signed out too.
+  open("GET", "/shop", getShop),
+  authed("POST", "/shop/buy", buyItem),
 
   authed("POST", "/sessions", startSession),
   authed("POST", "/sessions/:id/join", (context, [id = ""]) => joinSession(context, id)),

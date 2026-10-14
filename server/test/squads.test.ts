@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { FRIEND_CODE_ALPHABET } from "../src/context.ts";
 import { EXPIRED_CODE_RETENTION_SECONDS, FRIEND_CODE_LIFETIME_SECONDS } from "../src/friends.ts";
+import { PET_RULES } from "../src/pet.ts";
 import { type SignedIn, T0, type TestApp, read, testApp } from "./app.ts";
 
 let app: TestApp;
@@ -62,9 +63,14 @@ describe("POST /squads", () => {
         members: [memberView(ava, T0)],
         openSessionId: null,
         muted: false,
-        pet: { species: null, stage: 0, xp: 0 },
+        // M5: an egg (its species kept back until it hatches), hungry, and no streak yet.
+        pet: { species: null, stage: 0, xp: 0, mood: 1, progress: 0 },
+        streak: { count: 0, countedToday: false, doneToday: 0, needed: 1 },
+        tz: "UTC",
       },
     });
+    // The species is picked now, so the egg has its colour.
+    expect(PET_RULES.species).toContain(app.value("SELECT pet_species FROM squads"));
     expect(logs).toContain("squads: created");
   });
 
@@ -115,7 +121,9 @@ describe("GET /squads", () => {
       members: [memberView(ava, T0), memberView(noor, T0 + 1), memberView(kai, T0 + 2)],
       openSessionId: null,
       muted: false,
-      pet: { species: null, stage: 0, xp: 0 },
+      pet: { species: null, stage: 0, xp: 0, mood: 1, progress: 0 },
+      streak: { count: 0, countedToday: false, doneToday: 0, needed: 2 },
+      tz: "UTC",
     });
     expect(body.squads[1].members.map((member: { id: string }) => member.id)).toEqual([noor.user.id]);
 

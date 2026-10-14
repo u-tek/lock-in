@@ -191,6 +191,10 @@ describe("PATCH /me", () => {
   const patch = async (body: unknown) => read(await app.request("PATCH", "/me", { token, body }));
 
   test("sets the handle (lowercased), the name (trimmed) and the avatar", async () => {
+    // The parts are hers (M5): three bought, and Plus for the purple.
+    const id = app.value("SELECT id FROM users") as string;
+    for (const item of ["body.3", "eyes.2", "hat.4"]) app.sqlite.prepare("INSERT INTO cosmetics (user_id, item_id, acquired_at) VALUES (?, ?, 1)").run(id, item);
+    app.sqlite.prepare("UPDATE users SET plus_until = ?").run(app.clock.now + 86_400);
     const { status, body } = await patch({ handle: "Ava_Smith", displayName: "  Ava  ", avatarCode: "b3.c7.e2.h4" });
     expect(status).toBe(200);
     expect(body.user).toMatchObject({ handle: "ava_smith", displayName: "Ava", avatarCode: "b3.c7.e2.h4" });
