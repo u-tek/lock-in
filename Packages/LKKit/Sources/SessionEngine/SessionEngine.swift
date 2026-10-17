@@ -548,10 +548,13 @@ public final class SessionEngine: ObservableObject {
     private func startActivity() {
         guard !isPreview, let controller = liveActivities, var session = stored.active else { return }
         do {
+            // Solo: nothing pushes to it (only a squad's room does), so no push token. It also
+            // starts in a build without the push entitlement, such as one signed for sideloading.
             let started = try controller.start(
                 attributes: .solo(me: stored.memberID, sid: session.id),
                 state: contentState(for: session),
-                now: now()
+                now: now(),
+                takesPushes: false
             )
             activity = started
             session.activityID = started.id
