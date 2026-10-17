@@ -25,6 +25,10 @@ on:
         description: Film a scripted squad session in the simulator's Dynamic Island and Lock Screen
         type: boolean
         default: false
+      ipa:
+        description: Build an unsigned device IPA (sign and install it yourself, e.g. with Sideloadly)
+        type: boolean
+        default: false
 
 # macOS minutes are expensive: a newer push cancels the run it supersedes, TestFlight upload
 # included (the next [testflight] push uploads again, with a higher build number).
@@ -153,6 +157,7 @@ jobs:
   #   [testflight]         archive, sign and upload to TestFlight
   #   [island]             film a scripted squad session in the simulator's real Dynamic Island
   #                        and Lock Screen (scripts/island-demo.sh), into design/island/
+  #   [ipa]                an unsigned device IPA as an artifact, to sign and install yourself
   plan:
     name: Opt-ins
     if: >-
@@ -160,7 +165,8 @@ jobs:
       (github.event_name == 'push' &&
         (contains(github.event.head_commit.message, '[snapshots') ||
          contains(github.event.head_commit.message, '[testflight]') ||
-         contains(github.event.head_commit.message, '[island]')))
+         contains(github.event.head_commit.message, '[island]') ||
+         contains(github.event.head_commit.message, '[ipa]')))
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
@@ -169,6 +175,7 @@ jobs:
       appearances: ${{ steps.read.outputs.appearances }}
       testflight: ${{ steps.read.outputs.testflight }}
       island: ${{ steps.read.outputs.island }}
+      ipa: ${{ steps.read.outputs.ipa }}
     steps:
       - name: Read the opt-ins
         id: read
@@ -179,16 +186,18 @@ jobs:
           SCREENS_INPUT: ${{ inputs.screens }}
           TESTFLIGHT_INPUT: ${{ inputs.testflight }}
           ISLAND_INPUT: ${{ inputs.island }}
+          IPA_INPUT: ${{ inputs.ipa }}
         run: |
           # Matches contains() in the job's condition, which ignores case.
           shopt -s nocasematch
           subject="${COMMIT_MESSAGE%%$'\n'*}"
-          snapshots=false testflight=false island=false routes="" appearances=""
+          snapshots=false testflight=false island=false ipa=false routes="" appearances=""
           if [[ "$EVENT" == workflow_dispatch ]]; then
             routes="${SCREENS_INPUT// /}"
             if [[ "$SNAPSHOTS_INPUT" == true || -n "$routes" ]]; then snapshots=true; fi
             if [[ "$TESTFLIGHT_INPUT" == true ]]; then testflight=true; fi
             if [[ "$ISLAND_INPUT" == true ]]; then island=true; fi
+            if [[ "$IPA_INPUT" == true ]]; then ipa=true; fi
           else
             pattern='\[snapshots(:[[:space:]]*([^]]*))?\]'
             if [[ "$subject" =~ $pattern ]]; then
@@ -199,6 +208,7 @@ jobs:
             if [[ "$subject" == *"[dark]"* ]]; then appearances="dark"; fi
             if [[ "$subject" == *"[testflight]"* ]]; then testflight=true; fi
             if [[ "$subject" == *"[island]"* ]]; then island=true; fi
+            if [[ "$subject" == *"[ipa]"* ]]; then ipa=true; fi
           fi
           {
             echo "snapshots=$snapshots"
@@ -206,10 +216,12 @@ jobs:
             echo "appearances=$appearances"
             echo "testflight=$testflight"
             echo "island=$island"
+            echo "ipa=$ipa"
           } >> "$GITHUB_OUTPUT"
           echo "Snapshots: $snapshots${routes:+ (only $routes)}${appearances:+ ($appearances)}"
           echo "TestFlight: $testflight"
           echo "Island film: $island"
+          echo "Device IPA: $ipa"
 
   # One app launch per phone covers every screen (UITests/SnapshotExportTests.swift).
   snapshots:
@@ -343,6 +355,62 @@ jobs:
       - name: Fail if a screen didn't render
         if: always() && (steps.pro.outcome == 'failure' || steps.se.outcome == 'failure' || steps.store.outcome == 'failure' || steps.island.outcome == 'failure')
         run: exit 1
+
+  # An unsigned Release build for a real iPhone, packaged as an IPA. It has no signature, so it
+  # can't be installed as it is: a tool such as Sideloadly or AltStore signs it with an Apple
+  # Account first. TestFlight (below) is the real route to phones; this is for trying the app
+  # before the paid account and its secrets exist. Pushes, Sign in with Apple and the App Group
+  # need the paid account's entitlements, so squads and widgets won't work in it; solo sessions
+  # and their Live Activity do.
+  ipa:
+    name: Device IPA (unsigned)
+    needs: plan
+    if: needs.plan.outputs.ipa == 'true'
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+
+      - name: Archive without signing
+        env:
+          LK_API_HOST: ${{ secrets.LK_API_HOST || vars.LK_API_HOST }}
+        run: |
+          set -o pipefail
+          host="${LK_API_HOST//[[:space:]]/}"
+          host="${host#https://}"
+          host="${host#http://}"
+          host="${host%%/*}"
+          if [[ -n "$host" ]]; then
+            echo "LK_API_HOST = $host" > Config/Local.xcconfig
+          fi
+          xcodegen generate
+          xcodebuild archive -project Lockin.xcodeproj -scheme Lockin -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath build/Lockin.xcarchive \
+            -derivedDataPath build/DerivedData -clonedSourcePackagesDirPath "$SPM_DIR" \
+            -skipMacroValidation -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | xcbeautify --renderer github-actions
+
+      - name: Package the IPA
+        run: |
+          app=build/Lockin.xcarchive/Products/Applications/Lockin.app
+          [[ -d "$app" ]] || { echo "::error::No Lockin.app in the archive"; exit 1; }
+          mkdir -p build/ipa/Payload
+          cp -R "$app" build/ipa/Payload/
+          (cd build/ipa && zip -qry ../Lockin-unsigned.ipa Payload)
+          version=$(plutil -extract CFBundleShortVersionString raw -o - "$app/Info.plist")
+          build=$(plutil -extract CFBundleVersion raw -o - "$app/Info.plist")
+          echo "Lockin $version ($build), $(du -h build/Lockin-unsigned.ipa | cut -f1)"
+          ls "$app/PlugIns"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: Lockin-unsigned-ipa
+          path: build/Lockin-unsigned.ipa
+          retention-days: 30
+          # Already a zip.
+          compression-level: 0
 
   # Archives a Release build, signs it with the App Store Connect API key and uploads it; it then
   # shows up in the TestFlight app on the phone. The only way onto a real iPhone: pushes need the

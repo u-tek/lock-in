@@ -16,8 +16,8 @@ runs:
         sudo xcode-select -s "$xcode/Contents/Developer"
         xcodebuild -version
 
-    # No ldid: Lockin goes to phones through TestFlight (pushes need the paid account), never as
-    # a sideloaded IPA.
+    # No ldid: Lockin goes to phones through TestFlight (pushes need the paid account). The
+    # unsigned IPA job leaves signing to whoever installs it.
     - name: Install tools
       shell: bash
       run: |
